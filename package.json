@@ -1,0 +1,16 @@
+{
+  "name": "ai-test-agent",
+  "private": true,
+  "workspaces": ["apps/web", "apps/demo"],
+  "scripts": {
+    "setup": "npm install && cd apps/worker && uv sync && uv run playwright install chromium",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "dev": "concurrently -n web,demo,worker -c blue,magenta,green \"npm run dev -w apps/web\" \"npm run dev -w apps/demo\" \"cd apps/worker && uv run worker\"",
+    "test": "npm run test --workspaces && cd apps/worker && uv run pytest",
+    "lint": "npm run typecheck --workspaces && cd apps/worker && uv run ruff check . && uv run ruff format --check ."
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

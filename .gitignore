@@ -1,0 +1,24 @@
+# Node
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Env and outputs
+.env
+reports/
+screenshots/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
