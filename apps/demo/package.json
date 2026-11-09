@@ -3,16 +3,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --port 5173",
+    "dev": "vite",
+    "dev:clean": "vite --mode clean",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify-bugs": "playwright test"
   },
   "dependencies": {
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-router": "^8.5.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",

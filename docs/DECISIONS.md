@@ -31,3 +31,27 @@ before/after numbers from the benchmark.
   install safe dev tools without asking. The Mac has 16 GB RAM: an 8B model (~6 GB) is the
   largest that leaves room for the rest. It supports both images and tool calls, which the
   agent loop needs.
+
+## D5. One codebase, two shops, via Vite mode (M1)
+- **Decision:** every planted bug is guarded by `bug(n)` in `apps/demo/src/bugs.ts`, which is
+  false when Vite runs with `--mode clean`. `vite` serves the buggy shop on 5173,
+  `vite --mode clean` the clean one on 5174.
+- **Alternatives:** an env variable set on the command line (`VITE_CLEAN=true vite`) — breaks
+  on Windows `cmd`; two copies of the code — they'd drift apart.
+- **Why:** cross-platform, and `grep "bug("` lists every planted bug in one place.
+
+## D6. A fake backend inside the Vite dev server (M1)
+- **Decision:** a small Vite plugin (`demoApi` in `vite.config.ts`) answers `/api/profile`
+  (500 in the buggy build) and `/return-policy` (404).
+- **Alternatives:** a separate Express server (another process and port to manage); mocking in
+  the browser (then there'd be no real HTTP errors for the checker to see).
+- **Why:** bugs 2 and 3 need real HTTP status codes. A Vite SPA answers 200 for every path, so
+  a real 404 has to come from the server.
+
+## D7. Bug verification with Playwright for Node (M1)
+- **Decision:** `apps/demo/verify/bugs.e2e.ts` runs each bug check against both builds as two
+  Playwright projects (`buggy`, `clean`); each test expects the bug only on `buggy`.
+- **Alternatives:** Python Playwright in the worker (mixes target-app checks into the agent's
+  code); manual checking.
+- **Why:** the check belongs with the demo app, and M6 needs Node Playwright for the web
+  e2e test anyway.

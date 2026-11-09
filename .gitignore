@@ -25,3 +25,7 @@ Thumbs.db
 
 # Checker output (report.json + screenshots)
 reports/
+
+# Playwright output
+test-results/
+playwright-report/

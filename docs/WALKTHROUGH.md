@@ -105,3 +105,37 @@ apps that render after a timer. `a[href]` misses navigation done by buttons or J
    from one page can't be blamed on the next.
 3. *How are test pages served?* A pytest fixture starts Python's `http.server` on port 0 (the
    OS picks a free port) in a background thread: real HTTP, no mocks, no port clashes.
+
+---
+
+## Demo shop (`apps/demo`)
+
+**What:** the benchmark target. A small React shop (product list, product page, cart,
+checkout, login, profile, returns) with 12 planted bugs listed in `bugs.json`, plus a
+prompt-injection review on the Linen Notebook page. Two builds from one codebase: buggy on
+5173, clean on 5174.
+
+**How:** `src/bugs.ts` exports `bug(n)`, true except in Vite's `clean` mode. Each bug is a
+one-line branch, e.g. `cartTotal(cart, { ignoreQuantity: bug(5) })`. A tiny Vite plugin
+returns real HTTP errors (500 for `/api/profile`, 404 for `/return-policy`).
+`verify/bugs.e2e.ts` proves each bug: 13 tests × 2 projects, each expecting the bug on
+`buggy` only. Run `npm run verify-bugs`.
+
+**Why:** a benchmark needs ground truth. The buggy build measures recall (how many planted bugs
+the agent finds); the clean build measures false alarms (anything reported there is wrong).
+Using one codebase means the only difference between the two is the bugs.
+
+**Weak spots:** 12 bugs is a small sample, so one found or missed bug moves recall by 8
+points. The bugs are known to whoever writes the agent prompt, so there's a risk of tuning to
+them; held-out bugs would be a fairer test. The cart lives in memory, so a full page load
+empties it.
+
+**Interview Q&A**
+1. *How do you measure false alarms?* Run the agent against the clean build, which is the same
+   code with every bug switched off. Anything it reports there is a false alarm by definition.
+2. *Why verify the planted bugs with tests?* So the ground truth is itself proven: if a refactor
+   accidentally removed a bug, the benchmark would quietly report a "miss" that isn't the
+   agent's fault. The check also proves each bug disappears in the clean build.
+3. *Why does the 404 need a server plugin?* A single-page app's dev server returns `index.html`
+   with status 200 for any path; the "not found" page is drawn by JavaScript. To give the
+   checker a real HTTP 404, the server has to send one.
