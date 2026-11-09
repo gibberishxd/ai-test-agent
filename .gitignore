@@ -22,3 +22,6 @@ screenshots/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Checker output (report.json + screenshots)
+reports/
