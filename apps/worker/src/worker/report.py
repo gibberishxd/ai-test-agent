@@ -52,6 +52,9 @@ class PageResult(BaseModel):
     failed_requests: list[FailedRequest] = Field(default_factory=list)
     a11y_violations: list[A11yViolation] = Field(default_factory=list)
     error: str | None = None  # set when navigation itself failed or timed out
+    load_ms: int | None = None  # time until the "load" event
+    soft_404: bool = False  # status 200, but the page says "not found" (single-page apps)
+    blocked_requests: list[str] = Field(default_factory=list)  # refused by the safety guard
 
 
 class BrokenLink(BaseModel):
@@ -60,6 +63,28 @@ class BrokenLink(BaseModel):
     url: str
     status: int | None
     found_on: list[str]  # every page that links to it
+
+
+class BugReport(BaseModel):
+    """One bug, as stored in the `bugs` table and shown on the report page.
+
+    The web app has a TypeScript copy of this shape; tests fail if the two drift apart.
+    """
+
+    title: str
+    severity: Literal["critical", "high", "medium", "low"]
+    category: str  # console-error, network, broken-link, accessibility, performance, visual, ...
+    page_url: str
+    expected: str | None = None
+    actual: str | None = None
+    repro_steps: list[str] = Field(default_factory=list)
+    evidence: dict = Field(default_factory=dict)  # console errors, failed requests, axe results
+    reasoning: str | None = None  # why the agent thinks it's a bug (agent findings)
+    screenshot: str | None = None  # storage reference
+    step_indexes: list[int] = Field(default_factory=list)  # steps that led here (for replay)
+    source: Literal["deterministic", "agent"]
+    status: Literal["candidate", "confirmed", "dismissed"] = "candidate"
+    dismiss_reason: str | None = None
 
 
 class Report(BaseModel):
@@ -71,6 +96,7 @@ class Report(BaseModel):
     finished_at: datetime
     pages: list[PageResult] = Field(default_factory=list)
     broken_links: list[BrokenLink] = Field(default_factory=list)
+    bugs: list[BugReport] = Field(default_factory=list)
 
 
 def write_report(report: Report, path: Path) -> None:

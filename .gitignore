@@ -29,3 +29,6 @@ reports/
 # Playwright output
 test-results/
 playwright-report/
+
+# Worker screenshots (local storage)
+apps/worker/data/

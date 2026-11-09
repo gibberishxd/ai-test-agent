@@ -8,6 +8,7 @@ import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from playwright.sync_api import sync_playwright
@@ -16,7 +17,24 @@ SITE_DIR = Path(__file__).parent / "fixtures" / "site"
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
-    """Serves files like the standard handler, without printing a line per request."""
+    """Serves the test site's files, plus two test endpoints, without logging each request.
+
+    /status/<code>  → an empty response with that HTTP status (e.g. /status/500)
+    /redirect?to=X  → a 302 redirect to X
+    """
+
+    def do_GET(self):
+        parts = urlsplit(self.path)
+        if parts.path.startswith("/status/"):
+            self.send_response(int(parts.path.rsplit("/", 1)[1]))
+            self.end_headers()
+            return
+        if parts.path == "/redirect":
+            self.send_response(302)
+            self.send_header("Location", parse_qs(parts.query)["to"][0])
+            self.end_headers()
+            return
+        super().do_GET()
 
     def log_message(self, format, *args):
         pass

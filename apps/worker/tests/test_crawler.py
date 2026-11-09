@@ -50,3 +50,20 @@ def test_stops_at_max_pages():
         return PageResult(url=url, status=200), [f"{BASE}/p/{n + 1}"]
 
     assert len(crawl(f"{BASE}/", endless_visit, max_pages=5)) == 5
+
+
+def test_stops_at_max_depth():
+    # Depth 0 is the start page; with max_depth=1 only its direct links are visited.
+    pages = crawl(f"{BASE}/", fake_visit, max_depth=1)
+    assert sorted(visited_urls(pages)) == sorted([f"{BASE}/", f"{BASE}/about", f"{BASE}/products"])
+
+
+def test_calls_on_page_for_each_visit():
+    seen = []
+    crawl(f"{BASE}/", fake_visit, on_page=lambda page: seen.append(page.url))
+    assert len(seen) == len(FAKE_SITE)
+
+
+def test_should_stop_ends_the_crawl_early():
+    pages = crawl(f"{BASE}/", fake_visit, should_stop=lambda: True)
+    assert visited_urls(pages) == [f"{BASE}/"]  # the current page finishes, then it stops

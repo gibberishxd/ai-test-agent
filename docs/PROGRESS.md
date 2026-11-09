@@ -7,7 +7,7 @@ done (local model) / blocked.
 |---|---|---|---|
 | M1 | Demo shop: 12 planted bugs, injection text, clean build on 5174, bugs.json | done | `npm run verify-bugs`: 26/26 passed (12 bugs present on 5173 and absent on 5174, injection text on both) |
 | M2 | Data model + run queue, LLMClient (Fake, Claude, Ollama) | done | Inserted a queued run with SQL, `LLM_PROVIDER=fake uv run worker --once` claimed it and marked it `done` (provider=fake, claimed, finished). 52 worker tests pass. |
-| M3 | Deterministic checks + passive scan, safety 6.1/6.2/6.6 | todo | |
+| M3 | Deterministic checks + passive scan, safety 6.1/6.2/6.6 | done | `uv run worker scan`: buggy shop (11 pages) → 5 bugs covering bugs 1, 2, 3, 4, each with evidence; clean shop (11 pages) → 0 bugs. SSRF guard tests pass (incl. redirect to 10.0.0.5 blocked). 115 worker tests. |
 | M4 | Agent loop: safe mode, budgets, loop detection, injection, cost, caching | todo | |
 | M5 | Replay verification + dedup | todo | |
 | M6 | Web app core: landing, dashboard, run form, live run, report, history | todo | |

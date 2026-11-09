@@ -12,6 +12,7 @@ START = "http://localhost:5173/"
         ("HTTP://LocalHost:5173/Cart", "http://localhost:5173/Cart"),  # path case kept
         ("http://localhost:5173", "http://localhost:5173/"),  # empty path becomes "/"
         ("http://localhost:5173/a?b=1", "http://localhost:5173/a?b=1"),  # query kept
+        ("http://localhost:5173/a?z=1&a=2", "http://localhost:5173/a?a=2&z=1"),  # params sorted
         ("http://example.com:80/x", "http://example.com/x"),  # default port dropped
     ],
 )

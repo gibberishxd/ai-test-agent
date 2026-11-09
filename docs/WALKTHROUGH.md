@@ -230,3 +230,92 @@ API yet (no key tonight); its unit tests use a stand-in SDK object.
    steps read it at about a tenth of the input price.
 3. *What if the model doesn't call a tool?* `decide` returns `tool_call=None`; the loop counts it
    as a wasted step against the budget and asks again, instead of crashing.
+
+---
+
+## Deterministic checks (`apps/worker/src/worker/browser.py`, `findings.py`)
+
+**What:** for every page: console errors and uncaught exceptions, failed requests and HTTP
+4xx/5xx (page, fetch/XHR, assets), broken links (including SPA "not found" pages), axe-core
+WCAG A/AA violations, slow loads (> 3 s), and a full-page screenshot. `findings.py` turns them
+into bug reports.
+
+**How:** Playwright events (`console`, `pageerror`, `requestfailed`, `response`) fill lists
+while the page loads. axe-core (vendored, pinned 4.14.0) is injected with `page.evaluate`, which
+a site's Content Security Policy can't block. Findings are grouped by problem (same error text,
+same failing URL, same axe rule), keep every page they were seen on, and carry the raw evidence.
+
+**Why:** these checks are free and never hallucinate, so they run first and on every page. Grouping
+turns per-page noise into a report a developer can act on.
+
+**Weak spots:** a broken link records only the first page that linked to it (the crawler's seen
+set). The 3 s slow-page threshold is arbitrary, and local timings aren't representative. The
+soft-404 heuristic (an h1 saying "not found") can miss custom wording.
+
+**Interview Q&A**
+1. *Why drop Chrome's "Failed to load resource" console errors?* They're Chrome's echo of a
+   failed request that's already captured with better detail (URL, method, status). Keeping both
+   would report the same bug twice.
+2. *Why only WCAG A/AA axe rules?* They're testable requirements. Best-practice rules are
+   opinions; counting them would make the false-alarm rate depend on taste.
+3. *How does it find broken links in a single-page app?* A real server 404 is caught by status
+   code. An SPA returns 200 for every path, so a page whose main heading says "not found" counts too.
+
+---
+
+## Safety guard (`apps/worker/src/worker/safety/`)
+
+**What:** rule 6.1 (no private/internal addresses, re-checked on every redirect, stay on the
+target's origin), 6.2 (passive mode = links only), 6.6 (secrets redacted from logs and stored
+text).
+
+**How:** `NetworkGuard.vet(host, port)` resolves the name and requires every IP to be global
+(`ipaddress.is_global`) and not a metadata endpoint, returning the IP to use. `GuardProxy` is
+an HTTP/CONNECT proxy the browser must use; it calls `vet` per request and connects to the
+returned IP. In dev mode only our demo shop ports on localhost are exempt. `check_mode` refuses
+type/select/submit and non-link clicks in passive mode. `redact` masks API keys, bearer tokens
+and `password=`-style values; a logging filter applies it to every log line.
+
+**Why:** the worker's browser runs inside our infrastructure, so a user-supplied URL must never
+reach internal services (SSRF). Enforcing in code, not in the prompt, means a confused or
+manipulated model can't get around it.
+
+**Weak spots:** the proxy forwards plain HTTP one request per connection (simple but slower).
+The off-origin rule is checked on the requested URL, not after redirects. In production I'd run
+a hardened egress proxy (e.g. Stripe's smokescreen) and firewall the worker's network as a second
+layer.
+
+**Interview Q&A**
+1. *What is SSRF and why does a testing tool care?* Server-side request forgery: tricking a
+   server into fetching URLs for you. Our worker fetches arbitrary URLs by design, so without a
+   guard a user could read `169.254.169.254` (cloud credentials) or internal admin pages.
+2. *Why a proxy instead of Playwright's `route`?* A test proved `route` only sees the first
+   request; redirects are followed internally. A proxy sees every hop, and connecting to the
+   vetted IP also defeats DNS rebinding.
+3. *Why is the localhost exemption tied to specific ports?* So dev mode can test our own demo
+   shops without opening Postgres, the web app or anything else on the machine.
+
+---
+
+## Passive scan and run execution (`scan.py`, `review.py`, `execute.py`, `storage.py`)
+
+**What:** a passive run crawls the target through the guard proxy, runs the checks, asks the
+model to review a few screenshots for visual problems, and writes steps, bugs, cost and a
+summary to Postgres. `uv run worker scan URL` does the same without a database and writes
+`reports/<time>/report.json`.
+
+**How:** each visited page is saved as a `visit` step immediately (live progress) and the Stop
+flag is checked after each page. Screenshots go through a `Storage` interface (local disk now)
+keyed by `<run id>/page-001.png`. Model findings are `candidate` bugs; the review stops when the
+run's cost budget is used up.
+
+**Weak spots:** the screenshot review sends full-page screenshots (not downscaled yet); it
+reviews the first N pages rather than choosing the most interesting ones.
+
+**Interview Q&A**
+1. *Why write each step as it happens?* The live run page polls the database; committing per
+   page makes progress visible within a second and keeps partial results if the run crashes.
+2. *Why separate "confirmed" and "candidate" bugs?* Deterministic findings have hard evidence.
+   Model findings can be wrong; they wait for replay verification.
+3. *What does the storage interface buy you?* Moving screenshots to S3 or R2 later is one new
+   class; nothing that reads or writes screenshots changes.

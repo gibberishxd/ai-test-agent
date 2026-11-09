@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     max_run_cost_usd: float = 1.00
     max_repeated_actions: int = 3
 
+    # Passive scan
+    max_pages: int = 30
+    max_depth: int = 5
+    review_pages: int = 6  # pages whose screenshot the model reviews for visual problems
+
     # Targets and storage
     demo_url: str = "http://localhost:5173"
     clean_demo_url: str = "http://localhost:5174"

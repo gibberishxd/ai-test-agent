@@ -95,3 +95,32 @@ before/after numbers from the benchmark.
 - **Why:** a step is a small decision; medium keeps thinking (billed as output) modest. To be
   re-tuned with benchmark numbers once a Claude key is available. Untested against the live
   API tonight (no key): see Needs me.
+
+## D13. SSRF guard enforced by an egress proxy, not request interception (M3)
+- **Decision:** the browser's traffic goes through `GuardProxy`, a small proxy inside the
+  worker. It checks host:port for every request (HTTPS via `CONNECT`) and connects to the exact
+  IP it vetted. Chromium's implicit localhost bypass is turned off (`<-loopback>`).
+- **Alternatives:** Playwright `context.route` interception (first attempt); Chromium host
+  resolver rules; a separate proxy service such as Squid or smokescreen.
+- **Why:** a test showed that `context.route` sees only the first request of a redirect chain:
+  a site that redirects to `http://10.0.0.5/` got past it, and the browser really tried to
+  connect. Through a proxy every redirect hop is a new request. Connecting to the vetted IP
+  also prevents DNS rebinding. A separate service (smokescreen) is what I'd use in production;
+  the in-process proxy is ~150 lines, testable, and has no extra infrastructure.
+
+## D14. Findings grouped by problem, deterministic = confirmed (M3)
+- **Decision:** the same console error / failing URL / axe rule / broken link on several pages
+  is one bug, with every page listed in its evidence. Deterministic findings start as
+  `confirmed`. Chrome's "Failed to load resource" console echo is dropped (the failed request
+  is already a finding); axe runs WCAG A/AA rules only.
+- **Alternatives:** one bug per page per finding (a broken header = one bug per page); including
+  axe's best-practice rules.
+- **Why:** a report a developer can act on. Best-practice rules are advice, and counting them
+  would make false alarms on the clean shop depend on taste.
+
+## D15. Screenshot review is part of the passive scan, findings stay "candidate" (M3)
+- **Decision:** after the crawl the model reviews up to REVIEW_PAGES screenshots (default 6)
+  for visual/UX problems; results are `agent` / `candidate` bugs, within the run's cost budget.
+- **Alternatives:** no model in passive mode; review every page.
+- **Why:** the brief asks for it, and some bugs (a "$NaN" price) are invisible to deterministic
+  checks. Capping pages keeps cost predictable; replay (M5) decides whether candidates are real.
