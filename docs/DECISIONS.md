@@ -55,3 +55,43 @@ before/after numbers from the benchmark.
   code); manual checking.
 - **Why:** the check belongs with the demo app, and M6 needs Node Playwright for the web
   e2e test anyway.
+
+## D8. Prisma pinned to 7.10.1 (M2)
+- **Decision:** `prisma` and `@prisma/client` pinned to exactly 7.10.1.
+- **Alternatives:** whatever `npm install` picks: on 2026-11-09 the `latest` tag pointed at
+  `8.0.0-rc.33`, a release candidate, while `@prisma/client` resolved to 7.10.1 (mismatched).
+- **Why:** a stable, matching pair. Revisit when Prisma 8 is released as stable.
+
+## D9. The database generates ids and timestamps (M2)
+- **Decision:** ids use `@default(dbgenerated("gen_random_uuid()"))`, timestamps `now()`;
+  tables and columns are snake_case via `@map`.
+- **Alternatives:** Prisma's `@default(uuid())` (generated in JavaScript only); camelCase columns.
+- **Why:** Python inserts rows too. A default that lives in JavaScript would leave Python
+  inserts without ids. snake_case keeps raw SQL and the SQLAlchemy mirror readable.
+
+## D10. Python tests apply Prisma's migration SQL directly (M2)
+- **Decision:** the pytest fixture creates `agent_test` and runs
+  `apps/web/prisma/migrations/*/migration.sql` in order. `test_db_models.py` compares the
+  SQLAlchemy mirror with the resulting tables (names, columns, nullability).
+- **Alternatives:** `Base.metadata.create_all()` (tests would run against the mirror, not the
+  real schema, so drift would go unnoticed); calling `npx prisma migrate deploy` from pytest
+  (Python tests would need Node).
+- **Why:** tests run against the real schema, with no Node dependency, and drift fails a test.
+  It caught one on day one: Prisma creates `Int[]` columns as nullable.
+
+## D11. One-shot agent requests, tool_choice "auto" (M2)
+- **Decision:** each agent step is one request (system prompt + tools + current observation);
+  memory of earlier steps is a short summary inside the observation, not a growing chat history.
+  `tool_choice` is `auto` with `strict` tools and `disable_parallel_tool_use`.
+- **Alternatives:** a growing multi-turn conversation; `tool_choice: any`.
+- **Why:** constant cost per step (no ever-growing history), the system prompt and tools form a
+  stable cacheable prefix, and it works the same for Claude and Ollama. `tool_choice: any` is
+  rejected by Claude Sonnet 5.5 (400), so "always call exactly one tool" goes in the prompt.
+
+## D12. Effort "medium" and refusal fallback on agent calls (M2)
+- **Decision:** agent decisions use `output_config.effort = "medium"` and the server-side
+  refusal fallback (`fallbacks: "default"`).
+- **Alternatives:** the model default (`high`, more thinking tokens per step); `low`.
+- **Why:** a step is a small decision; medium keeps thinking (billed as output) modest. To be
+  re-tuned with benchmark numbers once a Claude key is available. Untested against the live
+  API tonight (no key): see Needs me.

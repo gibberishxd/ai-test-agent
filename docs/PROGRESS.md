@@ -6,7 +6,7 @@ done (local model) / blocked.
 | # | Milestone | Status | Acceptance check result |
 |---|---|---|---|
 | M1 | Demo shop: 12 planted bugs, injection text, clean build on 5174, bugs.json | done | `npm run verify-bugs`: 26/26 passed (12 bugs present on 5173 and absent on 5174, injection text on both) |
-| M2 | Data model + run queue, LLMClient (Fake, Claude, Ollama) | todo | |
+| M2 | Data model + run queue, LLMClient (Fake, Claude, Ollama) | done | Inserted a queued run with SQL, `LLM_PROVIDER=fake uv run worker --once` claimed it and marked it `done` (provider=fake, claimed, finished). 52 worker tests pass. |
 | M3 | Deterministic checks + passive scan, safety 6.1/6.2/6.6 | todo | |
 | M4 | Agent loop: safe mode, budgets, loop detection, injection, cost, caching | todo | |
 | M5 | Replay verification + dedup | todo | |

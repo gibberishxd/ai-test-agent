@@ -12,7 +12,8 @@
     "dev": "concurrently -n web,demo,clean,worker -c blue,magenta,cyan,green \"npm run dev -w apps/web\" \"npm run dev -w apps/demo\" \"npm run dev:clean -w apps/demo\" \"cd apps/worker && uv run worker\"",
     "test": "npm run test --workspaces && cd apps/worker && uv run pytest",
     "lint": "npm run typecheck --workspaces && cd apps/worker && uv run ruff check . && uv run ruff format --check .",
-    "verify-bugs": "npm run verify-bugs -w apps/demo"
+    "verify-bugs": "npm run verify-bugs -w apps/demo",
+    "db:migrate": "npm run db:deploy -w apps/web"
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

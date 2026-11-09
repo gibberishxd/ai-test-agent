@@ -3,6 +3,7 @@
 pytest finds this file automatically; any test can ask for these fixtures by parameter name.
 """
 
+import os
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -51,3 +52,72 @@ def context(browser):
     context = browser.new_context()
     yield context
     context.close()
+
+
+# --- Database fixtures -------------------------------------------------------------------------
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "apps" / "web" / "prisma" / "migrations"
+TEST_DB = "agent_test"
+
+
+def apply_migrations(engine) -> None:
+    """Run Prisma's migration SQL files in order: the real schema, without needing Node."""
+    with engine.begin() as conn:
+        for sql_file in sorted(MIGRATIONS_DIR.glob("*/migration.sql")):
+            conn.exec_driver_sql(sql_file.read_text())
+
+
+@pytest.fixture(scope="session")
+def db_engine():
+    """A fresh `agent_test` database with the current schema, for the whole session.
+
+    Skips DB tests when Postgres isn't running (`npm run db:up`), unless REQUIRE_DB=1 (CI),
+    where a missing database is a failure.
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import OperationalError
+
+    from worker.config import Settings
+
+    admin_url = Settings().sqlalchemy_url()
+    try:
+        admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+        with admin.connect() as conn:
+            conn.execute(text(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)"))
+            conn.execute(text(f"CREATE DATABASE {TEST_DB}"))
+        admin.dispose()
+    except OperationalError as error:
+        if os.environ.get("REQUIRE_DB") == "1":
+            raise
+        pytest.skip(f"Postgres not reachable ({error.__class__.__name__}); run `npm run db:up`")
+
+    engine = create_engine(make_url(admin_url).set(database=TEST_DB))
+    apply_migrations(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def sessions(db_engine):
+    """A session factory on an emptied test database."""
+    from sqlalchemy import text
+
+    from worker.db.models import Base
+    from worker.db.session import make_session_factory
+
+    tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
+    with db_engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE {tables} CASCADE"))
+    return make_session_factory(db_engine)
+
+
+@pytest.fixture
+def workspace(sessions):
+    from worker.db.models import Workspace
+
+    with sessions() as session:
+        ws = Workspace(name="Test workspace", slug="test")
+        session.add(ws)
+        session.commit()
+        return ws

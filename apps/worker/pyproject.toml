@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "The AI test agent: crawls a site, finds bugs, writes reports"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=2.6.0",
+    "httpx>=0.28.1",
     "playwright>=1.64.1",
+    "psycopg[binary]>=3.3.8",
     "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.2",
+    "sqlalchemy>=2.1.8",
 ]
 
 [project.scripts]

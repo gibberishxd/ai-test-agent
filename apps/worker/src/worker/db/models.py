@@ -1,0 +1,200 @@
+"""SQLAlchemy mirror of the Prisma schema (apps/web/prisma/schema.prisma).
+
+Prisma owns the schema and its migrations; these classes only describe the existing tables so
+Python can read and write them. tests/test_db_models.py fails if the two drift apart.
+"""
+
+import uuid
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from sqlalchemy import ForeignKey, Integer, String, func, text
+from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB, TIMESTAMP, UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class RunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class RunMode(StrEnum):
+    PASSIVE = "passive"
+    INTERACTIVE = "interactive"
+
+
+class Severity(StrEnum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class BugSource(StrEnum):
+    DETERMINISTIC = "deterministic"
+    AGENT = "agent"
+
+
+class BugStatus(StrEnum):
+    CANDIDATE = "candidate"
+    CONFIRMED = "confirmed"
+    DISMISSED = "dismissed"
+
+
+def _pg_enum(enum: type[StrEnum], name: str) -> ENUM:
+    # create_type=False: the type already exists (Prisma's migration created it).
+    return ENUM(*[member.value for member in enum], name=name, create_type=False)
+
+
+def _id() -> Mapped[uuid.UUID]:
+    return mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+
+
+def _created_at() -> Mapped[datetime]:
+    return mapped_column(TIMESTAMP(timezone=True, precision=3), server_default=func.now())
+
+
+def _timestamp() -> Any:
+    return TIMESTAMP(timezone=True, precision=3)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[uuid.UUID] = _id()
+    name: Mapped[str]
+    slug: Mapped[str] = mapped_column(unique=True)
+    monthly_run_quota: Mapped[int] = mapped_column(server_default=text("50"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = _id()
+    email: Mapped[str] = mapped_column(unique=True)
+    name: Mapped[str | None]
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Run(Base):
+    __tablename__ = "runs"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    target_url: Mapped[str]
+    mode: Mapped[str] = mapped_column(_pg_enum(RunMode, "run_mode"), server_default="passive")
+    focus: Mapped[str | None]
+    status: Mapped[str] = mapped_column(_pg_enum(RunStatus, "run_status"), server_default="queued")
+    stop_requested: Mapped[bool] = mapped_column(server_default=text("false"))
+    claimed_by: Mapped[str | None]
+    provider: Mapped[str | None]
+    model: Mapped[str | None]
+    pages_visited: Mapped[int] = mapped_column(server_default=text("0"))
+    step_count: Mapped[int] = mapped_column(server_default=text("0"))
+    input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    error: Mapped[str | None]
+    summary: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    started_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    finished_at: Mapped[datetime | None] = mapped_column(_timestamp())
+
+    steps: Mapped[list["Step"]] = relationship(back_populates="run", order_by="Step.index")
+    bugs: Mapped[list["Bug"]] = relationship(back_populates="run")
+
+
+class Step(Base):
+    __tablename__ = "steps"
+
+    id: Mapped[uuid.UUID] = _id()
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"))
+    index: Mapped[int]
+    action: Mapped[str]
+    args: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'"))
+    reasoning: Mapped[str | None]
+    url: Mapped[str | None]
+    screenshot: Mapped[str | None]
+    events: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'"))
+    blocked: Mapped[bool] = mapped_column(server_default=text("false"))
+    block_reason: Mapped[str | None]
+    input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    created_at: Mapped[datetime] = _created_at()
+
+    run: Mapped[Run] = relationship(back_populates="steps")
+
+
+class Bug(Base):
+    __tablename__ = "bugs"
+
+    id: Mapped[uuid.UUID] = _id()
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"))
+    title: Mapped[str]
+    severity: Mapped[str] = mapped_column(_pg_enum(Severity, "severity"))
+    category: Mapped[str]
+    page_url: Mapped[str]
+    expected: Mapped[str | None]
+    actual: Mapped[str | None]
+    repro_steps: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'"))
+    evidence: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'"))
+    reasoning: Mapped[str | None]
+    screenshot: Mapped[str | None]
+    # Prisma creates list columns as nullable (Postgres arrays), so the mirror says so too.
+    step_indexes: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), server_default=text("'{}'")
+    )
+    source: Mapped[str] = mapped_column(_pg_enum(BugSource, "bug_source"))
+    status: Mapped[str] = mapped_column(
+        _pg_enum(BugStatus, "bug_status"), server_default="candidate"
+    )
+    dismiss_reason: Mapped[str | None]
+    duplicate_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _created_at()
+
+    run: Mapped[Run] = relationship(back_populates="bugs")
+
+
+class BenchmarkResult(Base):
+    __tablename__ = "benchmark_results"
+
+    id: Mapped[uuid.UUID] = _id()
+    provider: Mapped[str]
+    model: Mapped[str]
+    git_commit: Mapped[str]
+    runs_buggy: Mapped[int]
+    recall: Mapped[float]
+    precision: Mapped[float]
+    false_alarms: Mapped[float]
+    avg_cost_usd: Mapped[float]
+    avg_duration_s: Mapped[float]
+    details: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    action: Mapped[str] = mapped_column(String)
+    target_url: Mapped[str | None]
+    mode: Mapped[str | None] = mapped_column(_pg_enum(RunMode, "run_mode"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = _created_at()

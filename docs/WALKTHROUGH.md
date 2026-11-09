@@ -139,3 +139,94 @@ empties it.
 3. *Why does the 404 need a server plugin?* A single-page app's dev server returns `index.html`
    with status 200 for any path; the "not found" page is drawn by JavaScript. To give the
    checker a real HTTP 404, the server has to send one.
+
+---
+
+## Database schema (`apps/web/prisma/schema.prisma`) and its Python mirror (`apps/worker/src/worker/db/models.py`)
+
+**What:** six tables (workspaces, users, runs, steps, bugs, benchmark_results, audit_log) and
+five enums. Prisma owns the schema and migrations; the worker describes the same tables with
+SQLAlchemy.
+
+**How:** `prisma migrate dev` turns schema changes into SQL migration files. The Python models
+use `create_type=False` enums and `server_default`s, so they never try to create anything.
+A test builds a fresh database from the migration SQL and compares it with the models.
+
+**Why:** two languages share one database. One owner (Prisma) avoids two competing migration
+systems; the drift test catches the mirror falling behind.
+
+**Weak spots:** the mirror is still hand-written, so every schema change touches two files.
+Money is stored as `Float` (fine for cost tracking at fractions of a cent; `Decimal` would be
+the choice for billing).
+
+**Interview Q&A**
+1. *Why does Prisma own the schema when Python also writes to it?* One source of truth for
+   migrations. The web app needs typed queries most; the worker only mirrors the tables and a
+   test proves the mirror matches.
+2. *Why do ids come from Postgres (`gen_random_uuid()`)?* Prisma's `uuid()` default runs in
+   JavaScript. Rows inserted from Python would have no id. A database default works for every
+   client.
+3. *How do you catch schema drift?* The test database is built from the real migration SQL,
+   then SQLAlchemy's inspector compares tables, columns and nullability with the models.
+
+---
+
+## Run queue (`apps/worker/src/worker/queue.py`, `runner.py`, `main.py`)
+
+**What:** the web app inserts a `runs` row with status `queued`; the worker claims it, does the
+work, and sets `done`, `failed` or `stopped`.
+
+**How:** `SELECT ... WHERE status='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`,
+then set `running` and commit. `transition()` only allows queued→running/stopped and
+running→done/failed/stopped. `process_next` wraps the work in try/except, so any exception
+becomes `failed` with the error text. `uv run worker` polls every second; `--once` does one run.
+
+**Why:** Postgres is already there, and a row-lock queue is enough for this scale: no Redis, no
+extra service to deploy. `SKIP LOCKED` lets many workers poll at once without blocking each
+other or taking the same run.
+
+**Weak spots:** if a worker dies mid-run, the run stays `running` forever (fix: a heartbeat
+column plus a sweeper that re-queues or fails stale runs). Polling adds up to 1 s of latency
+(fix: Postgres `LISTEN/NOTIFY`).
+
+**Interview Q&A**
+1. *What does `SKIP LOCKED` do?* Rows locked by another transaction are skipped instead of
+   waited for, so concurrent workers each get a different row immediately.
+2. *Why commit right after claiming?* The status change to `running` is what keeps other
+   workers away; committing makes it visible and releases the lock, so a long run doesn't hold
+   a database transaction open.
+3. *Why a transition table?* Status is the contract with the UI. Refusing illegal moves (like
+   done → running) turns silent state bugs into loud errors.
+
+---
+
+## LLM clients (`apps/worker/src/worker/llm/`)
+
+**What:** one interface, `LLMClient` (`decide` = pick one tool, `review_screenshot`,
+`complete`), with three implementations: `ClaudeClient` (Anthropic SDK), `OllamaClient` (local
+HTTP), `FakeClient` (scripted, for tests). `make_client(settings)` picks by `LLM_PROVIDER`.
+Every call returns a `Usage` with tokens and cost.
+
+**How:** tools are described once as `ToolSpec` (name, description, JSON Schema) and converted
+to each provider's format. Claude: `cache_control` on the last tool and on the system prompt
+caches that prefix; `strict` tools; `tool_choice: auto`. Ollama: OpenAI-style function tools,
+images as base64, and a fallback that finds a JSON tool call in plain text. Cost comes from a
+price table (`pricing.py`); unknown models are charged the highest known price.
+
+**Why:** swapping providers is a config change, so the benchmark can compare Claude and a free
+local model on equal terms. FakeClient makes the agent loop testable for free and
+deterministically.
+
+**Weak spots:** prices are hard-coded and need updating by hand. The Ollama client uses one
+model for both "agent" and "cheap" calls. The Claude client hasn't been run against the live
+API yet (no key tonight); its unit tests use a stand-in SDK object.
+
+**Interview Q&A**
+1. *Why an interface instead of calling the SDK directly?* The agent shouldn't care which model
+   answers. It also lets every unit test use a scripted fake, so tests cost nothing and never
+   flake on model randomness.
+2. *How does prompt caching cut cost here?* Each step sends the same tools and system prompt
+   followed by a new observation. Marking the end of the stable part as cacheable makes later
+   steps read it at about a tenth of the input price.
+3. *What if the model doesn't call a tool?* `decide` returns `tool_call=None`; the loop counts it
+   as a wasted step against the budget and asks again, instead of crashing.
