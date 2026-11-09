@@ -25,5 +25,9 @@ measured against a demo app with planted bugs.
 - Never commit secrets. Config comes from `.env` (see `.env.example`).
 - After each session, suggest 2–3 lines for `DEVLOG.md`.
 
+## Roadmap
+The full plan, decisions already made and each phase's "done when" are in `docs/PLAN.md`.
+Read it at the start of a session.
+
 ## Current phase
 Phase 0 — repo setup. Next: Phase 1, the deterministic checker in `apps/worker`.
