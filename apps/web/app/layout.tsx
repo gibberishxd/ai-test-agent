@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { SiteHeader } from "@/components/site-header";
+import { AuthProvider } from "@/components/auth-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,13 +23,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // suppressHydrationWarning: next-themes sets the "dark" class before React loads.
     <html lang="en" className={cn("font-sans", sans.variable, mono.variable)} suppressHydrationWarning>
       <body className="min-h-dvh bg-background text-foreground antialiased">
-        <ThemeProvider>
-          <TooltipProvider>
-            <SiteHeader />
-            {children}
-            <Toaster />
-          </TooltipProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <TooltipProvider>
+              <SiteHeader />
+              {children}
+              <Toaster />
+            </TooltipProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

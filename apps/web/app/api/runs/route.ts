@@ -1,20 +1,17 @@
-import { createRun, listRuns } from "@/lib/runs";
-import { parseRunInput } from "@/lib/targets";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { clientIp } from "@/lib/limits";
+import { listRuns, startRun } from "@/lib/runs";
+import { currentContext } from "@/lib/workspace";
 
-/** Start a run: validate, then insert it as "queued" for the worker to pick up. */
+/** Start a run: every check runs in startRun, then the run is queued for the worker. */
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
-  const parsed = parseRunInput(body);
-  if (!parsed.ok) return Response.json({ errors: parsed.errors }, { status: 400 });
-
-  const workspaceId = await currentWorkspaceId();
-  const run = await createRun(workspaceId, null, parsed.value);
-  return Response.json({ id: run.id }, { status: 201 });
+  const result = await startRun(await currentContext(), body, clientIp(request.headers));
+  if (!result.ok) return Response.json({ errors: result.errors }, { status: result.status });
+  return Response.json({ id: result.id }, { status: 201 });
 }
 
 export async function GET() {
-  const workspaceId = await currentWorkspaceId();
+  const { workspaceId } = await currentContext();
   const runs = await listRuns(workspaceId);
   return Response.json({
     runs: runs.map((run) => ({

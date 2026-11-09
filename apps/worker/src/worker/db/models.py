@@ -75,6 +75,9 @@ class Workspace(Base):
     name: Mapped[str]
     slug: Mapped[str] = mapped_column(unique=True)
     monthly_run_quota: Mapped[int] = mapped_column(server_default=text("50"))
+    verification_token: Mapped[str] = mapped_column(
+        unique=True, server_default=text("replace(gen_random_uuid()::text, '-', '')")
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -84,6 +87,8 @@ class User(Base):
     id: Mapped[uuid.UUID] = _id()
     email: Mapped[str] = mapped_column(unique=True)
     name: Mapped[str | None]
+    image: Mapped[str | None]
+    email_verified: Mapped[datetime | None] = mapped_column(_timestamp())
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
     created_at: Mapped[datetime] = _created_at()
 
@@ -109,6 +114,7 @@ class Run(Base):
     cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
     error: Mapped[str | None]
     summary: Mapped[dict | None] = mapped_column(JSONB)
+    share_token: Mapped[str | None] = mapped_column(unique=True)
     created_at: Mapped[datetime] = _created_at()
     started_at: Mapped[datetime | None] = mapped_column(_timestamp())
     finished_at: Mapped[datetime | None] = mapped_column(_timestamp())
@@ -197,4 +203,44 @@ class AuditLog(Base):
     mode: Mapped[str | None] = mapped_column(_pg_enum(RunMode, "run_mode"))
     run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Account(Base):
+    """Auth.js sign-in accounts. Unused by the worker; mirrored so the drift test is complete."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[uuid.UUID] = _id()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    type: Mapped[str]
+    provider: Mapped[str]
+    provider_account_id: Mapped[str]
+    refresh_token: Mapped[str | None]
+    access_token: Mapped[str | None]
+    expires_at: Mapped[int | None]
+    token_type: Mapped[str | None]
+    scope: Mapped[str | None]
+    id_token: Mapped[str | None]
+    session_state: Mapped[str | None]
+
+
+class VerificationToken(Base):
+    __tablename__ = "verification_tokens"
+
+    identifier: Mapped[str] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(primary_key=True)
+    expires: Mapped[datetime] = mapped_column(_timestamp())
+
+
+class Domain(Base):
+    """A domain a workspace has asked to test interactively; verified_at set once proven."""
+
+    __tablename__ = "domains"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    hostname: Mapped[str]
+    verified_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    method: Mapped[str | None]
     created_at: Mapped[datetime] = _created_at()

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Download, Loader2, OctagonX, SearchCheck, Square } from "lucide-react";
+import { ChevronDown, Download, Link2Off, Loader2, OctagonX, SearchCheck, Share2, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ModeBadge, StatusBadge } from "@/components/badges";
@@ -19,7 +19,16 @@ const POLL_MS = 1500;
 const bySeverity = (a: BugView, b: BugView) =>
   SEVERITIES.indexOf(a.severity as never) - SEVERITIES.indexOf(b.severity as never);
 
-export function RunView({ initial }: { initial: Run }) {
+type Props = {
+  initial: Run;
+  /** Shared, read-only view: no Stop, no sharing controls, no polling. */
+  readOnly?: boolean;
+  /** Signed-in members of the run's workspace can create and revoke share links. */
+  canShare?: boolean;
+  shareToken?: string | null;
+};
+
+export function RunView({ initial, readOnly = false, canShare = false, shareToken = null }: Props) {
   const [run, setRun] = useState(initial);
   const [now, setNow] = useState(() => Date.now());
   const [stopping, setStopping] = useState(false);
@@ -27,14 +36,14 @@ export function RunView({ initial }: { initial: Run }) {
 
   // Poll while the run is in progress; stop as soon as it reaches a final status.
   useEffect(() => {
-    if (final) return;
+    if (final || readOnly) return;
     const timer = setInterval(async () => {
       setNow(Date.now());
       const response = await fetch(`/api/runs/${run.id}`, { cache: "no-store" }).catch(() => null);
       if (response?.ok) setRun(await response.json());
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [final, run.id]);
+  }, [final, readOnly, run.id]);
 
   const stop = async () => {
     setStopping(true);
@@ -58,7 +67,7 @@ export function RunView({ initial }: { initial: Run }) {
         <h1 className="text-2xl font-semibold tracking-tight break-all">{run.targetUrl}</h1>
         {run.focus && <p className="text-muted-foreground">Focus: {run.focus}</p>}
         <div className="flex flex-wrap gap-2">
-          {!final && (
+          {!final && !readOnly && (
             <Button variant="outline" onClick={stop} disabled={stopping || run.stopRequested}>
               <Square /> Stop
             </Button>
@@ -70,6 +79,7 @@ export function RunView({ initial }: { initial: Run }) {
               </a>
             </Button>
           )}
+          {final && canShare && !readOnly && <ShareControl runId={run.id} initialToken={shareToken} />}
         </div>
       </header>
 
@@ -163,6 +173,52 @@ export function RunView({ initial }: { initial: Run }) {
         )}
       </section>
     </div>
+  );
+}
+
+function ShareControl({ runId, initialToken }: { runId: string; initialToken: string | null }) {
+  const [url, setUrl] = useState<string | null>(
+    initialToken && typeof window !== "undefined" ? `${window.location.origin}/share/${initialToken}` : null,
+  );
+  const [busy, setBusy] = useState(false);
+
+  const share = async () => {
+    setBusy(true);
+    const response = await fetch(`/api/runs/${runId}/share`, { method: "POST" });
+    const data = await response.json();
+    setBusy(false);
+    if (!response.ok) return toast.error(data.error ?? "Couldn't create a link.");
+    setUrl(data.url);
+    await navigator.clipboard?.writeText(data.url).catch(() => undefined);
+    toast.success("Share link copied. Anyone with the link can view this report.");
+  };
+
+  const revoke = async () => {
+    setBusy(true);
+    const response = await fetch(`/api/runs/${runId}/share`, { method: "DELETE" });
+    setBusy(false);
+    if (!response.ok) return toast.error("Couldn't revoke the link.");
+    setUrl(null);
+    toast.success("Link revoked. The old URL no longer works.");
+  };
+
+  return url ? (
+    <span className="flex flex-wrap items-center gap-2">
+      <input
+        readOnly
+        value={url}
+        aria-label="Share link"
+        className="h-8 w-64 max-w-full rounded-md border bg-muted px-2 text-xs"
+        onFocus={(event) => event.currentTarget.select()}
+      />
+      <Button variant="ghost" size="sm" onClick={revoke} disabled={busy}>
+        <Link2Off /> Revoke
+      </Button>
+    </span>
+  ) : (
+    <Button variant="outline" onClick={share} disabled={busy}>
+      <Share2 /> Share read-only link
+    </Button>
   );
 }
 

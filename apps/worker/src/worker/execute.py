@@ -7,6 +7,7 @@ finding becomes a bug, and tokens and cost are added to the run as they're spent
 import itertools
 import time
 from collections import Counter
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser
 from sqlalchemy.orm import Session
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from worker.agent.loop import AgentConfig, AgentRun, StepRecord
 from worker.agent.policy import Budget
 from worker.config import Settings
-from worker.db.models import Bug, Run, RunMode, Step
+from worker.db.models import Bug, Domain, Run, RunMode, Step
 from worker.findings import findings_from_pages
 from worker.llm import LLMClient, Usage
 from worker.report import BugReport, PageResult
@@ -33,7 +34,8 @@ def make_execute(settings: Settings, storage: Storage, browser: Browser | None =
 
     def execute(session: Session, run: Run, llm: LLMClient) -> None:
         if run.mode == RunMode.INTERACTIVE:
-            run_interactive(session, run, llm, settings, storage, browser)
+            verified = is_verified_domain(session, run.workspace_id, run.target_url)
+            run_interactive(session, run, llm, settings, storage, browser, verified)
         else:
             run_passive(session, run, llm, settings, storage, browser)
 
@@ -134,6 +136,18 @@ def summarize(pages: list[PageResult], bugs: list[BugReport]) -> dict:
         "by_severity": {s: by_severity.get(s, 0) for s in ("critical", "high", "medium", "low")},
         "blocked_requests": sum(len(p.blocked_requests) for p in pages),
     }
+
+
+def is_verified_domain(session: Session, workspace_id, url: str) -> bool:
+    """Has this workspace proven it owns the target's host (DNS TXT or well-known file)?"""
+    host = (urlsplit(url).hostname or "").lower()
+    domain = (
+        session.query(Domain)
+        .filter(Domain.workspace_id == workspace_id, Domain.hostname == host)
+        .filter(Domain.verified_at.isnot(None))
+        .first()
+    )
+    return domain is not None
 
 
 def interactive_allowed(settings: Settings, target_url: str, verified: bool = False) -> bool:

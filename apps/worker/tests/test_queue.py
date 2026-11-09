@@ -109,3 +109,30 @@ def test_stale_running_runs_are_failed(sessions, workspace):
     assert load(sessions, stale.id).status == RunStatus.FAILED
     assert "worker stopped" in load(sessions, stale.id).error
     assert load(sessions, fresh.id).status == RunStatus.RUNNING
+
+
+def test_only_verified_domains_count(sessions, workspace):
+    from datetime import UTC, datetime
+
+    from worker.db.models import Domain, Workspace
+    from worker.execute import is_verified_domain
+
+    with sessions() as session:
+        other = Workspace(name="Other", slug="other")
+        session.add(other)
+        session.flush()
+        session.add_all(
+            [
+                Domain(
+                    workspace_id=workspace.id, hostname="shop.test", verified_at=datetime.now(UTC)
+                ),
+                Domain(workspace_id=workspace.id, hostname="pending.test"),
+                Domain(
+                    workspace_id=other.id, hostname="theirs.test", verified_at=datetime.now(UTC)
+                ),
+            ]
+        )
+        session.commit()
+        assert is_verified_domain(session, workspace.id, "https://SHOP.test/cart")
+        assert not is_verified_domain(session, workspace.id, "https://pending.test/")
+        assert not is_verified_domain(session, workspace.id, "https://theirs.test/")  # not ours

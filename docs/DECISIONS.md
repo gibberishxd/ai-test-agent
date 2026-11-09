@@ -231,3 +231,38 @@ numbers are the real test (Needs me).
   budget plus 5 minutes are marked failed ("the worker stopped before the run finished").
 - **Why:** the e2e test exposed it: Playwright stopped its worker mid-run and that run stayed
   "running" forever. A heartbeat column would detect it sooner; this is the simple version.
+
+## D25. Auth.js v4 with our own small adapter and JWT sessions (M8)
+- **Decision:** `next-auth` 4.24.15 (stable) with GitHub OAuth and email magic links, each
+  enabled only when its env vars are set, plus a "sign in as demo user" credentials provider in
+  development only. JWT sessions carry user id + workspace id. A ~100-line adapter over our
+  Prisma client creates the user's personal workspace in the same transaction as the user.
+- **Alternatives:** Auth.js v5 (`next-auth@5`, still beta after two years: 5.0.0-beta.32);
+  the stock `@auth/prisma-adapter` (expects `@prisma/client` imports and can't create a
+  workspace with the user); Clerk or another hosted auth (a paid sign-up, and less to explain).
+- **Why:** stable over beta for a product. Our schema requires every user to have a workspace,
+  so user creation must be ours. JWT sessions are required by the credentials provider and
+  mean no session table lookups.
+
+## D26. Visitors share a public demo workspace; limits checked in one place (M8)
+- **Decision:** signed-out visitors act in the "demo" workspace and may only test the demo shop,
+  5 runs per IP per hour (counted from the audit log). `startRun` is the single gate: input,
+  visitor rules, monthly quota (default 50), then the audit entry.
+- **Why:** the landing page's "Try it on our demo shop" must work without sign-up, but a
+  visitor must not be able to point the worker at arbitrary sites.
+
+## D27. Domain verification by DNS TXT or well-known file, SSRF-checked (M8)
+- **Decision:** a per-workspace token (`workspaces.verification_token`), proven by a TXT record
+  `ai-test-agent-verification=<token>` or `/.well-known/ai-test-agent.txt`. The file check
+  resolves the host first and refuses private addresses, doesn't follow redirects, 5 s timeout,
+  1 KB max. The worker allows interactive runs only on verified hostnames of the run's workspace.
+- **Why:** interactive tests type and submit forms, which is only OK on sites you own. The
+  file check is a server-side fetch of a user-chosen URL, so it gets the same SSRF care as the
+  worker.
+
+## D28. Database tests for the web app (M8)
+- **Decision:** Vitest global setup creates `agent_web_test` and runs `prisma migrate deploy`;
+  `*.db.test.ts` files run against it (skip locally without Postgres, fail in CI with
+  `REQUIRE_DB=1`). CI's TypeScript job now has a Postgres service.
+- **Why:** workspace isolation is a property of real queries; mocking the database would test
+  the mock.

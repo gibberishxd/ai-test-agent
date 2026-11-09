@@ -440,3 +440,41 @@ streams the loading state before `notFound()` runs).
 3. *How do you stop one customer seeing another's screenshots?* Screenshot keys start with the
    run id; the file route looks the run up scoped to the caller's workspace before reading the
    file, and normalises the path so `../` can't escape the folder.
+
+---
+
+## B2B foundations (`apps/web/lib/auth*.ts`, `workspace.ts`, `limits.ts`, `domains.ts`, `share.ts`, `settings-data.ts`)
+
+**What:** sign-in (GitHub, email magic link, dev demo user), a personal workspace per user,
+workspace-scoped data, domain verification for interactive mode, a monthly run quota with a
+usage page, an audit log, revocable read-only share links, and limits for signed-out visitors.
+
+**How:**
+- `currentContext()` returns `{workspaceId, userId, signedIn}` for every request: the user's
+  workspace from the JWT, or the public demo workspace for visitors. Every query filters by it.
+- `startRun()` is the one gate before a run is queued: validation, visitor rules (demo shop
+  only, 5/hour/IP), quota (runs since the 1st of the month), then an audit log entry.
+- Domains: add → verify (TXT record or well-known file containing the workspace token) →
+  `verified_at` set → `parseRunInput` (web) and `is_verified_domain` (worker) allow
+  interactive mode there.
+- Share links: `runs.share_token` = 24 random bytes (base64url). `/share/<token>` renders the
+  report read-only; revoking sets the token to null.
+- Tests: `lib/b2b.db.test.ts` runs against a real Postgres: cross-workspace reads, stops and
+  shares fail; verification; quota; share links; visitor limits.
+
+**Why:** these are what make it a product a team can use safely: their data stays theirs,
+interactive testing only happens on sites they own, and usage is bounded and visible.
+
+**Weak spots:** one workspace per user (no invitations or roles yet). The visitor rate limit
+trusts `X-Forwarded-For` (fine behind a known proxy, spoofable without one). The quota counts
+runs, not cost. No email is actually sent without SMTP settings.
+
+**Interview Q&A**
+1. *How do you guarantee tenant isolation?* Every data function takes the workspace id from
+   the server-side session, never from the request body, and filters by it; a database test
+   proves another workspace's run can't be read, stopped or shared.
+2. *Why make domain verification support both DNS and a file?* DNS is the standard but needs
+   DNS access; a file works for anyone who can deploy the site. Both prove control of the domain.
+3. *How do share links stay safe?* 192 random bits can't be guessed or enumerated, the page is
+   read-only (no stop, no re-share, no polling of private APIs), it's `noindex`, and revoking
+   nulls the token so the old URL 404s immediately.

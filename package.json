@@ -14,7 +14,8 @@
     "lint": "npm run typecheck --workspaces && cd apps/worker && uv run ruff check . && uv run ruff format --check .",
     "verify-bugs": "npm run verify-bugs -w apps/demo",
     "db:migrate": "npm run db:deploy -w apps/web",
-    "test:e2e": "npm run e2e -w apps/web"
+    "test:e2e": "npm run e2e -w apps/web",
+    "bench": "cd apps/worker && uv run worker bench"
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

@@ -58,29 +58,35 @@ enum BugStatus {
 }
 
 model Workspace {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name            String
-  slug            String   @unique
-  monthlyRunQuota Int      @default(50) @map("monthly_run_quota")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  slug              String   @unique
+  monthlyRunQuota   Int      @default(50) @map("monthly_run_quota")
+  /// Proves domain ownership: put it in a DNS TXT record or /.well-known/ai-test-agent.txt.
+  verificationToken String   @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @map("verification_token")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   users    User[]
   runs     Run[]
   auditLog AuditLog[]
+  domains  Domain[]
 
   @@map("workspaces")
 }
 
 model User {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email       String   @unique
-  name        String?
-  workspaceId String   @map("workspace_id") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime? @map("email_verified") @db.Timestamptz(3)
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      Run[]
   auditLog  AuditLog[]
+  accounts  Account[]
 
   @@index([workspaceId])
   @@map("users")
@@ -110,6 +116,8 @@ model Run {
   error         String?
   /// Summary written when the run finishes (Report model in the worker).
   summary       Json?
+  /// Unguessable token for a read-only share link; null = not shared (or revoked).
+  shareToken    String?   @unique @map("share_token")
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   startedAt     DateTime? @map("started_at") @db.Timestamptz(3)
   finishedAt    DateTime? @map("finished_at") @db.Timestamptz(3)
@@ -213,4 +221,50 @@ model AuditLog {
 
   @@index([workspaceId, createdAt])
   @@map("audit_log")
+}
+
+/// A sign-in method linked to a user (GitHub account), used by Auth.js.
+model Account {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refreshToken      String? @map("refresh_token")
+  accessToken       String? @map("access_token")
+  expiresAt         Int?    @map("expires_at")
+  tokenType         String? @map("token_type")
+  scope             String?
+  idToken           String? @map("id_token")
+  sessionState      String? @map("session_state")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+/// One-time tokens for email magic links, used by Auth.js.
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime @db.Timestamptz(3)
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+/// A domain a workspace wants to test interactively. Verified by DNS TXT or a well-known file.
+model Domain {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  hostname    String
+  verifiedAt  DateTime? @map("verified_at") @db.Timestamptz(3)
+  method      String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, hostname])
+  @@map("domains")
 }
