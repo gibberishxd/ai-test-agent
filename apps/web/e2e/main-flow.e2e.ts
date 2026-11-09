@@ -5,7 +5,10 @@ import { expect, test } from "@playwright/test";
  * to finish it, and see bugs on the report.
  */
 test("start a run from the dashboard and see bugs on the report", async ({ page }) => {
-  await page.goto("/dashboard");
+  // Signed in (dev demo user): visitors are limited to 5 runs per hour, and this test runs often.
+  await page.goto("/signin");
+  await page.getByRole("button", { name: "Sign in as demo user" }).click();
+  await page.waitForURL("**/dashboard");
   await page.getByRole("button", { name: /Use the demo shop/ }).click();
   await expect(page.getByLabel("URL to test")).toHaveValue("http://localhost:5173");
   await page.getByText("Passive scan").click();

@@ -48,5 +48,6 @@ only. In short:
 - End the night with a `DEVLOG.md` entry.
 
 ## Current phase
-Demo v1 (branch `demo-v1`), milestones M1–M9 from the brief. See `docs/PROGRESS.md` for status.
-Phase 1 steps 1–3 (report models, URL helpers, crawler) are done and become part of M3.
+Demo v1 (branch `demo-v1`): milestones M1–M9 done (M4/M5 measured with a local model only).
+Next: re-run M4/M5 and the benchmark with Claude (see "Needs me" in `docs/PROGRESS.md`), then
+review and merge `demo-v1` into `main`.

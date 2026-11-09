@@ -478,3 +478,41 @@ runs, not cost. No email is actually sent without SMTP settings.
 3. *How do share links stay safe?* 192 random bits can't be guessed or enumerated, the page is
    read-only (no stop, no re-share, no polling of private APIs), it's `noindex`, and revoking
    nulls the token so the old URL 404s immediately.
+
+---
+
+## Benchmark (`apps/worker/src/worker/benchmark.py`, `main.py: bench`, `apps/web/app/benchmark`)
+
+**What:** `npm run bench` runs the agent N times (default 3) on the buggy shop and once on the
+clean shop, matches every reported bug to `apps/demo/bugs.json`, and prints and stores recall,
+precision, false alarms, average cost and duration, provider, model and git commit. The
+benchmark page shows the latest score per provider, trend charts across versions, a per-bug
+found/missed table, and every match decision.
+
+**How:** runs go through the normal queue (same code path as a real run). For each surviving
+report, the planted bugs on the same page are the candidates (all of them if none match the
+page); the cheap model answers `{"match": id|null, "reason": ...}`. Recall = distinct planted
+bugs found per run, averaged; precision = matched reports / all reports (a duplicate of a real
+bug counts as real); false alarms = reports per clean run. `--rescore` re-matches the latest
+result's runs without running the agent again.
+
+**Why:** a testing tool without a measurement is a demo. Saving each match decision makes the
+score auditable: the first real benchmark said 0% recall, and the saved decisions showed in
+seconds that the model had answered `"match": "2"` (a string) while its reason said "matches
+bug 2". A test now pins that.
+
+**Weak spots:** 12 bugs is a small sample (one bug moves recall by 8 points). The matcher is a
+model too, so it can be wrong; the decision log is the safeguard. The bugs are known to whoever
+tunes the prompt, so there's a risk of overfitting; held-out bugs would be fairer. Cost of the
+matching calls isn't included in cost per run.
+
+**Interview Q&A**
+1. *How do you measure precision for an agent like this?* Every report the user would see is
+   matched to the known bug list; reports that match nothing are false positives. The clean
+   build gives a second, stricter number: anything reported there is wrong by definition.
+2. *Why use a model to match reports to known bugs?* Reports are free text ("total wrong for 2
+   mugs" vs "cart total ignores quantity"); exact matching would undercount. The page narrows
+   the candidates, and every judgement is stored so a human can audit it.
+3. *What did the benchmark tell you?* With a local 8B model, recall 33% with 100% precision:
+   all from the deterministic checks. The agent explores flows but rarely judges what it
+   sees, which is exactly the question a Claude run answers next.

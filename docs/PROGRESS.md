@@ -13,7 +13,7 @@ done (local model) / blocked.
 | M6 | Web app core: landing, dashboard, run form, live run, report, history | done | `npm run test:e2e`: 3/3 passed. Main flow (dashboard → start run on the demo shop → live page → report with bug cards, export buttons, Download JSON) in 11.7 s with the worker on FakeClient; plus form validation and the interactive-mode guard. Pages checked at 1280 px and 375 px (no sideways scroll), light and dark, no console errors. |
 | M7 | Benchmark script + benchmark page | done | `npm run bench` (ollama, qwen3-vl:8b-instruct, 3 buggy + 1 clean run): recall 33% (bugs 1–4 found 3/3, bugs 5–12 0/3), precision 100%, false alarms 0.0, cost $0.000, 335 s/run. First run showed 0% because the matcher rejected `"match": "2"` (string); fixed test-first, rescored with `bench --rescore`. Benchmark page shows tiles, charts (validated palette), per-bug table, match log. |
 | M8 | B2B foundations: auth, workspaces, domain verification, quota, audit, share links | done | 11 database tests pass (`lib/b2b.db.test.ts`): workspace isolation, domain verification, quota, share links, visitor limits. Sign-in as demo user → settings → add domain → sign out checked in a real browser. |
-| M9 | Polish: README, walkthrough, states, 375 px | in progress | README written (benchmark table placeholder `<!-- BENCHMARK-RESULTS -->` and `docs/screenshots/report.png` still to add). Left: benchmark page overflows at 375 px (the "How reports were matched" button row, ~10 px); re-run `npm run test:e2e` after M8 (anonymous flow); DEVLOG entry; final `npm test`/`npm run lint`. |
+| M9 | Polish: README, walkthrough, states, 375 px | done | README (what it is, screenshots, Mermaid architecture, how to run, safety model, cost engineering, benchmark table, how AI tools were used); WALKTHROUGH covers all 16 components; empty/loading/error states on every page; all pages checked at 375 px (no sideways scroll) and in dark mode. `npm test` exit 0 (web 64 incl. 11 DB tests, demo 7, worker 176 + 1 live-model skip), `npm run lint` exit 0, `npm run test:e2e` 3/3. Committed and pushed. |
 
 Already done before demo v1 (branch `phase-1-checker`, merged into `demo-v1`): report models,
 URL helpers, BFS crawler, Playwright page visits, local test-site fixtures. 25 worker tests.
@@ -38,4 +38,4 @@ URL helpers, BFS crawler, Playwright page visits, local test-site fixtures. 25 w
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.
 
 ## Spend tonight
-Claude API: $0.00 (no key). Ollama: $0 (local).
+Claude API: $0.00 (no key, no Claude calls made). Ollama: $0 (local): ~12 agent runs + 2 benchmark scorings.

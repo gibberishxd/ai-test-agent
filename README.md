@@ -113,7 +113,19 @@ npm run bench        # benchmark (real model calls)
 report to `apps/demo/bugs.json` (page + a cheap-model judgement, every decision saved), and
 stores recall, precision, false alarms, cost and duration with the provider, model and commit.
 
-<!-- BENCHMARK-RESULTS -->
+Latest results (`apps/demo/bugs.json`, 3 runs on the buggy shop + 1 on the clean shop):
+
+| Provider · model | Recall | Precision | False alarms / clean run | Cost / run | Time / run | Commit |
+|---|---|---|---|---|---|---|
+| ollama · qwen3-vl:8b-instruct (local, 16 GB Mac) | 33% | 100% | 0.0 | $0.00 | 335 s | e8d3a24 |
+| claude · claude-sonnet-5-5 | not run yet: needs an API key | | | | | |
+
+Per bug, the local model's run found bugs 1–4 (JS error, 500 API, broken link,
+accessibility) in 3 of 3 runs, all through the free deterministic checks, and none of bugs 5–12,
+which need the agent to judge what it sees. The pipeline (agent → replay → dedup → matching)
+works end to end; the agent's quality depends on the model.
+
+![Benchmark page](docs/screenshots/benchmark.png)
 
 ## Project layout
 

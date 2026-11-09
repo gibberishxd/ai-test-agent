@@ -169,7 +169,7 @@ export default async function BenchmarkPage() {
       <section className="grid gap-2">
         <Collapsible>
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-fit">
+            <Button variant="ghost" className="h-auto w-fit max-w-full py-1.5 text-left whitespace-normal">
               <ChevronDown /> How reports were matched in the latest result ({matches.length})
             </Button>
           </CollapsibleTrigger>
