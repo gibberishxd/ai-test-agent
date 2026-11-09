@@ -1,25 +1,32 @@
-import { cartTotal, type CartItem } from "./cart";
-
-// Placeholder shop. Phase 2 grows this into product list, cart, checkout, login and profile.
-const items: CartItem[] = [
-  { name: "Coffee mug", price: 12, quantity: 2 },
-  { name: "Notebook", price: 8, quantity: 1 },
-];
+import { BrowserRouter, Route, Routes } from "react-router";
+import { Layout } from "./Layout";
+import { CartPage } from "./pages/CartPage";
+import { CheckoutPage } from "./pages/CheckoutPage";
+import { LoginPage } from "./pages/LoginPage";
+import { NotFound } from "./pages/NotFound";
+import { ProductList } from "./pages/ProductList";
+import { ProductPage } from "./pages/ProductPage";
+import { ProfilePage } from "./pages/ProfilePage";
+import { ReturnsPage } from "./pages/ReturnsPage";
+import { StoreProvider } from "./store";
 
 export function App() {
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", margin: "2rem" }}>
-      <h1>Demo Shop</h1>
-      <ul>
-        {items.map((item) => (
-          <li key={item.name}>
-            {item.name} × {item.quantity}: ${item.price * item.quantity}
-          </li>
-        ))}
-      </ul>
-      <p>
-        <strong>Total: ${cartTotal(items)}</strong>
-      </p>
-    </main>
+    <BrowserRouter>
+      <StoreProvider>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<ProductList />} />
+            <Route path="/products/:id" element={<ProductPage />} />
+            <Route path="/cart" element={<CartPage />} />
+            <Route path="/checkout" element={<CheckoutPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/returns" element={<ReturnsPage />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Layout>
+      </StoreProvider>
+    </BrowserRouter>
   );
 }

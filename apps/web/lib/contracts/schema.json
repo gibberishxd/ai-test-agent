@@ -1,0 +1,609 @@
+{
+  "BugReport": {
+    "description": "One bug, as stored in the `bugs` table and shown on the report page.\n\nThe web app has a TypeScript copy of this shape; tests fail if the two drift apart.",
+    "properties": {
+      "actual": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actual"
+      },
+      "category": {
+        "title": "Category",
+        "type": "string"
+      },
+      "dismiss_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Dismiss Reason"
+      },
+      "evidence": {
+        "additionalProperties": true,
+        "title": "Evidence",
+        "type": "object"
+      },
+      "expected": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected"
+      },
+      "page_url": {
+        "title": "Page Url",
+        "type": "string"
+      },
+      "reasoning": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reasoning"
+      },
+      "repro_steps": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Repro Steps",
+        "type": "array"
+      },
+      "screenshot": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Screenshot"
+      },
+      "severity": {
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "Severity",
+        "type": "string"
+      },
+      "source": {
+        "enum": [
+          "deterministic",
+          "agent"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "status": {
+        "default": "candidate",
+        "enum": [
+          "candidate",
+          "confirmed",
+          "dismissed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "step_indexes": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Step Indexes",
+        "type": "array"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "severity",
+      "category",
+      "page_url",
+      "source"
+    ],
+    "title": "BugReport",
+    "type": "object"
+  },
+  "Report": {
+    "$defs": {
+      "A11yViolation": {
+        "description": "One axe-core rule that failed on a page.",
+        "properties": {
+          "help": {
+            "title": "Help",
+            "type": "string"
+          },
+          "help_url": {
+            "title": "Help Url",
+            "type": "string"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "enum": [
+                  "minor",
+                  "moderate",
+                  "serious",
+                  "critical"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rule_id",
+          "impact",
+          "help",
+          "help_url",
+          "targets"
+        ],
+        "title": "A11yViolation",
+        "type": "object"
+      },
+      "BrokenLink": {
+        "description": "A same-origin link whose target returned 4xx/5xx or could not be loaded.",
+        "properties": {
+          "found_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Found On",
+            "type": "array"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "status",
+          "found_on"
+        ],
+        "title": "BrokenLink",
+        "type": "object"
+      },
+      "BugReport": {
+        "description": "One bug, as stored in the `bugs` table and shown on the report page.\n\nThe web app has a TypeScript copy of this shape; tests fail if the two drift apart.",
+        "properties": {
+          "actual": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actual"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "dismiss_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Dismiss Reason"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected"
+          },
+          "page_url": {
+            "title": "Page Url",
+            "type": "string"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reasoning"
+          },
+          "repro_steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repro Steps",
+            "type": "array"
+          },
+          "screenshot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Screenshot"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "deterministic",
+              "agent"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "default": "candidate",
+            "enum": [
+              "candidate",
+              "confirmed",
+              "dismissed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "step_indexes": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Step Indexes",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "severity",
+          "category",
+          "page_url",
+          "source"
+        ],
+        "title": "BugReport",
+        "type": "object"
+      },
+      "ConsoleError": {
+        "description": "A console.error() call (\"console\") or an uncaught JavaScript exception (\"pageerror\").",
+        "properties": {
+          "kind": {
+            "enum": [
+              "console",
+              "pageerror"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "ConsoleError",
+        "type": "object"
+      },
+      "FailedRequest": {
+        "description": "A request that failed at the network level, or got an HTTP 4xx/5xx response.",
+        "properties": {
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "method",
+          "resource_type"
+        ],
+        "title": "FailedRequest",
+        "type": "object"
+      },
+      "PageResult": {
+        "description": "Everything the checker found on one visited page.",
+        "properties": {
+          "a11y_violations": {
+            "items": {
+              "$ref": "#/$defs/A11yViolation"
+            },
+            "title": "A11Y Violations",
+            "type": "array"
+          },
+          "blocked_requests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Requests",
+            "type": "array"
+          },
+          "console_errors": {
+            "items": {
+              "$ref": "#/$defs/ConsoleError"
+            },
+            "title": "Console Errors",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "failed_requests": {
+            "items": {
+              "$ref": "#/$defs/FailedRequest"
+            },
+            "title": "Failed Requests",
+            "type": "array"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Found On"
+          },
+          "load_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load Ms"
+          },
+          "screenshot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Screenshot"
+          },
+          "soft_404": {
+            "default": false,
+            "title": "Soft 404",
+            "type": "boolean"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "status"
+        ],
+        "title": "PageResult",
+        "type": "object"
+      }
+    },
+    "description": "The full result of one checker run.",
+    "properties": {
+      "broken_links": {
+        "items": {
+          "$ref": "#/$defs/BrokenLink"
+        },
+        "title": "Broken Links",
+        "type": "array"
+      },
+      "bugs": {
+        "items": {
+          "$ref": "#/$defs/BugReport"
+        },
+        "title": "Bugs",
+        "type": "array"
+      },
+      "finished_at": {
+        "format": "date-time",
+        "title": "Finished At",
+        "type": "string"
+      },
+      "pages": {
+        "items": {
+          "$ref": "#/$defs/PageResult"
+        },
+        "title": "Pages",
+        "type": "array"
+      },
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "started_at": {
+        "format": "date-time",
+        "title": "Started At",
+        "type": "string"
+      },
+      "target": {
+        "title": "Target",
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "started_at",
+      "finished_at"
+    ],
+    "title": "Report",
+    "type": "object"
+  }
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Home</title></head>
+<body>
+  <h1>Test site</h1>
+  <a href="/about.html">About</a>
+  <a href="/about.html#team">Team (same page, different fragment)</a>
+  <a href="https://example.com/">External site (must not be crawled)</a>
+  <a href="mailto:help@example.com">Email (must not be crawled)</a>
+  <script>
+    // Like a React app: this link only exists after JavaScript runs, a moment after load.
+    setTimeout(() => {
+      const a = document.createElement("a");
+      a.href = "/products.html";
+      a.textContent = "Products";
+      document.body.append(a);
+    }, 100);
+  </script>
+</body>
+</html>

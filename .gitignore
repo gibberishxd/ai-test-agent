@@ -22,3 +22,13 @@ screenshots/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Checker output (report.json + screenshots)
+reports/
+
+# Playwright output
+test-results/
+playwright-report/
+
+# Worker screenshots (local storage)
+apps/worker/data/

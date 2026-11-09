@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Problems</title></head>
+<body>
+  <main>
+    <h1>A page with known problems</h1>
+    <img src="/missing.png" width="10" height="10">
+    <a href="/missing-page.html">A broken link</a>
+    <a href="/">Home</a>
+  </main>
+  <script>
+    console.error("boom from console");
+    fetch("/status/500");
+    setTimeout(() => { throw new Error("uncaught boom"); }, 0);
+  </script>
+</body>
+</html>

@@ -1,13 +1,18 @@
 # AI Test Agent
 
-A portfolio project: an AI agent that explores a web app like a manual tester and reports bugs,
-measured against a demo app with planted bugs.
+**Source of truth: [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md).** Read it first. Progress is in
+`docs/PROGRESS.md`, decisions in `docs/DECISIONS.md`, a study guide per component in
+`docs/WALKTHROUGH.md`. `docs/PLAN.md` is the earlier roadmap, superseded by the brief.
+
+A B2B web product: a team pastes their web app's URL, an AI agent explores it like a manual QA
+tester and reports bugs with evidence. It measures its own accuracy against a demo shop with
+planted bugs.
 
 ## Layout
-- `apps/web` — Next.js (App Router, TypeScript) dashboard + API. Talks to the worker only through Postgres.
-- `apps/worker` — Python (uv, Playwright, pytest, ruff). The agent: deterministic checks, LLM agent loop, replay verification.
-- `apps/demo` — Vite + React demo shop: the target app. Planted bugs live here, listed in `bugs.json` (Phase 2).
-- `docker-compose.yml` — local Postgres.
+- `apps/web` — Next.js (App Router, TypeScript, Tailwind, shadcn/ui) dashboard + API. Prisma owns the DB schema.
+- `apps/worker` — Python (uv, Playwright, pytest, ruff, Pydantic, SQLAlchemy). Deterministic checks, agent loop, replay.
+- `apps/demo` — Vite + React demo shop with planted bugs (5173) and a clean build (5174); bugs listed in `bugs.json`.
+- `docker-compose.yml` — local Postgres, the only link between web and worker.
 
 ## Commands (from the repo root)
 - `npm run setup` — install everything (Node packages, Python env, Chromium for Playwright)
@@ -25,5 +30,24 @@ measured against a demo app with planted bugs.
 - Never commit secrets. Config comes from `.env` (see `.env.example`).
 - After each session, suggest 2–3 lines for `DEVLOG.md`.
 
+## Overnight run
+When the owner starts an unattended overnight run, the PART B rules in `docs/PRODUCT_BRIEF.md`
+apply and override "wait for a go-ahead" and "the AI core is the owner's to write", for that run
+only. In short:
+- Don't ask or wait. Make the reasonable choice and record it in `docs/DECISIONS.md`
+  (decision, alternatives, why).
+- Work strictly in milestone order (M1–M9). After each milestone: run its acceptance check, show
+  the output, update `docs/PROGRESS.md`, commit, push to `demo-v1`. Never push to main, never
+  force-push, never rewrite history.
+- Blocked on the owner → write it under "Needs me" in `docs/PROGRESS.md`, then continue with what
+  can be done.
+- Stay inside this repo: no deploys, no paid sign-ups, no shell config or global settings changes.
+- Unit tests always use FakeClient. Real model calls only for acceptance checks and the benchmark.
+  Keep "Spend tonight" current; at $10 of Claude spend, stop real Claude calls.
+- Keep `docs/WALKTHROUGH.md` current: per component, what/how/why, weak spots, 3 interview Q&As.
+- End the night with a `DEVLOG.md` entry.
+
 ## Current phase
-Phase 0 — repo setup. Next: Phase 1, the deterministic checker in `apps/worker`.
+Demo v1 (branch `demo-v1`): milestones M1–M9 done (M4/M5 measured with a local model only).
+Next: re-run M4/M5 and the benchmark with Claude (see "Needs me" in `docs/PROGRESS.md`), then
+review and merge `demo-v1` into `main`.
