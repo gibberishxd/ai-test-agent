@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: agent
       POSTGRES_DB: agent
     ports:
-      - "5432:5432"
+      # host:container. Override the host side in .env if 5432 is taken (e.g. a local Postgres).
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
