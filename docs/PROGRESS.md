@@ -19,13 +19,20 @@ Already done before demo v1 (branch `phase-1-checker`, merged into `demo-v1`): r
 URL helpers, BFS crawler, Playwright page visits, local test-site fixtures. 25 worker tests.
 
 ## Needs me
-1. **Log in to GitHub so pushes work.** Run `gh auth login` (GitHub.com → HTTPS → log in with a
-   browser), make sure the `workflow` scope is included, then `gh auth setup-git`. Then, from
-   the repo: `git push -u origin demo-v1`. Until then, all commits are local only.
-2. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`
+1. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`
    and set `LLM_PROVIDER=claude`. Tonight runs on Ollama (`qwen3-vl:8b`, local, free).
-3. **(Optional) The `alias: ... not found` errors in `~/.bash_profile`.** Not touched: the
+2. **(Optional) The `alias: ... not found` errors in `~/.bash_profile`.** Not touched: the
    overnight rules forbid shell-config changes. Ask me to show the broken lines.
+3. **Re-run the model-quality checks with Claude** (tonight only had a local 8B model). With
+   `ANTHROPIC_API_KEY` in `.env` and `LLM_PROVIDER=claude`, `npm run dev` running:
+   - M4: `cd apps/worker && LIVE_MODEL=1 uv run pytest tests/test_live_model.py -s` (prompt
+     injection), then queue an interactive run on http://localhost:5173 from the dashboard (or
+     `npm run bench`, M7) and check that ≥ 4 of bugs 5–12 are reported. Expected cost: under
+     $1 per run (budget-capped).
+   - M5: compare false alarms on the clean shop (http://localhost:5174) before/after replay.
+   - The Claude client has unit tests with a stand-in SDK but has never called the live API:
+     the first real run is also the test of `ClaudeClient` (prompt caching:
+     `cache_read_input_tokens` should be > 0 from the second step on).
 4. **(Optional) Shell setup left over from the Mac setup:** add
    `eval "$(fnm env --use-on-cd --shell zsh)"` to `~/.zshrc` (otherwise new terminals use
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.

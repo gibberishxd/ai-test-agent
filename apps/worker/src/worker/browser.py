@@ -55,7 +55,7 @@ def visit_page(
     page = context.new_page()
     console: list[ConsoleError] = []
     failed: list[FailedRequest] = []
-    _listen(page, console, failed)
+    listen(page, console, failed)
     try:
         started = time.monotonic()
         try:
@@ -65,7 +65,7 @@ def visit_page(
             return PageResult(url=url, status=None, error=_first_line(error)), []
         load_ms = int((time.monotonic() - started) * 1000)
 
-        _wait_until_quiet(page)
+        wait_until_quiet(page)
         result = PageResult(
             url=url,
             status=response.status if response else None,
@@ -84,7 +84,7 @@ def visit_page(
         page.close()
 
 
-def _listen(page: Page, console: list[ConsoleError], failed: list[FailedRequest]) -> None:
+def listen(page: Page, console: list[ConsoleError], failed: list[FailedRequest]) -> None:
     def on_console(message: ConsoleMessage) -> None:
         if message.type != "error" or message.text.startswith("Failed to load resource"):
             return  # Chrome's echo of a failed request: already captured as a FailedRequest
@@ -148,14 +148,14 @@ def run_axe(page: Page) -> list[A11yViolation]:
     return [A11yViolation(**v) for v in violations]
 
 
-def _wait_until_quiet(page: Page) -> None:
+def wait_until_quiet(page: Page, timeout_ms: int = NETWORK_IDLE_TIMEOUT_MS) -> None:
     """Give JavaScript apps time to render (React adds links after the "load" event).
 
     "networkidle" means no requests for 500 ms. Some pages never go quiet (polling, live
     updates), so a timeout here is expected and not an error: we carry on with what rendered.
     """
     try:
-        page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
     except PlaywrightTimeoutError:
         pass
 

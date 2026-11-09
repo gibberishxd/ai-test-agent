@@ -319,3 +319,82 @@ reviews the first N pages rather than choosing the most interesting ones.
    Model findings can be wrong; they wait for replay verification.
 3. *What does the storage interface buy you?* Moving screenshots to S3 or R2 later is one new
    class; nothing that reads or writes screenshots changes.
+
+---
+
+## Agent loop (`apps/worker/src/worker/agent/`)
+
+**What:** interactive mode. Each step: observe the page → the model calls exactly one tool →
+the worker checks it against the safety rules → runs it → logs it. Ends on `finish`, a budget
+(steps, time, cost), loop detection (same action 3× in a row) or the Stop button.
+
+**How:**
+- `observe.py` tags visible interactive elements with `data-agent-id`, lists them as
+  `[id] role "name" value/state`, adds new console/network events, the last 12 steps, bugs
+  already reported, and the page text inside `<page_content>` (untrusted). A screenshot is
+  attached only on a page's first visit, after the URL changes, or when the model asks.
+- `tools.py`: click, type, select, navigate, go_back, scroll, take_screenshot, report_bug,
+  finish. Every tool has a `reasoning` argument (shown in the timeline).
+- `policy.py`: the deny list (pay, purchase, delete, unsubscribe, change password/email, send,
+  transfer; buy outside the demo), card numbers only on the demo shop, and `Budget`.
+- `loop.py`: `AgentRun` ties it together; callbacks save steps and bugs to the database live.
+- `prompt.py`: a fixed system prompt (cacheable) with the testing approach, reporting rules,
+  severity rubric and the untrusted-content rule.
+
+**Why:** the model decides, the worker enforces. Safety and budgets live in code, so a
+confused or manipulated model can't skip them. One request per step with a stable prefix
+keeps cost per step flat and cacheable.
+
+**Weak spots:** the accessible-name logic is an approximation of the browser's real algorithm.
+The memory is only the last 12 steps. Navigate does a full reload, which loses in-memory state
+(the prompt steers the model to click instead). A small local model often clicks around
+without reporting; quality depends heavily on the model.
+
+**Interview Q&A**
+1. *How do you stop the agent from doing something destructive?* Every action is checked by
+   the worker before it runs: mode rules, a deny list on the element's text, link and form
+   action, card numbers only on the demo shop, and navigation only on the target's origin. A
+   blocked action is logged and shown to the model, which picks something else.
+2. *How do you defend against prompt injection?* The system prompt says page content is data,
+   page text is fenced in a `<page_content>` block (and a fake closing tag in the page is
+   neutralised), and the tools can't reach anything outside the browser. Even a fully
+   "convinced" model can only click around the target site within budget.
+3. *Why give the model numbered elements instead of HTML?* It's 10–50× fewer tokens, so it's
+   cheaper and faster, and the model can only target elements that exist; the worker keeps the
+   precise locator.
+
+---
+
+## Replay verification and dedup (`apps/worker/src/worker/verify.py`, `execute.py: verify_and_dedupe`)
+
+**What:** after a run, every candidate bug (anything the model reported) is replayed in a fresh
+browser context and either confirmed or dismissed with a reason. Then the cheap model merges
+duplicates. Deterministic findings are confirmed without replay.
+
+**How:** each agent step stores the role and name of the element it acted on. Replay opens the
+start URL in a new context (no cookies, no state) and repeats the steps with
+`get_by_role(role, name)` (falling back to exact text). The final screenshot and page text go to
+the model with the bug's title, expected and actual: it must answer
+`{"reproduced": true|false, "reason": ...}`, and anything unclear counts as false. If a step
+can't be repeated, the bug is dismissed without a model call. Dedup sends a numbered list of
+the surviving bugs to CHEAP_MODEL; each duplicate is dismissed with "duplicate of: …" and
+linked by `duplicate_of_id`, always keeping the deterministic report when one is involved.
+
+**Why:** models report things that aren't there. A second, independent look at a clean
+re-creation of the steps filters many of them out, and a strict "unclear = no" rule trades a
+little recall for much better precision, which is what a team acting on the report needs.
+
+**Weak spots:** replay depends on role/name being stable; dynamic names ("Cart (2)") break it.
+In-memory state reached via a full-page navigate can't be reproduced. The verifier is the same
+model family as the reporter, so they can share blind spots. Bugs that need timing (double
+clicks) are replayed as single clicks.
+
+**Interview Q&A**
+1. *Why replay in a fresh context instead of re-asking the model about the original screenshot?*
+   A fresh context proves the bug comes from the steps, not from leftover state, and gives the
+   verifier evidence it hasn't seen yet instead of asking it to agree with itself.
+2. *Why does an unclear verdict count as "not reproduced"?* False alarms cost a team's trust and
+   time. Requiring a clear yes makes the report something people act on; dismissed bugs stay
+   visible with their reason, so nothing is silently lost.
+3. *Why use the cheap model for dedup?* It's a comparison of short texts, not a judgement about
+   the app, so a small model does it well at a fraction of the price.

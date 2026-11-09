@@ -4,11 +4,11 @@ Passive means look-only (rule 6.2): the browser loads pages and follows links, a
 """
 
 import itertools
-from collections.abc import Callable
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 
-from playwright.sync_api import Browser, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, sync_playwright
 
 from worker.browser import VisitOptions, visit_page
 from worker.config import Settings
@@ -18,6 +18,7 @@ from worker.report import BrokenLink, PageResult, Report
 from worker.safety.network import BlockedError, NetworkGuard, dev_allowed_local
 from worker.safety.proxy import GuardProxy
 from worker.storage import Storage
+from worker.urls import is_same_origin
 
 VIEWPORT = {"width": 1280, "height": 800}
 
@@ -32,6 +33,28 @@ def make_guard(settings: Settings, target_url: str) -> NetworkGuard:
     return NetworkGuard(allowed_local=allowed, target_url=target_url)
 
 
+@contextmanager
+def guarded_context(
+    settings: Settings, target_url: str, browser: Browser | None = None
+) -> Iterator[tuple[BrowserContext, NetworkGuard]]:
+    """A browser context whose traffic goes through the safety proxy (rule 6.1).
+
+    Pass `browser` to reuse one (tests); otherwise a browser is launched and closed here.
+    """
+    guard = make_guard(settings, target_url)
+    reason = guard.check(target_url)
+    if reason:
+        raise BlockedError(f"target not allowed: {reason}")
+    with GuardProxy(guard) as proxy, ExitStack() as stack:
+        if browser is None:
+            playwright = stack.enter_context(sync_playwright())
+            browser = playwright.chromium.launch()
+            stack.callback(browser.close)
+        context = browser.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
+        stack.callback(context.close)
+        yield context, guard
+
+
 def passive_scan(
     target_url: str,
     settings: Settings,
@@ -41,25 +64,14 @@ def passive_scan(
     should_stop: Callable[[], bool] | None = None,
     browser: Browser | None = None,
 ) -> Report:
-    """Crawl and check `target_url`. Pass `browser` to reuse one (tests); else one is launched."""
-    guard = make_guard(settings, target_url)
-    reason = guard.check(target_url)
-    if reason:
-        raise BlockedError(f"target not allowed: {reason}")
-
+    """Crawl and check `target_url`: look only, follow links, run every deterministic check."""
     started = datetime.now(UTC)
     counter = itertools.count(1)
 
     def save(png: bytes, url: str) -> str:
         return storage.save(f"{key_prefix}/page-{next(counter):03d}.png", png)
 
-    with GuardProxy(guard) as proxy, ExitStack() as stack:
-        if browser is None:
-            playwright = stack.enter_context(sync_playwright())
-            browser = playwright.chromium.launch()
-            stack.callback(browser.close)
-        context = browser.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
-        stack.callback(context.close)
+    with guarded_context(settings, target_url, browser) as (context, guard):
         options = VisitOptions(save_screenshot=save)
 
         def visit(url: str) -> tuple[PageResult, list[str]]:
@@ -84,6 +96,13 @@ def passive_scan(
         pages=pages,
         broken_links=_broken_links(pages),
         bugs=findings_from_pages(pages),
+    )
+
+
+def is_demo_target(settings: Settings, target_url: str) -> bool:
+    """Is the target one of our demo shops? (Interactive mode and the test card are OK there.)"""
+    return any(
+        is_same_origin(target_url, url) for url in (settings.demo_url, settings.clean_demo_url)
     )
 
 

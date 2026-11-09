@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     agent_model: str = "claude-sonnet-5-5"
     cheap_model: str = "claude-haiku-5-5"
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3-vl:8b"
+    ollama_model: str = "qwen3-vl:8b-instruct"
 
     # Run budgets, enforced by the worker
     max_steps: int = 40

@@ -124,3 +124,77 @@ before/after numbers from the benchmark.
 - **Alternatives:** no model in passive mode; review every page.
 - **Why:** the brief asks for it, and some bugs (a "$NaN" price) are invisible to deterministic
   checks. Capping pages keeps cost predictable; replay (M5) decides whether candidates are real.
+
+## D16. Local model: qwen3-vl:8b-instruct, not the default qwen3-vl:8b (M4)
+- **Decision:** use the instruct (non-thinking) variant; removed the thinking one.
+- **Alternatives:** `qwen3-vl:8b` (the default tag, a thinking model); `qwen3-vl:4b-instruct`.
+- **Why:** measured on this Mac (16 GB, ~10 tokens/s): the default tag ignores `think: false`
+  and wrote ~1,500 hidden reasoning tokens per step (3 minutes per step). The instruct variant
+  answers the same agent observation in 36 tokens, ~14 s per step. The 4B model would be faster
+  but noticeably weaker at tool use; 8B is the best fit for 16 GB.
+
+## D17. Agent observations: numbered elements tagged in the DOM (M4)
+- **Decision:** a script finds visible interactive elements, numbers them, and tags each with a
+  `data-agent-id` attribute. The model sees `[7] button "Apply"`; the worker acts on
+  `[data-agent-id="7"]`. Page text goes in a `<page_content>` block marked untrusted.
+- **Alternatives:** raw HTML (huge and noisy); Playwright's ARIA snapshot (YAML, no stable ids
+  to act on); coordinates from the screenshot (needs vision every step).
+- **Why:** small observations (cheap, fast on a local model), and the model can only point at
+  elements that exist. The attribute is a tiny DOM change; a site that reacts to unknown
+  attributes is very unlikely.
+
+## D18. Interactive runs start with the deterministic scan (M4)
+- **Decision:** an interactive run first does the free crawl + checks (no screenshot review),
+  then the agent loop with the remaining time and cost budget. Console errors and failed
+  requests seen during the agent's session become deterministic findings too.
+- **Alternatives:** agent loop only.
+- **Why:** "deterministic checks first" (brief §8): they're free and catch the obvious bugs, so the
+  model's budget goes to what only a model can find (wrong totals, validation, flows).
+
+## D19. Interactive mode limited to the demo shop until domain verification exists (M4)
+- **Decision:** interactive runs on anything other than the demo shops fail with a clear error.
+  M8 adds verified domains.
+- **Why:** rule: interactive mode only on verified domains. Refusing is the safe default.
+
+## D20. Agent feedback for small models: "nothing changed", a loop warning, login guidance (M4)
+- **Before (M4 run 1, qwen3-vl:8b-instruct, buggy shop):** 20 steps (11 page visits + 9 agent
+  steps), 154 s, $0. The agent logged in with the generated test email instead of the demo
+  account shown on the login page, reported "Login with valid credentials fails" (a false alarm),
+  then clicked "Log in" until loop detection stopped the run. Bugs 5–12 found: 0 of 8.
+- **Changes:** (1) the task now says to log in with an account the site offers (demo
+  credentials) and that a made-up account failing is not a bug; (2) a click that leaves the page
+  unchanged returns "ok, but nothing on the page changed" instead of "ok"; (3) after two
+  identical actions the observation warns that a third ends the run.
+- **Alternatives:** a bigger local model (doesn't fit well in 16 GB); a scripted plan per site
+  (overfits the demo shop).
+- **Why:** a small model can't tell "ok" from "it worked". These are generic, honest signals
+  that any site benefits from, not hints about the planted bugs.
+
+## D21. Replay every agent action up to the report; show the model what changed (M4/M5)
+- **Before (M4 run 2):** the agent walked product → cart → checkout and filed 2 vague "cart
+  status" reports (the header shows "Cart (0)" after an order, which is correct). Replay
+  dismissed both, but because it couldn't repeat the steps: it replayed only the step numbers
+  the model listed, the model had left out "Add to cart", so "Cart (1)" never existed.
+- **Changes:** (1) replay repeats every non-blocked agent action from the start of the agent
+  loop up to the step where the bug was reported (stored in the bug's evidence); (2) an
+  action's result says what appeared on the page ("ok; new on the page: Cart (2) | Added to
+  your cart.").
+- **Alternatives:** trust the model's step list (unreliable); replay from a stored browser state
+  snapshot (doesn't prove the steps reproduce the bug).
+- **Why:** replay must reach the same state as the original session, and the model's own list
+  isn't reliable enough for that. Showing what changed gives a small model the signal a human
+  tester gets by looking at the screen.
+
+## D22. Worker Python environment rebuilt on native arm64 (Mac setup)
+- **Problem:** `uv` on this Mac is the Intel build (it runs under Rosetta), so it picked the
+  Intel Python 3.12 and installed Intel builds of compiled packages (pydantic-core, psycopg…).
+  Under `uv run` everything stayed Intel and worked; a native arm64 shell that started
+  `.venv/bin/python` directly got "incompatible architecture" errors (and `uv run` from a
+  background shell failed to spawn the worker).
+- **Decision:** installed uv's managed `cpython-3.12-macos-aarch64` and recreated `.venv` with
+  it (`uv sync --python cpython-3.12-macos-aarch64-none`). `.python-version` stays `3.12`, so
+  Windows and CI are unchanged.
+- **Alternatives:** keep everything under Rosetta (slower, and fragile as shown); pin the full
+  interpreter name in `.python-version` (breaks other platforms).
+- **Why:** native is faster and works the same from every shell. Same lesson as Node (D2): on
+  an Apple Silicon Mac with an Intel Homebrew, check the architecture of every toolchain.
