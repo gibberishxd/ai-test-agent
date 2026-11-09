@@ -398,3 +398,45 @@ clicks) are replayed as single clicks.
    visible with their reason, so nothing is silently lost.
 3. *Why use the cheap model for dedup?* It's a comparison of short texts, not a judgement about
    the app, so a small model does it well at a fraction of the price.
+
+---
+
+## Web app (`apps/web`)
+
+**What:** Next.js 16 (App Router) + Tailwind 4 + shadcn/ui. Pages: landing (`/`), dashboard
+with the run form and recent runs (`/dashboard`), run history (`/runs`), live run + report
+(`/runs/[id]`). API routes: create/list runs, run detail (polled), stop, JSON download,
+screenshots (`/api/files/...`).
+
+**How:**
+- `lib/runs.ts` is the only place that reads/writes runs; every function takes a
+  `workspaceId` and filters by it. `lib/workspace.ts` decides the workspace for a request.
+- `lib/targets.ts` validates the form (http(s) only, interactive only on the demo shop or a
+  verified domain). The worker enforces the same rules again.
+- `components/run-view.tsx` is a client component: it gets the run from the server on first
+  render, then polls every 1.5 s until the status is final. The timeline shows each step with its
+  reasoning, thumbnail and any blocked action; the report shows bug cards sorted by severity
+  with copy-as-GitHub-issue / Jira buttons (`lib/export.ts`, pure functions with tests).
+- `/api/files/[...key]` serves screenshots only if the key's run belongs to the workspace, and
+  refuses keys that would escape the data folder.
+- `lib/contracts/types.ts` is the TypeScript copy of the worker's bug shape; a Vitest test
+  compares it with `schema.json` (exported from the Pydantic models).
+
+**Why:** server components fetch data close to the database; only interactive pieces (form,
+polling, copy buttons) are client components. Validation lives in small pure functions so it's
+unit-tested; the e2e test proves the whole loop through the real worker.
+
+**Weak spots:** polling every 1.5 s per open tab is fine for a demo, wasteful at scale (SSE +
+`LISTEN/NOTIFY` would fix it). A missing run renders the not-found page with HTTP 200 (Next
+streams the loading state before `notFound()` runs).
+
+**Interview Q&A**
+1. *How does the browser see live progress if the worker never talks to the web app?* The
+   worker commits a step row per action; the run page polls an API route that reads those rows.
+   Postgres is the shared state.
+2. *Why validate the URL in the web app if the worker checks it too?* Different jobs: the web
+   app gives a friendly message before anything is queued; the worker is the security
+   boundary and must never trust its input.
+3. *How do you stop one customer seeing another's screenshots?* Screenshot keys start with the
+   run id; the file route looks the run up scoped to the caller's workspace before reading the
+   file, and normalises the path so `../` can't escape the folder.

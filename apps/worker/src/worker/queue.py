@@ -7,7 +7,7 @@ SELECT ... FOR UPDATE SKIP LOCKED:
 So two workers polling at the same moment always get different runs, and none blocks.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,6 +38,22 @@ def transition(run: Run, new_status: RunStatus, error: str | None = None) -> Non
         run.finished_at = now
     if error is not None:
         run.error = error
+
+
+def recover_stale_runs(session: Session, older_than_s: float) -> int:
+    """Fail runs stuck in "running" for longer than any run may take.
+
+    If a worker process dies mid-run (crash, deploy, laptop closed), its run would stay
+    "running" forever. Called when a worker starts; returns how many runs were recovered.
+    """
+    cutoff = datetime.now(UTC) - timedelta(seconds=older_than_s)
+    stale = session.scalars(
+        select(Run).where(Run.status == RunStatus.RUNNING, Run.started_at < cutoff)
+    ).all()
+    for run in stale:
+        transition(run, RunStatus.FAILED, error="the worker stopped before the run finished")
+    session.commit()
+    return len(stale)
 
 
 def claim_next_run(session: Session, worker_id: str) -> Run | None:

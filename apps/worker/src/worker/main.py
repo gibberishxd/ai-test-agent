@@ -15,6 +15,7 @@ from worker.config import REPO_ROOT, get_settings
 from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
 from worker.llm import make_client
+from worker.queue import recover_stale_runs
 from worker.report import write_report
 from worker.runner import process_next
 from worker.safety.secrets import RedactingFilter
@@ -22,6 +23,7 @@ from worker.scan import passive_scan
 from worker.storage import LocalStorage
 
 POLL_INTERVAL_S = 1.0
+STALE_GRACE_S = 300
 
 log = logging.getLogger("worker")
 
@@ -56,6 +58,11 @@ def main(argv: list[str] | None = None) -> None:
     llm = make_client(settings)
     sessions = make_session_factory(make_engine(settings))
     execute = make_execute(settings, LocalStorage(settings.data_path()))
+    with sessions() as session:
+        # A run can't legitimately take longer than its time budget plus a grace period.
+        recovered = recover_stale_runs(session, settings.max_run_seconds + STALE_GRACE_S)
+    if recovered:
+        log.warning("marked %d stale run(s) as failed", recovered)
     log.info("ready. provider=%s model=%s", llm.provider, llm.agent_model)
 
     if args.once:

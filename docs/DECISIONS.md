@@ -198,3 +198,36 @@ before/after numbers from the benchmark.
   interpreter name in `.python-version` (breaks other platforms).
 - **Why:** native is faster and works the same from every shell. Same lesson as Node (D2): on
   an Apple Silicon Mac with an Intel Homebrew, check the architecture of every toolchain.
+
+## M4/M5 measurements with the local model (2026-11-09, qwen3-vl:8b-instruct, $0)
+
+| Run | Shop | Steps | Agent reports | After replay | Planted bugs 5–12 found |
+|---|---|---|---|---|---|
+| M4 run 1 (before D20) | buggy | 20 | 1 (login, false) | (no replay yet) | 0/8 |
+| M4 run 2 (after D20) | buggy | 30 | 2 ("cart status", false) | 0 (both dismissed) | 0/8 |
+| M4 run 3 (after D21) | buggy | 25 | 0 | 0 | 0/8 |
+| M5 interactive | clean | 35 | 0 | 0 | n/a |
+| M5 passive + screenshot review | clean | 17 | 0 | 0 | n/a |
+
+Conclusion: the pipeline works end to end (scan → agent → replay → dedup, steps and cost
+recorded), and the deterministic part finds bugs 1–4 every time. The local 8B model explores
+flows but rarely judges what it sees; it reached bug 5's state without reporting it. Claude
+numbers are the real test (Needs me).
+
+## D23. Web app stack details (M6)
+- **Decision:** shadcn/ui on Radix with the "Nova" preset (Lucide icons, Geist font), one indigo
+  accent, `next-themes` for light/dark (system default + toggle); the live run page polls
+  `/api/runs/[id]` every 1.5 s and stops polling at a final status; database pages call
+  `await connection()` so they render per request; Prisma 7 with the `pg` driver adapter.
+- **Alternatives:** Server-Sent Events or WebSockets for live updates; Next's Cache Components.
+- **Why:** polling is what the brief allows, works through any proxy, and is one `setInterval`
+  to explain. The worker writes to Postgres, not to the web app, so a push channel would need
+  `LISTEN/NOTIFY` plumbing for little gain at a 1.5 s cadence.
+- **Note:** M6 work started while the last M4/M5 measurement runs (local model) were still
+  running in the background; those milestones' outcomes didn't depend on M6 code.
+
+## D24. Stale run recovery (M6)
+- **Decision:** when a worker starts, runs that have been "running" for longer than the time
+  budget plus 5 minutes are marked failed ("the worker stopped before the run finished").
+- **Why:** the e2e test exposed it: Playwright stopped its worker mid-run and that run stayed
+  "running" forever. A heartbeat column would detect it sooner; this is the simple version.

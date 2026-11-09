@@ -89,3 +89,23 @@ def test_stop_requested_ends_as_stopped(sessions, workspace):
 
 def test_process_next_returns_false_when_queue_is_empty(sessions):
     assert process_next(sessions, FakeClient()) is False
+
+
+def test_stale_running_runs_are_failed(sessions, workspace):
+    from datetime import UTC, datetime, timedelta
+
+    from worker.queue import recover_stale_runs
+
+    stale = add_run(sessions, workspace)
+    fresh = add_run(sessions, workspace)
+    with sessions() as session:
+        for run_id, age in ((stale.id, 3600), (fresh.id, 10)):
+            run = session.get(Run, run_id)
+            run.status = RunStatus.RUNNING
+            run.started_at = datetime.now(UTC) - timedelta(seconds=age)
+        session.commit()
+        assert recover_stale_runs(session, older_than_s=600) == 1
+
+    assert load(sessions, stale.id).status == RunStatus.FAILED
+    assert "worker stopped" in load(sessions, stale.id).error
+    assert load(sessions, fresh.id).status == RunStatus.RUNNING
