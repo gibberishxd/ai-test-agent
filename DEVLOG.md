@@ -30,3 +30,13 @@ Benchmark scores go here too, once Phase 2 exists.
 - First bug found by the model itself: bug 9 (Wool Socks "$NaN") in 3/3 runs.
 - Precision showed 90% only because the matcher filters by page: the cart NaN (bug 9's symptom
   on `/cart`) counted as unmatched. Next: decide how matching handles cross-page symptoms.
+
+## 2026-11-10 (run 2, stopped early at the usage limit)
+- Gemma 4 12B with a 1200 s limit used all 40 steps and still found only bug 9: recall 42%,
+  precision 100%, 0 false alarms, 1101 s/run. The time limit wasn't the bottleneck; the model is.
+- Fixed from the review, test first: off-site clicks, loop detection that punished real
+  testing, a pinned benchmark judge, DEV_MODE off by default, a rule-table deny list, an
+  unspoofable visitor rate limit with an atomic quota, share-link screenshots, a pinned
+  domain-verification fetch.
+- Next: G2.1–G2.4 (viewport/double-click/reload/note tools, richer observation, QA charter,
+  robust replay), then G3–G8 of docs/RUN_PLAN_2.md.

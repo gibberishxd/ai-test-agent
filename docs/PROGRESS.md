@@ -21,15 +21,38 @@ URL helpers, BFS crawler, Playwright page visits, local test-site fixtures. 25 w
 ## Local model comparison (2026-11-10, after demo v1)
 `npm run bench` with `OLLAMA_MODEL` overridden, 3 buggy + 1 clean interactive runs each.
 
-| Model | Recall | Precision | False alarms | Avg run | Bugs found |
-|---|---|---|---|---|---|
-| qwen3-vl:8b-instruct (commit e8d3a24) | 33% | 100% | 0.0 | 335 s | 1–4 (deterministic) |
-| gemma4:12b (commit e78a2ca) | 42% | 90% | 0.0 | 522 s | 1–4 + **9** (agent, 3/3 runs) |
+| Model | Recall | Precision | False alarms | Avg run | Agent steps used | Bugs found |
+|---|---|---|---|---|---|---|
+| qwen3-vl:8b-instruct (commit e8d3a24) | 33% | 100% | 0.0 | 335 s | not recorded (480 s limit) | 1–4 (deterministic) |
+| gemma4:12b (commit e78a2ca) | 42% | 90% (100% after the matcher fix, D29 era rescore) | 0.0 | 522 s | about 24 of 40 (480 s limit ended every run) | 1–4 + **9** (agent, 3/3 runs) |
+| gemma4:12b, `MAX_RUN_SECONDS=1200` (code of commit 18e1975) | 42% | 100% | 0.0 | 1101 s | 40, 40, 40 of 40 on the buggy shop; 38 on the clean shop | 1–4 + **9** (agent, 3/3 runs) |
+
+The third row answers "was the time limit the problem?": no. With all 40 steps the agent
+still found only bug 9. The result row in the database is labelled commit c6fb2e3 (HEAD when
+scoring ran), but the process had loaded the code of 18e1975, before the loop-detector,
+off-site and deny-list changes. The judge was the model under test (gemma4:12b).
 
 Bug 9 ($NaN price) is the first bug found by the model rather than the deterministic checks.
 The 2 unmatched reports were "Cart price and total displayed as NaN" on `/cart`, which is bug 9
 seen on another page; the matcher filters candidates by page, so bug 9 (listed on `/`) wasn't
 considered. Real false alarms: 0. Matcher change is open (owner's call).
+
+## Run 2 (branch `agent-v2`, plan in `docs/RUN_PLAN_2.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| G0 Finish what's running | partly done | Benchmark finished and recorded above. Transcripts are git-ignored. **Not done:** no normal worker was started, so the two runs queued from the dashboard (99e6cd3c, 92cc0e45) are still queued. |
+| G1 Safety and correctness fixes (1–6) | done | Worker `uv run pytest`: 241 passed, 1 skipped. Web `npm test -w apps/web`: 79 passed. Web typecheck and worker ruff clean. Decisions D32–D37. |
+| G2 Findable bugs | in progress | G2.5 done (`_step` split, duplicate visit code removed; 241 worker tests pass). G2.1–G2.4 not started. |
+| G3 Honest benchmark | not started | |
+| G4 Live browser pane | not started | |
+| G5 Any model | not started | |
+| G6 Measure | not started | |
+| G7 Project hygiene | not started | |
+| G8 Wrap-up | not started | |
+
+The run stopped early because the Claude usage limit was reached. Root `npm test`,
+`npm run lint` and CI on `agent-v2` were not checked.
 
 ## Needs me
 1. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`
