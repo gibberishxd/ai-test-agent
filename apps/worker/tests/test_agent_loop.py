@@ -317,7 +317,7 @@ def test_notes_are_capped(agent):
     notes = [call("note", text=f"note {i}") for i in range(21)]
     run, llm, _ = agent(notes, target="/counter.html", max_steps=30)
     result = run.run()
-    assert result.steps[19].result == "noted"
+    assert result.steps[19].result.startswith("noted")
     assert result.steps[20].result.startswith("error: the notepad is full")
     assert len(run.memory.notes) == 20
 
@@ -422,3 +422,11 @@ def test_the_observation_lists_charter_techniques_not_tried_yet(agent):
     first, second = (c["observation"] for c in llm.calls if c["method"] == "decide")
     assert "NOT TRIED YET" in first and "double_click" in first.split("NOT TRIED YET")[1]
     assert "double_click" not in second.split("NOT TRIED YET")[1]
+
+
+def test_a_note_reminds_the_model_that_notes_are_not_reports(agent):
+    # Run 3 traces: in 5 gemma4:12b runs the model noted "Wool Socks price is NaN" and never
+    # reported it. The note's result is what the model reads next, so the reminder goes there.
+    run, _, _ = agent([call("note", text="price shows NaN"), call("finish", summary="")])
+    result = run.run().steps[0].result
+    assert result.startswith("noted") and "report_bug" in result

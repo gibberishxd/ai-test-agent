@@ -354,7 +354,11 @@ class AgentRun:
         if len(self.memory.notes) >= MAX_NOTES:
             return f"error: the notepad is full ({MAX_NOTES} notes)"
         self.memory.notes.append(text)
-        return "noted"
+        # A weak model used notes for problems it then never reported (run 3, MISS_ANALYSIS).
+        return (
+            "noted (notes are only for you and are never reported; if this describes a "
+            "problem you saw, report it now with report_bug)"
+        )
 
     def _scroll_position(self) -> float:
         try:

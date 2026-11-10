@@ -677,3 +677,16 @@ numbers are the real test (Needs me).
   "unusual value" check looks only at the typed text and whether the field's name mentions
   mail. No page, product or bug of either app appears in it.
 - **Rule:** kept only if the holdout results don't drop (measured below in PROGRESS).
+
+## D60. A note's result says notes are never reported (run 3, H6)
+- **Evidence:** in 5 gemma4:12b shop runs the model wrote the note "Wool Socks price is NaN"
+  and reported it in only one of them. Run 2's line in the system prompt ("a note is never a
+  substitute for report_bug", D52) didn't change that.
+- **Decision:** the result of `note` (what the model reads on its next step) says notes are
+  only for the model and are never reported, and to report a problem now with report_bug.
+- **Alternatives:** detect problem words in notes ("NaN", "wrong", "broken") and file a bug
+  automatically (the model's note is not a checked report: no expected/actual, no steps);
+  ask the model at the end of the run to review its notes (one more call per run, and late:
+  the replay steps would be far behind).
+- **Why generic:** it is about how the tool works, not about any site. Measured together with
+  D59 in the second Gemma benchmark; the holdout decides.
