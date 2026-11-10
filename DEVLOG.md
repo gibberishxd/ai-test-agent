@@ -23,3 +23,10 @@ Benchmark scores go here too, once Phase 2 exists.
 - Benchmark (local qwen3-vl:8b, no API key): recall 33%, precision 100%, 0 false alarms, $0.
   All recall came from deterministic checks; the 8B model explores but rarely reports. Next:
   the same benchmark with Claude.
+
+## 2026-11-10
+- Benchmarked a bigger local model, gemma4:12b (Ollama, ~8 GB, fits in 16 GB): recall 42% vs
+  33% for qwen3-vl:8b, 0 false alarms on the clean shop, $0, 522 s/run.
+- First bug found by the model itself: bug 9 (Wool Socks "$NaN") in 3/3 runs.
+- Precision showed 90% only because the matcher filters by page: the cart NaN (bug 9's symptom
+  on `/cart`) counted as unmatched. Next: decide how matching handles cross-page symptoms.

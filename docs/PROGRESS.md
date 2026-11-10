@@ -18,6 +18,19 @@ done (local model) / blocked.
 Already done before demo v1 (branch `phase-1-checker`, merged into `demo-v1`): report models,
 URL helpers, BFS crawler, Playwright page visits, local test-site fixtures. 25 worker tests.
 
+## Local model comparison (2026-11-10, after demo v1)
+`npm run bench` with `OLLAMA_MODEL` overridden, 3 buggy + 1 clean interactive runs each.
+
+| Model | Recall | Precision | False alarms | Avg run | Bugs found |
+|---|---|---|---|---|---|
+| qwen3-vl:8b-instruct (commit e8d3a24) | 33% | 100% | 0.0 | 335 s | 1–4 (deterministic) |
+| gemma4:12b (commit e78a2ca) | 42% | 90% | 0.0 | 522 s | 1–4 + **9** (agent, 3/3 runs) |
+
+Bug 9 ($NaN price) is the first bug found by the model rather than the deterministic checks.
+The 2 unmatched reports were "Cart price and total displayed as NaN" on `/cart`, which is bug 9
+seen on another page; the matcher filters candidates by page, so bug 9 (listed on `/`) wasn't
+considered. Real false alarms: 0. Matcher change is open (owner's call).
+
 ## Needs me
 1. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`
    and set `LLM_PROVIDER=claude`. Tonight runs on Ollama (`qwen3-vl:8b`, local, free).
