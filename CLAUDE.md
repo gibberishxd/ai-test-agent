@@ -12,6 +12,7 @@ planted bugs.
 - `apps/web` — Next.js (App Router, TypeScript, Tailwind, shadcn/ui) dashboard + API. Prisma owns the DB schema.
 - `apps/worker` — Python (uv, Playwright, pytest, ruff, Pydantic, SQLAlchemy). Deterministic checks, agent loop, replay.
 - `apps/demo` — Vite + React demo shop with planted bugs (5173) and a clean build (5174); bugs listed in `bugs.json`.
+- `apps/demo2` — holdout app for the benchmark (5175, clean 5176): same kinds of bugs, never used to tune the agent.
 - `docker-compose.yml` — local Postgres, the only link between web and worker.
 
 ## Commands (from the repo root)

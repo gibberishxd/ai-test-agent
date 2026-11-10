@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # Targets and storage
     demo_url: str = "http://localhost:5173"
     clean_demo_url: str = "http://localhost:5174"
+    # The holdout app (apps/demo2): benchmark only, never used to tune prompts.
+    demo2_url: str = "http://localhost:5175"
+    clean_demo2_url: str = "http://localhost:5176"
+
+    def demo_urls(self) -> list[str]:
+        """Our own demo apps: the only targets where interactive tests need no verified domain."""
+        return [self.demo_url, self.clean_demo_url, self.demo2_url, self.clean_demo2_url]
+
     # Off unless DEV_MODE=true is set explicitly: a deployment that forgets the variable must
     # not let the browser reach localhost (fail safe).
     dev_mode: bool = False

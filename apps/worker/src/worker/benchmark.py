@@ -27,6 +27,8 @@ from worker.queue import FINAL
 from worker.verify import parse_json_object
 
 BUGS_JSON = REPO_ROOT / "apps" / "demo" / "bugs.json"
+# The holdout app: same kinds of bugs, different specifics. Never tune prompts against it.
+HOLDOUT_BUGS_JSON = REPO_ROOT / "apps" / "demo2" / "bugs.json"
 
 MATCH_SYSTEM = """You match bug reports from an automated tester to a list of known, planted \
 bugs. Decide which known bug (if any) the report describes. The report must describe the same \
@@ -40,6 +42,8 @@ class PlantedBug:
     page: str
     title: str
     description: str
+    # "deterministic": the free checks can find it. "agent": it needs judgement.
+    detection: str = "agent"
 
 
 @dataclass
@@ -66,11 +70,18 @@ class BenchmarkScores:
     per_bug: dict[int, dict] = field(default_factory=dict)
     decisions: list[MatchDecision] = field(default_factory=list)
     judge: str = ""  # "provider/model" that matched reports to planted bugs
+    # Recall over the bugs that need judgement only: the number to compare models by.
+    ai_recall: float = 0.0
+    holdout: "BenchmarkScores | None" = None  # the same scores on the holdout app
+    rescore_commit: str | None = None  # set by `bench --rescore`
 
 
 def load_planted(path: Path = BUGS_JSON) -> list[PlantedBug]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    return [PlantedBug(b["id"], b["page"], b["title"], b["description"]) for b in data["bugs"]]
+    return [
+        PlantedBug(b["id"], b["page"], b["title"], b["description"], b["detection"])
+        for b in data["bugs"]
+    ]
 
 
 def path_of(url: str) -> str:
@@ -159,20 +170,28 @@ def score(
     """Compute the scores from match decisions (one list per buggy run).
 
     recall: average over buggy runs of (distinct planted bugs found / planted bugs).
+    ai_recall: the same over the bugs that need judgement only (detection "agent"): the
+    deterministic checks find the others for free, whichever model runs.
     precision: matched reports / all reports, over all buggy runs (duplicates of a real bug
     count as matched, not as false alarms).
     false_alarms: average number of reports per clean run.
     """
-    total = len(planted)
-    recalls = [
-        len({d.matched for d in ds if d.matched is not None}) / total for ds in buggy.values()
-    ]
+
+    def recall_over(bugs: list[PlantedBug]) -> list[float]:
+        ids = {b.id for b in bugs}
+        if not ids:
+            return []
+        return [len({d.matched for d in ds} & ids) / len(ids) for ds in buggy.values()]
+
+    recalls = recall_over(planted)
+    ai_recalls = recall_over([b for b in planted if b.detection == "agent"])
     all_decisions = [d for ds in buggy.values() for d in ds]
     matched = sum(1 for d in all_decisions if d.matched is not None)
     per_bug = {
         b.id: {
             "title": b.title,
             "found_runs": sum(1 for ds in buggy.values() if any(d.matched == b.id for d in ds)),
+            "detection": b.detection,
         }
         for b in planted
     }
@@ -182,6 +201,7 @@ def score(
         git_commit=git_commit,
         runs_buggy=len(buggy),
         recall=sum(recalls) / len(recalls) if recalls else 0.0,
+        ai_recall=sum(ai_recalls) / len(ai_recalls) if ai_recalls else 0.0,
         precision=matched / len(all_decisions) if all_decisions else 0.0,
         false_alarms=sum(clean_reports.values()) / len(clean_reports) if clean_reports else 0.0,
         avg_cost_usd=sum(costs) / len(costs) if costs else 0.0,
@@ -246,22 +266,45 @@ def report_bugs(session: Session, run_id: str) -> list[Bug]:
 def print_scores(scores: BenchmarkScores) -> None:
     print()
     print(f"Benchmark · {scores.provider} · {scores.model} · commit {scores.git_commit}")
+    if scores.rescore_commit:
+        print(f"  rescored at    {scores.rescore_commit}")
     print(f"  judge          {scores.judge or 'not recorded'}")
-    print(f"  buggy runs     {scores.runs_buggy}")
-    print(f"  recall         {scores.recall:.0%}  (planted bugs found per run, averaged)")
-    print(f"  precision      {scores.precision:.0%}  (reports that matched a planted bug)")
-    print(f"  false alarms   {scores.false_alarms:.1f}  (reports per run on the clean shop)")
+    _print_set("demo shop", scores)
+    if scores.holdout:
+        _print_set("holdout app (apps/demo2, never tuned against)", scores.holdout)
     print(f"  avg cost       ${scores.avg_cost_usd:.3f}")
     print(f"  avg duration   {scores.avg_duration_s:.0f} s")
+
+
+def _print_set(name: str, scores: BenchmarkScores) -> None:
     print()
+    print(f"  {name}: {scores.runs_buggy} buggy runs")
+    print(f"  AI-only recall {scores.ai_recall:.0%}  (bugs that need judgement, found per run)")
+    print(f"  recall         {scores.recall:.0%}  (all planted bugs, incl. the free checks)")
+    print(f"  precision      {scores.precision:.0%}  (reports that matched a planted bug)")
+    print(f"  false alarms   {scores.false_alarms:.1f}  (reports per run on the clean build)")
     print("  per bug (found in N of the buggy runs):")
     for bug_id, info in scores.per_bug.items():
         mark = "✓" if info["found_runs"] else "·"
-        print(f"   {mark} {bug_id:>2}. {info['title']}  [{info['found_runs']}/{scores.runs_buggy}]")
+        kind = "AI " if info.get("detection") == "agent" else "det"
+        line = f"   {mark} {kind} {bug_id:>2}. {info['title']}"
+        print(f"{line}  [{info['found_runs']}/{scores.runs_buggy}]")
 
 
 def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> BenchmarkResult:
     data = asdict(scores)
+    holdout = scores.holdout
+    details = {
+        "per_bug": {str(k): v for k, v in data["per_bug"].items()},
+        "decisions": data["decisions"],
+        "runs": run_ids,
+        "judge": scores.judge,
+    }
+    if holdout:
+        details["holdout"] = {
+            "per_bug": {str(k): v for k, v in asdict(holdout)["per_bug"].items()},
+            "decisions": asdict(holdout)["decisions"],
+        }
     result = BenchmarkResult(
         provider=scores.provider,
         model=scores.model,
@@ -272,12 +315,15 @@ def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> Ben
         false_alarms=scores.false_alarms,
         avg_cost_usd=scores.avg_cost_usd,
         avg_duration_s=scores.avg_duration_s,
-        details={
-            "per_bug": {str(k): v for k, v in data["per_bug"].items()},
-            "decisions": data["decisions"],
-            "runs": run_ids,
-            "judge": scores.judge,
-        },
+        ai_recall=scores.ai_recall,
+        holdout_runs_buggy=holdout.runs_buggy if holdout else None,
+        holdout_recall=holdout.recall if holdout else None,
+        holdout_ai_recall=holdout.ai_recall if holdout else None,
+        holdout_precision=holdout.precision if holdout else None,
+        holdout_false_alarms=holdout.false_alarms if holdout else None,
+        judge=scores.judge or None,
+        rescore_commit=scores.rescore_commit,
+        details=details,
     )
     session.add(result)
     session.commit()

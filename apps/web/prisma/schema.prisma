@@ -197,6 +197,18 @@ model BenchmarkResult {
   falseAlarms  Float    @map("false_alarms")
   avgCostUsd   Float    @map("avg_cost_usd")
   avgDurationS Float    @map("avg_duration_s")
+  /// Recall over the planted bugs that need judgement (not findable by deterministic checks).
+  aiRecall           Float?  @map("ai_recall")
+  /// The same scores on the holdout app (apps/demo2), which prompts are never tuned against.
+  holdoutRunsBuggy   Int?    @map("holdout_runs_buggy")
+  holdoutRecall      Float?  @map("holdout_recall")
+  holdoutAiRecall    Float?  @map("holdout_ai_recall")
+  holdoutPrecision   Float?  @map("holdout_precision")
+  holdoutFalseAlarms Float?  @map("holdout_false_alarms")
+  /// "provider/model" that matched reports to planted bugs.
+  judge              String?
+  /// Set when the row came from `bench --rescore`: the commit the rescore ran on.
+  rescoreCommit      String? @map("rescore_commit")
   /// Per-bug found/missed and every match decision, for spot checks.
   details      Json     @default("{}")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

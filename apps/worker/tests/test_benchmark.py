@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from worker.benchmark import (
+    HOLDOUT_BUGS_JSON,
     MatchDecision,
     PlantedBug,
     candidates_for,
@@ -137,3 +138,44 @@ def test_judge_name_is_the_provider_and_the_model_that_answers_cheap_calls():
 def test_scores_record_the_judge():
     scores = score({}, {}, PLANTED, [], [], "ollama", "qwen", "abc", judge="ollama/gemma4:12b")
     assert scores.judge == "ollama/gemma4:12b"
+
+
+# --- honest numbers: AI-only recall, holdout, judge, rescore commit ----------------------------
+
+MIXED = [
+    PlantedBug(1, "/", "Console error", "", detection="deterministic"),
+    PlantedBug(2, "/", "Broken link", "", detection="deterministic"),
+    PlantedBug(5, "/cart", "Total ignores quantity", "", detection="agent"),
+    PlantedBug(6, "/checkout", "Invalid email accepted", "", detection="agent"),
+]
+
+
+def test_ai_recall_counts_only_the_bugs_that_need_judgement():
+    # Run a: both deterministic bugs and one of the two AI bugs. Run b: deterministic only.
+    buggy = {"a": [decision("a", 1), decision("a", 2), decision("a", 5)], "b": [decision("b", 1)]}
+    scores = score(buggy, {}, MIXED, [], [], "fake", "m", "abc")
+    assert scores.recall == pytest.approx((3 / 4 + 1 / 4) / 2)
+    assert scores.ai_recall == pytest.approx((1 / 2 + 0 / 2) / 2)
+
+
+def test_load_planted_reads_how_each_bug_can_be_detected():
+    shop = load_planted()
+    assert {b.detection for b in shop} == {"deterministic", "agent"}
+    assert [b.id for b in shop if b.detection == "deterministic"] == [1, 2, 3, 4]
+
+
+def test_holdout_has_its_own_planted_bugs_of_the_same_kinds():
+    holdout = load_planted(HOLDOUT_BUGS_JSON)
+    assert len(holdout) == 6
+    assert {b.detection for b in holdout} == {"deterministic", "agent"}
+    shop_titles = {b.title for b in load_planted()}
+    assert not shop_titles & {b.title for b in holdout}
+
+
+def test_per_bug_results_say_how_each_bug_is_detected():
+    scores = score({"a": [decision("a", 5)]}, {}, MIXED, [], [], "fake", "m", "abc")
+    assert scores.per_bug[5] == {
+        "title": "Total ignores quantity",
+        "found_runs": 1,
+        "detection": "agent",
+    }

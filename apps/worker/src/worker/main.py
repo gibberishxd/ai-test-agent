@@ -15,6 +15,8 @@ from pathlib import Path
 from sqlalchemy.orm import Session, sessionmaker
 
 from worker.benchmark import (
+    HOLDOUT_BUGS_JSON,
+    BenchmarkScores,
     benchmark_workspace,
     git_commit,
     judge_name,
@@ -60,6 +62,12 @@ def main(argv: list[str] | None = None) -> None:
     scan.add_argument("--out", type=Path, help="output folder (default: reports/<timestamp>)")
     bench = sub.add_parser("bench", help="score the agent against the demo shop's planted bugs")
     bench.add_argument("--runs", type=int, default=3, help="runs on the buggy shop (default 3)")
+    bench.add_argument(
+        "--holdout-runs",
+        type=int,
+        default=2,
+        help="runs on the buggy holdout app, apps/demo2 (default 2; 0 skips the holdout)",
+    )
     bench.add_argument("--mode", choices=["interactive", "passive"], default="interactive")
     bench.add_argument(
         "--rescore", action="store_true", help="re-match the latest benchmark's runs, no new runs"
@@ -99,7 +107,9 @@ def main(argv: list[str] | None = None) -> None:
         rescore_latest(sessions, judge)
         return
     if args.command == "bench":
-        run_benchmark(settings, llm, judge, sessions, execute, args.runs, args.mode)
+        run_benchmark(
+            settings, llm, judge, sessions, execute, args.runs, args.mode, args.holdout_runs
+        )
         return
     if args.once:
         if not process_next(sessions, llm, execute):
@@ -118,61 +128,94 @@ def run_benchmark(
     execute: ExecuteFn,
     runs: int,
     mode: str,
+    holdout_runs: int = 0,
 ) -> None:
     """Queue the benchmark runs, process them with `llm`, then score them with `judge`."""
     with sessions() as session:
         workspace = benchmark_workspace(session)
-        buggy_ids = queue_runs(session, workspace.id, [settings.demo_url] * runs, mode)
-        clean_ids = queue_runs(session, workspace.id, [settings.clean_demo_url], mode)
-    log.info("benchmark: %d buggy + %d clean %s runs queued", runs, len(clean_ids), mode)
-    wait_for(sessions, buggy_ids + clean_ids, lambda: process_next(sessions, llm, execute))
-    score_runs(sessions, judge, buggy_ids, clean_ids)
+        run_ids = {
+            "buggy": queue_runs(session, workspace.id, [settings.demo_url] * runs, mode),
+            "clean": queue_runs(session, workspace.id, [settings.clean_demo_url], mode),
+        }
+        if holdout_runs > 0:
+            run_ids["holdout_buggy"] = queue_runs(
+                session, workspace.id, [settings.demo2_url] * holdout_runs, mode
+            )
+            run_ids["holdout_clean"] = queue_runs(
+                session, workspace.id, [settings.clean_demo2_url], mode
+            )
+    every_run = [run_id for ids in run_ids.values() for run_id in ids]
+    log.info("benchmark: %d runs queued (%s)", len(every_run), mode)
+    wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute))
+    score_runs(sessions, judge, run_ids, git_commit())
 
 
 def rescore_latest(sessions: sessionmaker[Session], judge: LLMClient) -> None:
-    """Re-match the reports of the latest benchmark's runs (after a matching fix), save anew."""
+    """Re-match the reports of the latest benchmark's runs (after a matching fix), save anew.
+
+    The new row keeps the commit the runs were made on; the commit the rescore ran on is
+    recorded separately, so a rescore never looks like a fresh benchmark of newer code.
+    """
     with sessions() as session:
         latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
         if latest is None:
             log.error("no benchmark result to rescore; run `uv run worker bench` first")
             return
-        runs = latest.details["runs"]
-    log.info("rescoring %d buggy + %d clean runs", len(runs["buggy"]), len(runs["clean"]))
-    score_runs(sessions, judge, runs["buggy"], runs["clean"])
+        runs, original_commit = latest.details["runs"], latest.git_commit
+    log.info("rescoring the runs of commit %s", original_commit)
+    score_runs(sessions, judge, runs, original_commit, rescore_commit=git_commit())
 
 
 def score_runs(
-    sessions: sessionmaker[Session], judge: LLMClient, buggy_ids: list[str], clean_ids: list[str]
+    sessions: sessionmaker[Session],
+    judge: LLMClient,
+    run_ids: dict[str, list[str]],
+    commit: str,
+    rescore_commit: str | None = None,
 ) -> None:
-    """Match every reported bug to bugs.json, compute the scores, print and save them."""
-    planted = load_planted()
+    """Match every reported bug to its app's bugs.json, compute the scores, print and save."""
     with sessions() as session:
-        finished = [session.get(Run, run_id) for run_id in buggy_ids + clean_ids]
-        buggy = {
-            run_id: [
-                match_report(judge, run_id, bug, planted) for bug in report_bugs(session, run_id)
-            ]
-            for run_id in buggy_ids
-        }
-        clean = {run_id: len(report_bugs(session, run_id)) for run_id in clean_ids}
-        durations = [
-            (run.finished_at - run.started_at).total_seconds()
-            for run in finished
-            if run.started_at and run.finished_at
-        ]
-        scores = score(
-            buggy,
-            clean,
-            planted,
-            costs=[run.cost_usd for run in finished],
-            durations=durations,
-            provider=finished[0].provider or judge.provider,
-            model=finished[0].model or judge.agent_model,
-            git_commit=git_commit(),
-            judge=judge_name(judge),
+        scores = _score_set(
+            session, judge, run_ids["buggy"], run_ids["clean"], load_planted(), commit
         )
-        save_scores(session, scores, {"buggy": buggy_ids, "clean": clean_ids})
+        if run_ids.get("holdout_buggy"):
+            scores.holdout = _score_set(
+                session,
+                judge,
+                run_ids["holdout_buggy"],
+                run_ids.get("holdout_clean", []),
+                load_planted(HOLDOUT_BUGS_JSON),
+                commit,
+            )
+        scores.rescore_commit = rescore_commit
+        save_scores(session, scores, run_ids)
     print_scores(scores)
+
+
+def _score_set(session, judge, buggy_ids, clean_ids, planted, commit) -> BenchmarkScores:
+    finished = [run for run_id in buggy_ids + clean_ids if (run := session.get(Run, run_id))]
+    buggy = {
+        run_id: [match_report(judge, run_id, bug, planted) for bug in report_bugs(session, run_id)]
+        for run_id in buggy_ids
+    }
+    clean = {run_id: len(report_bugs(session, run_id)) for run_id in clean_ids}
+    durations = [
+        (run.finished_at - run.started_at).total_seconds()
+        for run in finished
+        if run.started_at and run.finished_at
+    ]
+    first = finished[0] if finished else None
+    return score(
+        buggy,
+        clean,
+        planted,
+        costs=[run.cost_usd for run in finished],
+        durations=durations,
+        provider=(first.provider if first else None) or judge.provider,
+        model=(first.model if first else None) or judge.agent_model,
+        git_commit=commit,
+        judge=judge_name(judge),
+    )
 
 
 if __name__ == "__main__":

@@ -6,7 +6,20 @@ import { TrendChart } from "@/components/trend-chart";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { decisions, latestPerProvider, perBug, percent, trend, type BenchmarkRow } from "@/lib/benchmark";
+import {
+  commitLabel,
+  decisions,
+  holdout,
+  holdoutPerBug,
+  judgeLabel,
+  latestPerProvider,
+  perBug,
+  percent,
+  percentOrDash,
+  trend,
+  type BenchmarkRow,
+  type PerBug,
+} from "@/lib/benchmark";
 import { db } from "@/lib/db";
 import { formatCost, formatDate } from "@/lib/format";
 
@@ -31,6 +44,8 @@ export default async function BenchmarkPage() {
   const latest = latestPerProvider(rows);
   const newest = rows[0];
   const bugs = perBug(newest);
+  const holdoutBugs = holdoutPerBug(newest);
+  const newestHoldout = holdout(newest);
   const matches = decisions(newest);
   const quality = trend(rows, (r) => [r.recall, r.precision]);
   const cost = trend(rows, (r) => [r.avgCostUsd]);
@@ -53,15 +68,23 @@ export default async function BenchmarkPage() {
                   {row.provider} <span className="text-muted-foreground">· {row.model}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {formatDate(row.createdAt)} · <span className="font-mono">{row.gitCommit}</span>
+                  {formatDate(row.createdAt)} · <span className="font-mono">{commitLabel(row)}</span>
                 </p>
               </div>
-              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <Tile label="Recall" value={percent(row.recall)} hint="planted bugs found" />
+              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <Tile
+                  label="AI-only recall"
+                  value={percentOrDash(row.aiRecall)}
+                  hint="bugs that need judgement"
+                  headline
+                />
+                <Tile label="Recall" value={percent(row.recall)} hint="all planted bugs" />
                 <Tile label="Precision" value={percent(row.precision)} hint="reports that were real" />
                 <Tile label="False alarms" value={row.falseAlarms.toFixed(1)} hint="per clean run" />
+                <Tile label="Holdout AI-only" value={percentOrDash(holdout(row)?.aiRecall)} hint="app never tuned for" />
                 <Tile label="Cost / run" value={formatCost(row.avgCostUsd)} hint={`${Math.round(row.avgDurationS)} s avg`} />
               </dl>
+              <p className="text-xs text-muted-foreground">Judge: {judgeLabel(row)}</p>
             </div>
           ))}
         </div>
@@ -93,42 +116,30 @@ export default async function BenchmarkPage() {
           </h2>
           <p className="text-sm text-muted-foreground">
             Latest result ({newest.provider} · {newest.model}): how many of the {newest.runsBuggy} runs on the
-            buggy shop found each bug.
+            buggy shop found each bug. &ldquo;AI&rdquo; bugs need judgement; &ldquo;checks&rdquo; bugs are
+            found by the free deterministic checks whatever the model.
           </p>
         </div>
-        <div className="overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">#</TableHead>
-                <TableHead>Planted bug</TableHead>
-                <TableHead className="text-right">Found in</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {bugs.map((bug) => (
-                <TableRow key={bug.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">{bug.id}</TableCell>
-                  <TableCell>{bug.title}</TableCell>
-                  <TableCell className="text-right">
-                    <span className="inline-flex items-center gap-2 tabular-nums">
-                      <span className="flex gap-0.5" aria-hidden>
-                        {Array.from({ length: newest.runsBuggy }, (_, i) => (
-                          <span
-                            key={i}
-                            className={i < bug.foundRuns ? "size-2.5 rounded-sm bg-series-1" : "size-2.5 rounded-sm bg-muted"}
-                          />
-                        ))}
-                      </span>
-                      {bug.foundRuns} of {newest.runsBuggy}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <BugTable bugs={bugs} runs={newest.runsBuggy} />
       </section>
+
+      {newestHoldout && holdoutBugs.length > 0 && (
+        <section className="grid gap-4" aria-labelledby="holdout-heading">
+          <div>
+            <h2 id="holdout-heading" className="text-lg font-semibold">
+              Holdout app: found or missed
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              A separate booking app with the same kinds of bugs and different specifics. Prompts are never
+              tuned against it, so a score here that is close to the shop&rsquo;s shows the agent isn&rsquo;t
+              overfitted to the shop. AI-only recall {percentOrDash(newestHoldout.aiRecall)}, recall{" "}
+              {percent(newestHoldout.recall)}, false alarms {newestHoldout.falseAlarms?.toFixed(1) ?? "—"} per
+              clean run.
+            </p>
+          </div>
+          <BugTable bugs={holdoutBugs} runs={newestHoldout.runsBuggy} />
+        </section>
+      )}
 
       <section className="grid gap-4" aria-labelledby="all-heading">
         <h2 id="all-heading" className="text-lg font-semibold">
@@ -141,10 +152,13 @@ export default async function BenchmarkPage() {
                 <TableHead>Date</TableHead>
                 <TableHead>Provider · model</TableHead>
                 <TableHead>Commit</TableHead>
+                <TableHead className="text-right">AI-only</TableHead>
                 <TableHead className="text-right">Recall</TableHead>
+                <TableHead className="text-right">Holdout AI-only</TableHead>
                 <TableHead className="text-right">Precision</TableHead>
                 <TableHead className="text-right">False alarms</TableHead>
                 <TableHead className="text-right">Cost / run</TableHead>
+                <TableHead>Judge</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -154,11 +168,14 @@ export default async function BenchmarkPage() {
                   <TableCell>
                     {row.provider} · {row.model}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{row.gitCommit}</TableCell>
+                  <TableCell className="font-mono text-xs">{commitLabel(row)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.recall)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{percentOrDash(holdout(row)?.aiRecall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.precision)}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.falseAlarms.toFixed(1)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCost(row.avgCostUsd)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{judgeLabel(row)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -199,21 +216,65 @@ function Intro() {
       <h1 className="text-2xl font-semibold tracking-tight">Benchmark</h1>
       <p className="max-w-3xl text-muted-foreground">
         The agent runs against a demo shop with 12 planted bugs, and once against a clean copy with
-        none. <b className="font-medium text-foreground">Recall</b> is the share of planted bugs it finds;{" "}
+        none. <b className="font-medium text-foreground">AI-only recall</b> counts only the bugs that need
+        judgement (the free deterministic checks find the others whatever the model), so it is the number
+        to compare models by. <b className="font-medium text-foreground">Recall</b> is the share of all planted bugs found;{" "}
         <b className="font-medium text-foreground">precision</b> is the share of its reports that are real;
         every report on the clean copy is a <b className="font-medium text-foreground">false alarm</b>.
-        Reports are matched to planted bugs by page and a model judgement, and every match is listed
-        below for spot checks.
+        Reports are matched to planted bugs by page and a model judgement (the judge is shown with each
+        result), and every match is listed below for spot checks. A separate holdout app, never used to
+        tune prompts, checks that the agent isn&rsquo;t overfitted to the shop.
       </p>
     </div>
   );
 }
 
-function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
+function BugTable({ bugs, runs }: { bugs: PerBug[]; runs: number }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-12">#</TableHead>
+            <TableHead>Planted bug</TableHead>
+            <TableHead>Kind</TableHead>
+            <TableHead className="text-right">Found in</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bugs.map((bug) => (
+            <TableRow key={bug.id}>
+              <TableCell className="tabular-nums text-muted-foreground">{bug.id}</TableCell>
+              <TableCell>{bug.title}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {bug.needsJudgement === null ? "—" : bug.needsJudgement ? "AI" : "checks"}
+              </TableCell>
+              <TableCell className="text-right">
+                <span className="inline-flex items-center gap-2 tabular-nums">
+                  <span className="flex gap-0.5" aria-hidden>
+                    {Array.from({ length: runs }, (_, i) => (
+                      <span
+                        key={i}
+                        className={i < bug.foundRuns ? "size-2.5 rounded-sm bg-series-1" : "size-2.5 rounded-sm bg-muted"}
+                      />
+                    ))}
+                  </span>
+                  {bug.foundRuns} of {runs}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function Tile({ label, value, hint, headline = false }: { label: string; value: string; hint: string; headline?: boolean }) {
   return (
     <div>
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
+      <dt className={headline ? "text-sm font-medium" : "text-sm text-muted-foreground"}>{label}</dt>
+      <dd className={headline ? "mt-1 text-3xl font-semibold tabular-nums" : "mt-1 text-2xl font-semibold tabular-nums"}>{value}</dd>
       <dd className="text-xs text-muted-foreground">{hint}</dd>
     </div>
   );

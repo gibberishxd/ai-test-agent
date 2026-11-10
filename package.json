@@ -3,16 +3,17 @@
   "private": true,
   "workspaces": [
     "apps/web",
-    "apps/demo"
+    "apps/demo",
+    "apps/demo2"
   ],
   "scripts": {
     "setup": "npm install && npx -w apps/demo playwright install chromium && cd apps/worker && uv sync && uv run playwright install chromium",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
-    "dev": "concurrently -n web,demo,clean,worker -c blue,magenta,cyan,green \"npm run dev -w apps/web\" \"npm run dev -w apps/demo\" \"npm run dev:clean -w apps/demo\" \"cd apps/worker && uv run worker\"",
+    "dev": "concurrently -n web,demo,clean,demo2,clean2,worker -c blue,magenta,cyan,yellow,gray,green \"npm run dev -w apps/web\" \"npm run dev -w apps/demo\" \"npm run dev:clean -w apps/demo\" \"npm run dev -w apps/demo2\" \"npm run dev:clean -w apps/demo2\" \"cd apps/worker && uv run worker\"",
     "test": "npm run test --workspaces && cd apps/worker && uv run pytest",
     "lint": "npm run typecheck --workspaces && cd apps/worker && uv run ruff check . && uv run ruff format --check .",
-    "verify-bugs": "npm run verify-bugs -w apps/demo",
+    "verify-bugs": "npm run verify-bugs -w apps/demo && npm run verify-bugs -w apps/demo2",
     "db:migrate": "npm run db:deploy -w apps/web",
     "test:e2e": "npm run e2e -w apps/web",
     "bench": "cd apps/worker && uv run worker bench"

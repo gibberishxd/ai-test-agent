@@ -16,9 +16,27 @@ export type BenchmarkRow = {
   avgDurationS: number;
   details: unknown;
   createdAt: Date;
+  /** Recall over the bugs that need judgement only. Null on rows from before it was recorded. */
+  aiRecall: number | null;
+  holdoutRunsBuggy: number | null;
+  holdoutRecall: number | null;
+  holdoutAiRecall: number | null;
+  holdoutPrecision: number | null;
+  holdoutFalseAlarms: number | null;
+  judge: string | null;
+  rescoreCommit: string | null;
 };
 
-export type PerBug = { id: number; title: string; foundRuns: number };
+/** `needsJudgement`: the deterministic checks can't find it; only the AI can. */
+export type PerBug = { id: number; title: string; foundRuns: number; needsJudgement: boolean | null };
+
+export type HoldoutScores = {
+  runsBuggy: number;
+  recall: number;
+  aiRecall: number | null;
+  precision: number | null;
+  falseAlarms: number | null;
+};
 
 export type MatchDecision = {
   run_id: string;
@@ -39,11 +57,49 @@ export function latestPerProvider(rows: BenchmarkRow[]): BenchmarkRow[] {
   return [...seen.values()];
 }
 
-export function perBug(row: BenchmarkRow): PerBug[] {
-  const details = (row.details ?? {}) as { per_bug?: Record<string, { title: string; found_runs: number }> };
-  return Object.entries(details.per_bug ?? {})
-    .map(([id, value]) => ({ id: Number(id), title: value.title, foundRuns: value.found_runs }))
+type StoredPerBug = Record<string, { title: string; found_runs: number; detection?: string }>;
+
+function toPerBug(stored: StoredPerBug | undefined): PerBug[] {
+  return Object.entries(stored ?? {})
+    .map(([id, value]) => ({
+      id: Number(id),
+      title: value.title,
+      foundRuns: value.found_runs,
+      needsJudgement: value.detection ? value.detection === "agent" : null,
+    }))
     .sort((a, b) => a.id - b.id);
+}
+
+export function perBug(row: BenchmarkRow): PerBug[] {
+  return toPerBug((row.details as { per_bug?: StoredPerBug } | null)?.per_bug);
+}
+
+/** The holdout app's per-bug results, if the row measured the holdout. */
+export function holdoutPerBug(row: BenchmarkRow): PerBug[] {
+  return toPerBug((row.details as { holdout?: { per_bug?: StoredPerBug } } | null)?.holdout?.per_bug);
+}
+
+/** The holdout app's scores, or null when the row didn't measure it. */
+export function holdout(row: BenchmarkRow): HoldoutScores | null {
+  if (row.holdoutRunsBuggy === null || row.holdoutRecall === null) return null;
+  return {
+    runsBuggy: row.holdoutRunsBuggy,
+    recall: row.holdoutRecall,
+    aiRecall: row.holdoutAiRecall,
+    precision: row.holdoutPrecision,
+    falseAlarms: row.holdoutFalseAlarms,
+  };
+}
+
+/** Who judged the matches. Older rows didn't record it. */
+export function judgeLabel(row: BenchmarkRow): string {
+  const fromDetails = (row.details as { judge?: string } | null)?.judge;
+  return row.judge || fromDetails || "not recorded";
+}
+
+/** The commit the runs were made on, plus the rescore's commit when there was one. */
+export function commitLabel(row: BenchmarkRow): string {
+  return row.rescoreCommit ? `${row.gitCommit} (rescored at ${row.rescoreCommit})` : row.gitCommit;
 }
 
 export function decisions(row: BenchmarkRow): MatchDecision[] {
@@ -66,4 +122,9 @@ export function trend(rows: BenchmarkRow[], pick: (row: BenchmarkRow) => number[
 
 export function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+/** A percentage, or a dash for a number that wasn't recorded (never a misleading 0%). */
+export function percentOrDash(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : percent(value);
 }

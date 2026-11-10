@@ -114,21 +114,43 @@ npm run bench        # benchmark (real model calls)
 
 ## Benchmark
 
-`npm run bench` runs the agent 3× on the buggy shop and once on the clean shop, matches each
-report to `apps/demo/bugs.json` (page + a cheap-model judgement, every decision saved), and
-stores recall, precision, false alarms, cost and duration with the provider, model and commit.
+`npm run bench` runs the agent 3× on the buggy shop and once on the clean shop, then 2× on the
+buggy **holdout app** and once on its clean build. Each report is matched to the app's
+`bugs.json` (page first, then a judge model; every decision is saved), and the result stores
+the scores with the provider, model, judge and commit.
 
-Latest results (`apps/demo/bugs.json`, 3 runs on the buggy shop + 1 on the clean shop):
+Two recall numbers, because they answer different questions:
 
-| Provider · model | Recall | Precision | False alarms / clean run | Cost / run | Time / run | Commit |
-|---|---|---|---|---|---|---|
-| ollama · qwen3-vl:8b-instruct (local, 16 GB Mac) | 33% | 100% | 0.0 | $0.00 | 335 s | e8d3a24 |
-| claude · claude-sonnet-5-5 | not run yet: needs an API key | | | | | |
+- **AI-only recall** counts only the planted bugs that need judgement (a wrong total, an
+  accepted invalid email, a layout that breaks on a phone). The free deterministic checks
+  (console errors, failed requests, broken links, accessibility) find the others whatever the
+  model, so this is the number to compare models by.
+- **Recall** counts all planted bugs: what a user of the product gets.
 
-Per bug, the local model's run found bugs 1–4 (JS error, 500 API, broken link,
-accessibility) in 3 of 3 runs, all through the free deterministic checks, and none of bugs 5–12,
-which need the agent to judge what it sees. The pipeline (agent → replay → dedup → matching)
-works end to end; the agent's quality depends on the model.
+**Why a holdout app.** The agent's prompt and tools are developed while watching it work on the
+demo shop, so a good shop score could mean the agent learned the shop. `apps/demo2` is a
+room-booking app with six bugs of the same *kinds* (an API failure, an unlabelled field, a wrong
+total, accepted invalid input, a double submit, a mobile overflow) and different specifics.
+Nothing is ever tuned against it, and a unit test fails if anything from either app's
+`bugs.json` appears in the prompt or tool descriptions. A holdout score close to the shop score
+means the techniques are general.
+
+The judge (`JUDGE_PROVIDER` / `JUDGE_MODEL`) is kept the same while the agent model changes, so
+two models are graded by the same judge. `bench --rescore` re-matches the saved runs of the
+latest result: it keeps the commit the runs were made on and records its own commit separately.
+
+Results so far (shop: 3 buggy runs + 1 clean run each):
+
+| Provider · model | AI-only recall | Recall | Precision | False alarms / clean run | Cost / run | Time / run | Judge | Commit |
+|---|---|---|---|---|---|---|---|---|
+| ollama · qwen3-vl:8b-instruct (local, 16 GB Mac) | 0% | 33% | 100% | 0.0 | $0.00 | 335 s | the model itself | e8d3a24 |
+| ollama · gemma4:12b (local) | 13% | 42% | 100% | 0.0 | $0.00 | 522 s | the model itself | e78a2ca |
+| ollama · gemma4:12b, 1200 s budget (local) | 13% | 42% | 100% | 0.0 | $0.00 | 1101 s | the model itself | 18e1975 |
+| claude · claude-sonnet-5-5 | not run yet: needs an API key | | | | | | | |
+
+AI-only recall for these rows is computed from their per-bug results (bug 9, "$NaN" price, was
+the only AI bug found, by Gemma in 3 of 3 runs); they predate the holdout app. Bugs 1–4 were
+found in every run by the deterministic checks.
 
 ![Benchmark page](docs/screenshots/benchmark.png)
 
@@ -139,6 +161,7 @@ works end to end; the agent's quality depends on the model.
 | `apps/web` | Next.js 16 dashboard + API, Prisma schema and migrations, Auth.js |
 | `apps/worker` | Python worker: crawler, checks, agent loop, replay, benchmark, safety |
 | `apps/demo` | Vite + React demo shop with 12 planted bugs (`bugs.json`) and a clean build |
+| `apps/demo2` | Holdout app for the benchmark: a room-booking site with 6 planted bugs (5175) and a clean build (5176); never used to tune the agent |
 | `docs/` | Product brief, progress, decisions, a study guide per component |
 
 ## How AI tools were used

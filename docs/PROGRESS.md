@@ -44,7 +44,7 @@ considered. Real false alarms: 0. Matcher change is open (owner's call).
 | G0 Finish what's running | done | Benchmark finished and recorded above. Transcripts are git-ignored. The two runs queued from the dashboard were processed with `uv run worker --once` (gemma4:12b): 92cc0e45 done (35 steps, 6 bugs), 99e6cd3c done (33 steps, 7 bugs), both stopped by the 470 s time budget. |
 | G1 Safety and correctness fixes (1–6) | done | Worker `uv run pytest`: 241 passed, 1 skipped. Web `npm test -w apps/web`: 79 passed. Web typecheck and worker ruff clean. Decisions D32–D37. |
 | G2 Findable bugs (1–5) | done | Worker `uv run pytest`: 281 passed, 1 skipped; ruff clean. New tests: `test_observe.py`, `test_prompt.py`, `test_replay_plan.py`, `test_review.py`, new cases in `test_agent_loop.py`, `test_verify.py`, `test_passive_run.py` (incl. six identical "Add to cart" buttons). Decisions D38–D41. |
-| G3 Honest benchmark | not started | |
+| G3 Honest benchmark (1–4) | done | Root `npm test`: web 84, demo 7, demo2 3, worker 288 passed + 1 skipped; `npm run lint` clean; new `test_benchmark_db.py` (AI-only, holdout columns, judge, rescore keeps commit) and cases in `test_benchmark.py`. Web `npm test -w apps/web`: 84 passed (page helpers). `npm run verify-bugs -w apps/demo2` (from `apps/demo2`: `npx playwright test --repeat-each 3`): 36 passed; shop `verify-bugs`: 26 passed. Migration `20261110120000_honest_benchmark` applied. Decisions D42–D44. |
 | G4 Live browser pane | not started | |
 | G5 Any model | not started | |
 | G6 Measure | not started | |

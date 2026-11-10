@@ -674,3 +674,38 @@ model call. Dedup quality depends on the cheap model.
 3. *Why dedup before replay?* Deterministic findings have hard evidence. If the agent reports
    the same failed request, replaying it can only fail (the model can't see a network error in
    a screenshot) and would dismiss a real bug. Merging it first avoids that.
+
+## Run 2: honest benchmark and the holdout app (`benchmark.py`, `main.py: bench`, `apps/demo2`, `apps/web/app/benchmark`)
+
+**What:** the benchmark reports AI-only recall next to overall recall, scores a second app the
+agent is never tuned against, records the judge, and keeps the original commit on a rescore.
+
+**How:**
+- `PlantedBug.detection` comes from `bugs.json`. `score()` computes recall over all planted
+  bugs and over those with detection "agent"; `per_bug` stores the detection too.
+- `run_benchmark` queues four groups of runs (shop buggy/clean, holdout buggy/clean) and
+  `score_runs` scores each app against its own `bugs.json`; the holdout scores sit in
+  `BenchmarkScores.holdout` and in their own columns (`holdout_ai_recall`, ...).
+- `rescore_latest` passes the stored `git_commit` through and sets `rescore_commit`.
+- `apps/demo2` is built like the shop: every bug behind `bug(n)`, a fake API in the Vite dev
+  server, `verify/bugs.e2e.ts` checking each bug is present on 5175 and absent on 5176.
+- The web page's helpers (`percentOrDash`, `judgeLabel`, `commitLabel`, `holdout`) show a dash
+  or "not recorded" for older rows rather than a misleading 0%.
+
+**Why:** a single recall number mixed what every model gets for free with what only a good model
+finds, and nothing showed whether the agent was learning the shop.
+
+**Weak spots:** the holdout is small (6 bugs, 2 runs), so one found bug moves its recall by
+25 points. Both apps are written by the same person, in the same style, so they share more than
+real sites would. The judge is still a model: a weak judge can mis-score both apps.
+
+**Interview Q&A**
+1. *Why report AI-only recall?* The deterministic checks find their bugs for every model, so
+   overall recall makes a weak and a strong model look alike. AI-only recall isolates the part
+   the model is responsible for.
+2. *What does the holdout prove, and what doesn't it?* It shows the techniques work on an app
+   the prompt was never adjusted for. It doesn't prove the agent works on any real site: both
+   apps are small and written by us.
+3. *Why keep the original commit on a rescore?* The scores describe the runs, and the runs were
+   made with the old code. Labelling them with the new commit would claim the new code was
+   measured when it wasn't.

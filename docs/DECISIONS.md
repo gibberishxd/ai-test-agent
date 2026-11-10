@@ -421,3 +421,33 @@ numbers are the real test (Needs me).
 - **Why:** a verdict on the wrong element is worse than no verdict. Starting late avoids
   repeating side effects such as a second order. Before, an agent report of a server error was
   replayed, the model couldn't see a failed request on screen, and a real bug was dismissed.
+
+## D42. AI-only recall is the headline number for comparing models (run 2, G3.1)
+- **Decision:** every benchmark result stores and shows two recalls: over all planted bugs, and
+  over the bugs whose `detection` in `bugs.json` is "agent" (those the deterministic checks
+  can't find). The CLI, the database (`ai_recall`), the README and the page lead with AI-only.
+- **Alternatives:** keep one recall (it hid that the AI found nothing: 33% came entirely from
+  free checks); drop deterministic bugs from the benchmark (the product does find them, and
+  users care about the total).
+- **Why:** the deterministic checks score the same for every model, so they make all models
+  look alike. Only the AI-only number moves when the model gets better.
+
+## D43. A holdout app the agent is never tuned against (run 2, G3.4)
+- **Decision:** `apps/demo2`, a room-booking app on 5175 (clean build 5176) with six planted
+  bugs of the same kinds as the shop (API failure, unlabelled field, wrong total, accepted
+  invalid input, double submit, mobile overflow) and different specifics, its own `bugs.json`
+  and `verify-bugs`. `bench` runs it 2× buggy + 1× clean by default and reports it separately.
+  A unit test fails if any title, product name, code or address from either app reaches the
+  prompt or tool descriptions.
+- **Alternatives:** test on real public sites (no ground truth, and interactive mode needs
+  ownership); a holdout made of more shop pages (same codebase and wording, not a real
+  generalisation test).
+- **Why:** every prompt change is made while watching the agent on the shop, so the shop score
+  can drift towards "learned the shop". A separate app with unseen specifics shows whether the
+  techniques generalise.
+
+## D44. A rescore keeps the original commit (run 2, G3.3)
+- **Decision:** `bench --rescore` saves a new row with the `git_commit` of the row it rescored
+  and its own commit in `rescore_commit`. The page shows "abc1234 (rescored at def5678)".
+- **Why:** a rescore re-matches old runs; it says nothing about the agent at the new commit.
+  Before, a rescored row looked like a fresh benchmark of newer code.

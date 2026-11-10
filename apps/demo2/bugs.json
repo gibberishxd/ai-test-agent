@@ -1,0 +1,65 @@
+{
+  "description": "Planted bugs in the holdout app (a room-booking site). Same KINDS of bugs as the demo shop, different specifics. It exists to show the agent isn't tuned to the demo shop: prompts and tools are never adjusted against it. Every bug is switched off in the clean build (vite --mode clean, port 5176).",
+  "bugs": [
+    {
+      "id": 1,
+      "page": "/rooms/1",
+      "category": "network",
+      "severity": "high",
+      "title": "Availability API answers 503",
+      "description": "Every room page asks /api/availability for open dates, and the server answers 503 Service Unavailable, so the page shows 'Availability unknown'.",
+      "detection": "deterministic",
+      "how_to_detect": "A failed request (status 503) to /api/availability on any room page."
+    },
+    {
+      "id": 2,
+      "page": "/rooms/1",
+      "category": "accessibility",
+      "severity": "medium",
+      "title": "Phone field in the booking form has no label",
+      "description": "The phone input has a visual caption that isn't connected to it (no <label for>, no aria-label, no placeholder), so screen readers announce an unnamed text field.",
+      "detection": "deterministic",
+      "how_to_detect": "axe rule 'label' on a room page."
+    },
+    {
+      "id": 3,
+      "page": "/rooms/1",
+      "category": "functional",
+      "severity": "high",
+      "title": "Booking total charges one night whatever the stay length",
+      "description": "The price summary shows '3 nights × $120.00' but the total is $120.00: the number of nights is ignored.",
+      "detection": "agent",
+      "how_to_detect": "Pick dates 2+ nights apart and compare the total with nights × nightly rate."
+    },
+    {
+      "id": 4,
+      "page": "/rooms/1",
+      "category": "validation",
+      "severity": "high",
+      "title": "Check-out date before check-in is accepted",
+      "description": "The booking form accepts a check-out date earlier than the check-in date and confirms the booking instead of showing an error next to the check-out field.",
+      "detection": "agent",
+      "how_to_detect": "Enter a check-out date before the check-in date and submit: the booking is confirmed."
+    },
+    {
+      "id": 5,
+      "page": "/rooms/1",
+      "category": "functional",
+      "severity": "high",
+      "title": "Double-clicking 'Book now' creates two bookings",
+      "description": "The Book now button isn't disabled while the booking is saved, so a double click creates the same booking twice on My bookings.",
+      "detection": "agent",
+      "how_to_detect": "Double-click Book now with valid data, then open My bookings: the booking is listed twice."
+    },
+    {
+      "id": 6,
+      "page": "/rooms/3",
+      "category": "layout",
+      "severity": "medium",
+      "title": "Room name runs off the screen on mobile",
+      "description": "On a 375 px wide screen the long name of room 3 doesn't wrap and runs out of its box.",
+      "detection": "agent",
+      "how_to_detect": "At a 375 px viewport, the room title's scrollWidth is larger than its clientWidth, or a screenshot shows the clipped title."
+    }
+  ]
+}

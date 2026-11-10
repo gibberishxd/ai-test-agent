@@ -25,11 +25,7 @@ VIEWPORT = VIEWPORTS["desktop"]
 
 def make_guard(settings: Settings, target_url: str) -> NetworkGuard:
     """In dev mode our own demo shops on localhost are allowed; everything else must be public."""
-    allowed = (
-        dev_allowed_local([settings.demo_url, settings.clean_demo_url])
-        if settings.dev_mode
-        else set()
-    )
+    allowed = dev_allowed_local(settings.demo_urls()) if settings.dev_mode else set()
     return NetworkGuard(allowed_local=allowed, target_url=target_url)
 
 
@@ -108,9 +104,7 @@ def passive_scan(
 
 def is_demo_target(settings: Settings, target_url: str) -> bool:
     """Is the target one of our demo shops? (Interactive mode and the test card are OK there.)"""
-    return any(
-        is_same_origin(target_url, url) for url in (settings.demo_url, settings.clean_demo_url)
-    )
+    return any(is_same_origin(target_url, url) for url in settings.demo_urls())
 
 
 def _broken_links(pages: list[PageResult]) -> list[BrokenLink]:

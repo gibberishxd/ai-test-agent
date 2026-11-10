@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { decisions, latestPerProvider, perBug, percent, trend, type BenchmarkRow } from "./benchmark";
+import {
+  commitLabel,
+  decisions,
+  holdout,
+  judgeLabel,
+  latestPerProvider,
+  perBug,
+  percent,
+  percentOrDash,
+  trend,
+  type BenchmarkRow,
+} from "./benchmark";
 
 function row(fields: Partial<BenchmarkRow>): BenchmarkRow {
   return {
@@ -15,6 +26,14 @@ function row(fields: Partial<BenchmarkRow>): BenchmarkRow {
     avgDurationS: 120,
     details: {},
     createdAt: new Date("2026-11-09T10:00:00Z"),
+    aiRecall: null,
+    holdoutRunsBuggy: null,
+    holdoutRecall: null,
+    holdoutAiRecall: null,
+    holdoutPrecision: null,
+    holdoutFalseAlarms: null,
+    judge: null,
+    rescoreCommit: null,
     ...fields,
   };
 }
@@ -36,8 +55,8 @@ describe("perBug and decisions", () => {
 
   it("lists bugs in id order", () => {
     expect(perBug(row({ details }))).toEqual([
-      { id: 1, title: "A", foundRuns: 3 },
-      { id: 2, title: "B", foundRuns: 0 },
+      { id: 1, title: "A", foundRuns: 3, needsJudgement: null }, // old row: not recorded
+      { id: 2, title: "B", foundRuns: 0, needsJudgement: null },
     ]);
   });
 
@@ -64,4 +83,36 @@ describe("trend", () => {
 
 it("formats percentages", () => {
   expect(percent(0.416)).toBe("42%");
+});
+
+describe("honest numbers", () => {
+  it("says which planted bugs need judgement", () => {
+    const details = { per_bug: { "1": { title: "A", found_runs: 3, detection: "deterministic" }, "5": { title: "E", found_runs: 0, detection: "agent" } } };
+    expect(perBug(row({ details })).map((b) => b.needsJudgement)).toEqual([false, true]);
+  });
+
+  it("shows a dash, not 0%, for numbers an old row didn't record", () => {
+    expect(percentOrDash(null)).toBe("—");
+    expect(percentOrDash(0)).toBe("0%");
+    expect(percentOrDash(0.125)).toBe("13%");
+  });
+
+  it("names the judge, or says it wasn't recorded", () => {
+    expect(judgeLabel(row({ judge: "ollama/gemma4:12b" }))).toBe("ollama/gemma4:12b");
+    expect(judgeLabel(row({ details: { judge: "claude/haiku" } }))).toBe("claude/haiku");
+    expect(judgeLabel(row({}))).toBe("not recorded");
+  });
+
+  it("keeps the runs' commit and adds the rescore commit", () => {
+    expect(commitLabel(row({ gitCommit: "abc1234" }))).toBe("abc1234");
+    expect(commitLabel(row({ gitCommit: "abc1234", rescoreCommit: "def5678" }))).toBe(
+      "abc1234 (rescored at def5678)",
+    );
+  });
+
+  it("reads the holdout scores when they were measured", () => {
+    expect(holdout(row({}))).toBeNull();
+    const measured = row({ holdoutRunsBuggy: 2, holdoutRecall: 0.5, holdoutAiRecall: 0.25, holdoutPrecision: 1, holdoutFalseAlarms: 0 });
+    expect(holdout(measured)).toEqual({ runsBuggy: 2, recall: 0.5, aiRecall: 0.25, precision: 1, falseAlarms: 0 });
+  });
 });

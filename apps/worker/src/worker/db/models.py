@@ -188,6 +188,14 @@ class BenchmarkResult(Base):
     false_alarms: Mapped[float]
     avg_cost_usd: Mapped[float]
     avg_duration_s: Mapped[float]
+    ai_recall: Mapped[float | None]
+    holdout_runs_buggy: Mapped[int | None]
+    holdout_recall: Mapped[float | None]
+    holdout_ai_recall: Mapped[float | None]
+    holdout_precision: Mapped[float | None]
+    holdout_false_alarms: Mapped[float | None]
+    judge: Mapped[str | None]
+    rescore_commit: Mapped[str | None]
     details: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'"))
     created_at: Mapped[datetime] = _created_at()
 
