@@ -40,9 +40,9 @@ from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
 from worker.llm import LLMClient, make_client, make_judge
 from worker.model_configs import client_for_run
-from worker.queue import recover_stale_runs
+from worker.queue import recover_expired_leases, recover_stale_runs
 from worker.report import write_report
-from worker.runner import ExecuteFn, process_next
+from worker.runner import LEASE_S, ExecuteFn, process_next
 from worker.safety.secrets import RedactingFilter
 from worker.scan import passive_scan
 from worker.storage import LocalStorage
@@ -131,7 +131,13 @@ def main(argv: list[str] | None = None) -> None:
         if not process_next(sessions, llm, execute, client_for):
             log.info("queue is empty")
         return
+    last_recovery = 0.0
     while True:
+        if time.monotonic() - last_recovery > LEASE_S / 2:  # any live worker cleans up
+            with sessions() as session:
+                if recovered := recover_expired_leases(session, LEASE_S):
+                    log.warning("failed %d run(s) whose worker stopped responding", recovered)
+            last_recovery = time.monotonic()
         if not process_next(sessions, llm, execute, client_for):
             time.sleep(POLL_INTERVAL_S)
 

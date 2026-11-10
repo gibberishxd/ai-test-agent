@@ -122,6 +122,7 @@ class Run(Base):
     created_at: Mapped[datetime] = _created_at()
     started_at: Mapped[datetime | None] = mapped_column(_timestamp())
     finished_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    heartbeat_at: Mapped[datetime | None] = mapped_column(_timestamp())  # the worker's lease
 
     steps: Mapped[list["Step"]] = relationship(back_populates="run", order_by="Step.index")
     bugs: Mapped[list["Bug"]] = relationship(back_populates="run")

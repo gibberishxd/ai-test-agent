@@ -617,3 +617,24 @@ numbers are the real test (Needs me).
   dev-server restart.
 - **Weak spot:** a future client component that adds `useSession` would bring the provider
   and the race back; the e2e test above would catch it.
+
+## D56. Queue proof, a lease for running runs, one index from EXPLAIN (run 3, H4)
+- **Queue:** `test_queue_concurrency.py` starts 8 worker threads (own connections) at the same
+  instant on 300 queued runs: each run claimed exactly once, none lost. No code change was
+  needed: `FOR UPDATE SKIP LOCKED` was already right.
+- **Lease:** `runs.heartbeat_at` (migration `20261111010000_run_lease`), set at claim and
+  renewed every 15 s by a `Heartbeat` thread; any live worker fails runs silent for 60 s, every
+  30 s, in one conditional UPDATE; times from the database clock; a frozen worker that wakes up
+  re-reads its run under `FOR UPDATE` and doesn't overwrite "failed".
+  - Alternatives: re-queue instead of fail (would silently repeat clicks on a customer's
+    site); Postgres advisory locks held for the whole run (die with the connection, but a
+    worker needs a connection open for 10+ minutes and they don't show in the table);
+    only the start-time check (a dead worker's run waits for some worker to restart).
+  - Not tested first: the 6 lines in `main()`'s polling loop that call recovery every 30 s
+    (glue around the tested `recover_expired_leases`; testing the infinite loop would need a
+    clock and loop-exit hooks for no extra confidence).
+- **Indexes:** `scripts/db_perf.py` (10k runs, 500k steps) showed every hot query already on an
+  index except the newest benchmark results (Seq Scan + sort of every row): added
+  `benchmark_results(created_at)` (0.87 → 0.09 ms for 200 rows, 0.96 → 0.01 ms for 1). Nothing
+  else added. `HOT_QUERY_INDEXES` in the drift test names each index and its query.
+- **Docs:** `docs/DATABASE.md` (tables, keys, indexes, queue, lease, plans, Prisma/SQLAlchemy).

@@ -122,6 +122,9 @@ model Run {
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   startedAt     DateTime? @map("started_at") @db.Timestamptz(3)
   finishedAt    DateTime? @map("finished_at") @db.Timestamptz(3)
+  /// The worker's lease: renewed every few seconds while it works (database clock). A running
+  /// run whose heartbeat is older than the lease belongs to a dead worker and is failed.
+  heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(3)
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -218,6 +221,8 @@ model BenchmarkResult {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([provider, createdAt])
+  /// Newest results first: benchmark page, leaderboard, home page (docs/DATABASE.md).
+  @@index([createdAt])
   @@map("benchmark_results")
 }
 
