@@ -2,6 +2,7 @@
 `make_judge(settings, agent)` returns the one that judges benchmark matches."""
 
 import json
+import os
 
 from worker.config import Settings
 from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
@@ -37,7 +38,35 @@ def make_client(settings: Settings) -> LLMClient:
         from worker.llm.ollama import OllamaClient
 
         return OllamaClient(settings.ollama_url, settings.ollama_model)
+    if provider == "openai-compat":
+        if not settings.openai_compat_base_url or not settings.openai_compat_model:
+            raise ConfigError(
+                "LLM_PROVIDER=openai-compat needs OPENAI_COMPAT_BASE_URL and OPENAI_COMPAT_MODEL"
+            )
+        from worker.llm.openai_compat import OpenAICompatClient
+
+        return OpenAICompatClient(
+            base_url=settings.openai_compat_base_url,
+            model=settings.openai_compat_model,
+            api_key=settings.openai_compat_api_key.get_secret_value() or None,
+            cheap_model=settings.openai_compat_cheap_model or None,
+            input_price=settings.openai_compat_input_price,
+            output_price=settings.openai_compat_output_price,
+        )
+    if provider == "claude-cli":
+        _check_local_only(settings)
+        from worker.llm.claude_cli import ClaudeCliClient
+
+        return ClaudeCliClient()
     return FakeClient(decisions=_fake_script(settings.fake_script))
+
+
+def _check_local_only(settings: Settings) -> None:
+    """claude-cli uses the owner's own Claude login: never on a server, never in production."""
+    if not settings.dev_mode:
+        raise ConfigError("LLM_PROVIDER=claude-cli only runs with DEV_MODE=true (local testing)")
+    if "production" in (os.environ.get("NODE_ENV", ""), os.environ.get("ENV", "")):
+        raise ConfigError("LLM_PROVIDER=claude-cli never runs in production")
 
 
 def _fake_script(text: str) -> list[ToolCall]:
@@ -67,4 +96,5 @@ def make_judge(settings: Settings, agent: LLMClient) -> LLMClient:
     if settings.judge_model:
         pinned["cheap_model"] = settings.judge_model
         pinned["ollama_model"] = settings.judge_model
+        pinned["openai_compat_cheap_model"] = settings.judge_model
     return make_client(settings.model_copy(update=pinned))

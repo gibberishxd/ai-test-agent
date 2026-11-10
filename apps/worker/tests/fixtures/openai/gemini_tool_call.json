@@ -1,0 +1,22 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {"arguments": "{\"element_id\":3,\"text\":\"ada@example\",\"reasoning\":\"invalid email\"}", "name": "type"},
+            "id": "function-call-1",
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1794300001,
+  "model": "gemini-3-flash",
+  "object": "chat.completion",
+  "usage": {"completion_tokens": 25, "prompt_tokens": 900, "total_tokens": 925}
+}

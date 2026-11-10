@@ -1,0 +1,9 @@
+{
+  "id": "chatcmpl-xyz",
+  "object": "chat.completion",
+  "model": "gpt-5-nano",
+  "choices": [
+    {"index": 0, "message": {"role": "assistant", "content": "{\"match\": 5, \"reason\": \"same total\"}"}, "finish_reason": "stop"}
+  ],
+  "usage": {"prompt_tokens": 300, "completion_tokens": 12, "total_tokens": 312}
+}

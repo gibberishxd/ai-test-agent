@@ -277,3 +277,43 @@ def test_a_broken_fake_script_is_a_config_error():
     settings = Settings(_env_file=None, llm_provider="fake", fake_script="[not json")
     with pytest.raises(ConfigError):
         make_client(settings)
+
+
+# --- any model: openai-compat and claude-cli providers ------------------------------------------
+
+
+def test_make_client_openai_compat_from_settings():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="openai-compat",
+        openai_compat_base_url="https://openrouter.test/api/v1",
+        openai_compat_model="some/model",
+        openai_compat_api_key="sk-or-123",
+    )
+    client = make_client(settings)
+    assert (client.provider, client.agent_model, client.cheap_model) == (
+        "openai-compat",
+        "some/model",
+        "some/model",
+    )
+
+
+def test_openai_compat_needs_a_base_url_and_a_model():
+    with pytest.raises(ConfigError):
+        make_client(Settings(_env_file=None, llm_provider="openai-compat"))
+
+
+def test_claude_cli_only_starts_in_dev_mode(monkeypatch):
+    monkeypatch.delenv("NODE_ENV", raising=False)
+    monkeypatch.delenv("ENV", raising=False)
+    with pytest.raises(ConfigError, match="DEV_MODE"):
+        make_client(Settings(_env_file=None, llm_provider="claude-cli", dev_mode=False))
+    client = make_client(Settings(_env_file=None, llm_provider="claude-cli", dev_mode=True))
+    assert client.provider == "claude-cli"
+
+
+@pytest.mark.parametrize("variable", ["NODE_ENV", "ENV"])
+def test_claude_cli_never_starts_in_production(monkeypatch, variable):
+    monkeypatch.setenv(variable, "production")
+    with pytest.raises(ConfigError, match="production"):
+        make_client(Settings(_env_file=None, llm_provider="claude-cli", dev_mode=True))

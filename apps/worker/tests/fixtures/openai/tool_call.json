@@ -1,0 +1,24 @@
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1794300000,
+  "model": "gpt-5-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "click", "arguments": "{\"element_id\": 7, \"reasoning\": \"open the cart\"}"}
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {"prompt_tokens": 1200, "completion_tokens": 40, "total_tokens": 1240}
+}
