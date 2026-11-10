@@ -64,8 +64,9 @@ COLLECT_ELEMENTS_JS = """(max) => {
   document.querySelectorAll('[data-agent-id]').forEach(e => e.removeAttribute('data-agent-id'));
   const implicitRole = { a: 'link', button: 'button', select: 'combobox', textarea: 'textbox',
                          summary: 'button' };
+  // ARIA's implicit roles (the ones Playwright's get_by_role uses, so replay finds them again).
   const inputRole = { checkbox: 'checkbox', radio: 'radio', submit: 'button', button: 'button',
-                      reset: 'button', range: 'slider', search: 'searchbox' };
+                      reset: 'button', range: 'slider', search: 'searchbox', number: 'spinbutton' };
   const shown = (n) => {
     const box = n.getBoundingClientRect();
     const style = getComputedStyle(n);

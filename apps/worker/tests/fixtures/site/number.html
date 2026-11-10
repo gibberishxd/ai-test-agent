@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Number field</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <label for="qty">Quantity</label>
+    <input id="qty" type="number" value="1" min="0" />
+    <label for="mail">Email</label>
+    <input id="mail" type="email" />
+    <p id="echo"></p>
+    <script>
+      document.getElementById("qty").oninput = (e) => {
+        document.getElementById("echo").textContent = "Quantity is " + e.target.value;
+      };
+    </script>
+  </body>
+</html>

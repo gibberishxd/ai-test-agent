@@ -177,3 +177,27 @@ def test_replay_resolves_a_relative_navigate(context, site_url):
     page = context.new_page()
     replay(page, f"{site_url}/form.html", [ReplayStep("navigate", {"url": "/cards.html"}, None)])
     assert page.url == f"{site_url}/cards.html"
+
+
+def test_a_number_field_is_a_spinbutton_and_replay_can_type_into_it(context, site_url):
+    # A number input's role is "spinbutton" (ARIA), not "textbox": calling it a textbox made
+    # replay look for an element that doesn't exist and dismiss correct bug reports.
+    from worker.agent.observe import read_page
+
+    page = context.new_page()
+    page.goto(f"{site_url}/number.html")
+    roles = {e.name: e.role for e in read_page(page).elements}
+    assert roles == {"Quantity": "spinbutton", "Email": "textbox"}
+
+    fresh = context.new_page()
+    target = {"role": "spinbutton", "name": "Quantity", "nth": 0, "count": 1}
+    replay(fresh, f"{site_url}/number.html", [ReplayStep("type", {"text": "3"}, target)])
+    assert fresh.locator("#echo").inner_text() == "Quantity is 3"
+
+
+def test_replay_finds_a_field_by_its_label_when_the_recorded_role_is_off(context, site_url):
+    # Runs recorded before the fix stored "textbox" for number fields.
+    page = context.new_page()
+    target = {"role": "textbox", "name": "Quantity", "nth": 0, "count": 1}
+    replay(page, f"{site_url}/number.html", [ReplayStep("type", {"text": "4"}, target)])
+    assert page.locator("#echo").inner_text() == "Quantity is 4"
