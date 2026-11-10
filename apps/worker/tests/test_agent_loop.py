@@ -336,3 +336,24 @@ def test_passive_mode_allows_looking_tools_but_not_double_click(agent):
     result = run.run()
     assert [s.blocked for s in result.steps[:4]] == [False, False, False, True]
     assert page.locator("#quantity").inner_text() == "1"
+
+
+def test_the_same_prompt_object_is_sent_on_every_step(agent):
+    class Recording(FakeClient):
+        systems = []
+
+        def decide(self, system, *args, **kwargs):
+            self.systems.append(system)
+            return super().decide(system, *args, **kwargs)
+
+    run, _, _ = agent([])
+    run.llm = Recording(
+        decisions=[
+            call("scroll", direction="down"),
+            call("note", text="x"),
+            call("finish", summary=""),
+        ]
+    )
+    run.run()
+    assert len(Recording.systems) == 3
+    assert all(system is SYSTEM_PROMPT for system in Recording.systems)  # cacheable prefix
