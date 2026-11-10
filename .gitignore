@@ -37,3 +37,4 @@ apps/worker/data/
 apps/worker/AItestagent.txt
 aitestagentprogress*.txt
 *.transcript.txt
+testprogress*.txt

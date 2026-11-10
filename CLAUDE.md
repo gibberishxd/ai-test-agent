@@ -57,3 +57,7 @@ go-ahead" and "the AI core is the owner's to write".
 Demo v1 (branch `demo-v1`): milestones M1–M9 done (M4/M5 measured with a local model only).
 Next: re-run M4/M5 and the benchmark with Claude (see "Needs me" in `docs/PROGRESS.md`), then
 review and merge `demo-v1` into `main`.
+
+## Unattended run 3 (branch `agent-v3`)
+Goals and acceptance checks: [`docs/RUN_PLAN_3.md`](docs/RUN_PLAN_3.md). Same override rules as run 2,
+plus at most one claude-cli benchmark run (H7).
