@@ -18,8 +18,10 @@ import {
   percent,
   percentOrDash,
   trend,
+  verification,
   type BenchmarkRow,
   type PerBug,
+  type Verification,
 } from "@/lib/benchmark";
 import { db } from "@/lib/db";
 import { formatCost, formatDate } from "@/lib/format";
@@ -79,6 +81,8 @@ export default async function BenchmarkPage() {
                 <TableHead className="text-right">Precision</TableHead>
                 <TableHead className="text-right">False alarms</TableHead>
                 <TableHead className="text-right">Holdout AI-only</TableHead>
+                <TableHead className="text-right">Reported → verified</TableHead>
+                <TableHead className="text-right">Correct but discarded</TableHead>
                 <TableHead className="text-right">Cost / run</TableHead>
                 <TableHead className="text-right">Time / run</TableHead>
                 <TableHead>Date</TableHead>
@@ -96,6 +100,10 @@ export default async function BenchmarkPage() {
                   <TableCell className="text-right tabular-nums">{percent(row.precision)}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.falseAlarms.toFixed(1)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percentOrDash(holdout(row)?.aiRecall)}</TableCell>
+                  <TableCell className="text-right tabular-nums whitespace-nowrap">
+                    {funnelLabel(verification(row))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{verification(row)?.correctButDiscarded ?? "—"}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCost(row.avgCostUsd)}</TableCell>
                   <TableCell className="text-right tabular-nums">{Math.round(row.avgDurationS)} s</TableCell>
                   <TableCell className="whitespace-nowrap">{formatDate(row.createdAt)}</TableCell>
@@ -134,6 +142,7 @@ export default async function BenchmarkPage() {
                 <Tile label="Holdout AI-only" value={percentOrDash(holdout(row)?.aiRecall)} hint="app never tuned for" />
                 <Tile label="Cost / run" value={formatCost(row.avgCostUsd)} hint={`${Math.round(row.avgDurationS)} s avg`} />
               </dl>
+              <VerificationSummary funnel={verification(row)} />
               <p className="text-xs text-muted-foreground">Judge: {judgeLabel(row)}</p>
             </div>
           ))}
@@ -326,6 +335,33 @@ function Tile({ label, value, hint, headline = false }: { label: string; value: 
       <dt className={headline ? "text-sm font-medium" : "text-sm text-muted-foreground"}>{label}</dt>
       <dd className={headline ? "mt-1 text-3xl font-semibold tabular-nums" : "mt-1 text-2xl font-semibold tabular-nums"}>{value}</dd>
       <dd className="text-xs text-muted-foreground">{hint}</dd>
+    </div>
+  );
+}
+
+function funnelLabel(funnel: Verification | null): string {
+  return funnel ? `${funnel.reported} → ${funnel.verified}` : "—";
+}
+
+/** What replay verification threw away, so a too-strict verifier is visible (run 3). */
+function VerificationSummary({ funnel }: { funnel: Verification | null }) {
+  if (!funnel) return null;
+  return (
+    <div className="grid gap-1 rounded-lg bg-muted/50 p-3 text-sm" data-testid="verification-summary">
+      <p>
+        <span className="font-medium">Verification:</span> {funnel.reported} reported → {funnel.verified} verified (
+        {funnel.duplicates} duplicates, {funnel.discardedAtReplay} discarded at replay).
+      </p>
+      <p>
+        <span className="font-medium">Correct but discarded: {funnel.correctButDiscarded}</span>
+        {funnel.bugsLost > 0 && <> ({funnel.bugsLost} planted bug(s) lost)</>}. Before verification: AI-only recall{" "}
+        {percent(funnel.aiRecallBefore)}, false alarms {funnel.falseAlarmsBefore.toFixed(1)} per clean run.
+      </p>
+      {funnel.reasons.length > 0 && (
+        <p className="text-muted-foreground">
+          Discarded because: {funnel.reasons.map(([reason, n]) => `${reason.replaceAll("_", " ")} ${n}`).join(", ")}
+        </p>
+      )}
     </div>
   );
 }

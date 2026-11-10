@@ -21,16 +21,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from worker.benchmark import (
     HOLDOUT_BUGS_JSON,
     BenchmarkScores,
+    all_reports,
     benchmark_workspace,
     git_commit,
     judge_name,
     load_planted,
-    match_report,
     print_scores,
     queue_runs,
     report_bugs,
     save_scores,
     score,
+    staged_match,
     wait_for,
 )
 from worker.config import REPO_ROOT, Settings, get_settings
@@ -223,10 +224,14 @@ def score_runs(
 def _score_set(session, judge, buggy_ids, clean_ids, planted, commit) -> BenchmarkScores:
     finished = [run for run_id in buggy_ids + clean_ids if (run := session.get(Run, run_id))]
     buggy = {
-        run_id: [match_report(judge, run_id, bug, planted) for bug in report_bugs(session, run_id)]
+        run_id: [staged_match(judge, run_id, bug, planted) for bug in all_reports(session, run_id)]
         for run_id in buggy_ids
     }
     clean = {run_id: len(report_bugs(session, run_id)) for run_id in clean_ids}
+    clean_before = {
+        run_id: sum(1 for bug in all_reports(session, run_id) if bug.duplicate_of_id is None)
+        for run_id in clean_ids
+    }
     durations = [
         (run.finished_at - run.started_at).total_seconds()
         for run in finished
@@ -243,6 +248,7 @@ def _score_set(session, judge, buggy_ids, clean_ids, planted, commit) -> Benchma
         model=(first.model if first else None) or judge.agent_model,
         git_commit=commit,
         judge=judge_name(judge),
+        clean_before=clean_before,
     )
 
 

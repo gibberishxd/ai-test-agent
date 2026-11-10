@@ -575,3 +575,23 @@ numbers are the real test (Needs me).
   local judge (gemma4:12b) 6 of 6 are confirmed, incl. bug 5 (cart total) and bug 8 (Save
   changes). The original verdicts came from Sonnet, so the judge differs: the stored run is not
   changed. All 16 previously confirmed agent reports of 11 older runs still replay.
+
+## D54. The verification funnel and "correct but discarded" (run 3, H2)
+- **Decision:** scoring now matches *every* report of a buggy run, not only the ones that
+  survived verification, and records how each one ended (`stage`: verified, judge_said_no,
+  could_not_replay, duplicate; plus the replay failure kind). Recall, AI-only recall and
+  precision still count only surviving reports (what the customer sees). New numbers:
+  recall / AI-only recall *before* verification, false alarms before verification (clean-run
+  reports incl. dismissed ones), the funnel (reported → verified, duplicates, discarded at
+  replay by reason), **correct but discarded** (discarded reports that match a planted bug)
+  and bugs lost (planted bugs a run found but lost entirely). Shown in `bench` output, on the
+  leaderboard and on each latest-score card.
+- **Alternatives:** new columns in `benchmark_results` (a migration for numbers nothing sorts
+  or filters on); judging dismissed reports in a separate script (the numbers would not be
+  next to the scores they explain).
+- **Why:** run 2's lost Sonnet reports were invisible in every score. If "correct but
+  discarded" is high, verification is too strict; if false alarms drop a lot from before to
+  after, it is earning its keep. Duplicates are not sent to the judge (the report they
+  duplicate already is), so the extra judge calls are only for discarded reports.
+- **False alarms for claude-cli:** they were "not measured" in run 2 because the single
+  Sonnet run had no clean run. The H7 benchmark run includes a clean run, so they are measured.

@@ -51,3 +51,95 @@ def test_rescore_keeps_the_original_commit_and_records_its_own(sessions, monkeyp
     with sessions() as session:
         latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
         assert (latest.git_commit, latest.rescore_commit) == ("abc1234", "def5678")
+
+
+# --- Run 3, H2 -------------------------------------------------------------------------------
+
+
+def test_saved_result_keeps_what_verification_did_for_shop_and_holdout(sessions):
+    funnel = {"reported": 5, "verified": 3, "discard_reasons": {"timeout": 1}}
+    holdout = scores(correct_but_discarded=1, verification={"reported": 2})
+    with sessions() as session:
+        row = save_scores(
+            session,
+            scores(
+                recall_before=0.5,
+                ai_recall_before=0.25,
+                false_alarms_before=2.0,
+                correct_but_discarded=2,
+                verification=funnel,
+                holdout=holdout,
+            ),
+            {"buggy": [], "clean": []},
+        )
+        saved = session.get(BenchmarkResult, row.id).details["verification"]
+    assert saved == {
+        **funnel,
+        "recall_before": 0.5,
+        "ai_recall_before": 0.25,
+        "false_alarms_before": 2.0,
+        "correct_but_discarded": 2,
+    }
+    assert row.details["holdout"]["verification"]["correct_but_discarded"] == 1
+
+
+def test_scoring_matches_discarded_reports_too_and_records_their_stage(sessions, workspace):
+    from worker.benchmark import PlantedBug
+    from worker.db.models import Bug, Run
+    from worker.main import _score_set
+
+    def bug(run, title, status="confirmed", **fields):
+        return Bug(
+            run_id=run.id,
+            title=title,
+            severity="medium",
+            category="functional",
+            page_url="http://localhost:5173/cart",
+            source="agent",
+            status=status,
+            **fields,
+        )
+
+    with sessions() as session:
+        buggy, clean = (Run(workspace_id=workspace.id, target_url="http://x/") for _ in range(2))
+        session.add_all([buggy, clean])
+        session.flush()
+        kept = bug(buggy, "Total is wrong")
+        session.add(kept)
+        session.flush()
+        session.add_all(
+            [
+                bug(
+                    buggy,
+                    "Save does nothing",
+                    "dismissed",
+                    dismiss_reason="could not replay: step 2 (type): no textbox",
+                    evidence={"replay_failure": {"kind": "element_not_found"}},
+                ),
+                bug(
+                    buggy,
+                    "Total wrong again",
+                    "dismissed",
+                    dismiss_reason="duplicate of: Total is wrong",
+                    duplicate_of_id=kept.id,
+                ),
+                bug(clean, "Clean run report", "dismissed", dismiss_reason="replay: fine"),
+            ]
+        )
+        session.commit()
+        planted = [
+            PlantedBug(5, "/cart", "Cart total", "ignores quantity"),
+            PlantedBug(8, "/cart", "Save", "does nothing"),
+        ]
+        judge = FakeClient(texts=['{"match": 5}', '{"match": 8}'])
+        result = _score_set(session, judge, [str(buggy.id)], [str(clean.id)], planted, "abc")
+
+    stages = {d.report: (d.stage, d.failure_kind, d.matched) for d in result.decisions}
+    assert stages == {
+        "Total is wrong": ("verified", None, 5),
+        "Save does nothing": ("could_not_replay", "element_not_found", 8),
+        "Total wrong again": ("duplicate", None, None),  # duplicates aren't sent to the judge
+    }
+    assert len(judge.calls) == 2
+    assert result.correct_but_discarded == 1
+    assert (result.false_alarms, result.false_alarms_before) == (0.0, 1.0)

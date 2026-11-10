@@ -10,6 +10,7 @@ import {
   percent,
   percentOrDash,
   trend,
+  verification,
   type BenchmarkRow,
 } from "./benchmark";
 
@@ -126,5 +127,48 @@ describe("leaderboard", () => {
     const old = row({ id: "old", provider: "ollama", model: "qwen", aiRecall: null, recall: 0.33 });
     const superseded = row({ id: "older-strong", provider: "claude", model: "sonnet", aiRecall: 0.9, createdAt: new Date("2026-11-01") });
     expect(leaderboard([weak, old, superseded, strong, tie]).map((r) => r.id)).toEqual(["strong", "tie", "weak", "old"]);
+  });
+});
+
+describe("verification", () => {
+  const stored = {
+    reported: 9,
+    verified: 5,
+    duplicates: 1,
+    discarded_at_replay: 3,
+    discard_reasons: { judge_said_no: 1, element_not_found: 2 },
+    bugs_lost: 1,
+    recall_before: 0.5,
+    ai_recall_before: 0.25,
+    false_alarms_before: 2,
+    correct_but_discarded: 2,
+  };
+
+  it("reads what verification threw away, biggest reason first", () => {
+    expect(verification(row({ details: { verification: stored } }))).toEqual({
+      reported: 9,
+      verified: 5,
+      duplicates: 1,
+      discardedAtReplay: 3,
+      reasons: [
+        ["element_not_found", 2],
+        ["judge_said_no", 1],
+      ],
+      bugsLost: 1,
+      recallBefore: 0.5,
+      aiRecallBefore: 0.25,
+      falseAlarmsBefore: 2,
+      correctButDiscarded: 2,
+    });
+  });
+
+  it("reads the holdout's numbers from the holdout details", () => {
+    const details = { holdout: { verification: { ...stored, correct_but_discarded: 4 } } };
+    expect(verification(row({ details }), "holdout")?.correctButDiscarded).toBe(4);
+  });
+
+  it("is null for results saved before it was recorded", () => {
+    expect(verification(row({ details: {} }))).toBeNull();
+    expect(verification(row({ details: null }))).toBeNull();
   });
 });

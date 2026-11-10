@@ -179,3 +179,108 @@ def test_per_bug_results_say_how_each_bug_is_detected():
         "found_runs": 1,
         "detection": "agent",
     }
+
+
+# --- Run 3, H2: what verification throws away ----------------------------------------------
+
+
+def staged(run, matched, stage="verified", failure_kind=None):
+    return MatchDecision(
+        run_id=run,
+        report="r",
+        page="/",
+        candidates=[],
+        matched=matched,
+        reason="",
+        stage=stage,
+        failure_kind=failure_kind,
+    )
+
+
+FUNNEL_RUNS = {
+    "a": [
+        staged("a", 1),  # verified, matches bug 1
+        staged("a", 5, "could_not_replay", "element_not_found"),  # correct but discarded
+        staged("a", None, "judge_said_no"),  # discarded, and rightly so
+        staged("a", 1, "duplicate"),  # merged into the first report
+    ],
+    "b": [
+        staged("b", 7, "judge_said_no"),  # correct but discarded
+        staged("b", 7, "verified"),  # ...but another report of bug 7 survived
+        staged("b", None, "verified"),  # verified, matches nothing: lowers precision
+    ],
+}
+
+
+def test_recall_and_precision_count_only_reports_that_survived_verification():
+    scores = score(FUNNEL_RUNS, {}, PLANTED, [], [], "fake", "m", "abc")
+    assert scores.recall == pytest.approx((1 / 4 + 1 / 4) / 2)  # a: {1}, b: {7}
+    assert scores.precision == pytest.approx(2 / 3)  # 3 surviving reports, 2 matched
+
+
+def test_recall_before_verification_counts_every_report_except_duplicates():
+    scores = score(FUNNEL_RUNS, {}, PLANTED, [], [], "fake", "m", "abc")
+    assert scores.recall_before == pytest.approx((2 / 4 + 1 / 4) / 2)  # a: {1, 5}, b: {7}
+
+
+def test_the_verification_funnel_counts_each_stage_and_why_reports_were_discarded():
+    funnel = score(FUNNEL_RUNS, {}, PLANTED, [], [], "fake", "m", "abc").verification
+    assert funnel["reported"] == 7
+    assert funnel["verified"] == 3
+    assert funnel["duplicates"] == 1
+    assert funnel["discarded_at_replay"] == 3
+    assert funnel["discard_reasons"] == {"element_not_found": 1, "judge_said_no": 2}
+
+
+def test_correct_but_discarded_counts_discarded_reports_that_match_a_planted_bug():
+    scores = score(FUNNEL_RUNS, {}, PLANTED, [], [], "fake", "m", "abc")
+    assert scores.correct_but_discarded == 2  # bug 5 in run a, bug 7 in run b
+    # Bug 5 in run a was lost entirely; bug 7 in run b survived through another report.
+    assert scores.verification["bugs_lost"] == 1
+
+
+def test_false_alarms_before_and_after_verification():
+    scores = score({}, {"clean": 1}, PLANTED, [], [], "fake", "m", "abc", clean_before={"clean": 4})
+    assert scores.false_alarms == 1.0
+    assert scores.false_alarms_before == 4.0
+
+
+def test_false_alarms_before_verification_default_to_the_ones_after():
+    scores = score({}, {"clean": 2}, PLANTED, [], [], "fake", "m", "abc")
+    assert scores.false_alarms_before == 2.0
+
+
+def test_stage_of_a_bug_follows_how_verification_ended():
+    from worker.benchmark import stage_of
+
+    def bug(status, reason=None, evidence=None, duplicate=False):
+        return SimpleNamespace(
+            status=status,
+            dismiss_reason=reason,
+            evidence=evidence or {},
+            duplicate_of_id="x" if duplicate else None,
+        )
+
+    assert stage_of(bug("confirmed")) == ("verified", None)
+    assert stage_of(bug("candidate")) == ("verified", None)  # never checked: still reported
+    assert stage_of(bug("dismissed", "replay: works fine")) == ("judge_said_no", None)
+    failed = {"replay_failure": {"kind": "timeout"}}
+    assert stage_of(bug("dismissed", "could not replay: x", failed)) == (
+        "could_not_replay",
+        "timeout",
+    )
+    # Runs from before failure kinds were stored.
+    assert stage_of(bug("dismissed", "could not replay: x")) == ("could_not_replay", "unknown")
+    assert stage_of(bug("dismissed", "duplicate of: y", duplicate=True)) == ("duplicate", None)
+
+
+def test_printed_scores_show_what_verification_threw_away(capsys):
+    from worker.benchmark import print_scores
+
+    print_scores(score(FUNNEL_RUNS, {"c": 0}, PLANTED, [], [], "fake", "m", "abc"))
+    out = capsys.readouterr().out
+    assert "reported 7 → verified 3 (duplicates 1, discarded at replay 3)" in out
+    assert "correct but discarded  2" in out
+    assert "element_not_found 1, judge_said_no 2" in out
+    assert "recall before verification" in out
+    assert "false alarms before verification" in out

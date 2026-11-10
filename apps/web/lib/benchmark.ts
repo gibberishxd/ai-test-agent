@@ -138,3 +138,51 @@ export function percent(value: number): string {
 export function percentOrDash(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : percent(value);
 }
+
+export type Verification = {
+  reported: number;
+  verified: number;
+  duplicates: number;
+  discardedAtReplay: number;
+  /** Why reports were discarded at replay, biggest reason first. */
+  reasons: [string, number][];
+  /** Planted bugs a run found but lost entirely in verification. */
+  bugsLost: number;
+  recallBefore: number;
+  aiRecallBefore: number;
+  falseAlarmsBefore: number;
+  /** Discarded reports that match a planted bug: high means verification is too strict. */
+  correctButDiscarded: number;
+};
+
+type StoredVerification = {
+  reported: number;
+  verified: number;
+  duplicates: number;
+  discarded_at_replay: number;
+  discard_reasons: Record<string, number>;
+  bugs_lost: number;
+  recall_before: number;
+  ai_recall_before: number;
+  false_alarms_before: number;
+  correct_but_discarded: number;
+};
+
+/** What verification did in this result (shop, or the holdout app). Null on older rows. */
+export function verification(row: BenchmarkRow, set: "shop" | "holdout" = "shop"): Verification | null {
+  const details = (row.details ?? {}) as { verification?: StoredVerification; holdout?: { verification?: StoredVerification } };
+  const v = set === "holdout" ? details.holdout?.verification : details.verification;
+  if (!v || typeof v.reported !== "number") return null;
+  return {
+    reported: v.reported,
+    verified: v.verified,
+    duplicates: v.duplicates,
+    discardedAtReplay: v.discarded_at_replay,
+    reasons: Object.entries(v.discard_reasons ?? {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    bugsLost: v.bugs_lost,
+    recallBefore: v.recall_before,
+    aiRecallBefore: v.ai_recall_before,
+    falseAlarmsBefore: v.false_alarms_before,
+    correctButDiscarded: v.correct_but_discarded,
+  };
+}

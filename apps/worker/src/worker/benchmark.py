@@ -14,6 +14,7 @@ decision is saved so a human can spot-check it.
 import json
 import subprocess
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -54,6 +55,10 @@ class MatchDecision:
     candidates: list[int]
     matched: int | None
     reason: str
+    # How verification ended for this report: "verified" (kept: confirmed, or never checked),
+    # "judge_said_no" (replayed, the model didn't see it), "could_not_replay", "duplicate".
+    stage: str = "verified"
+    failure_kind: str | None = None  # for "could_not_replay": evidence.replay_failure.kind
 
 
 @dataclass
@@ -74,6 +79,12 @@ class BenchmarkScores:
     ai_recall: float = 0.0
     holdout: "BenchmarkScores | None" = None  # the same scores on the holdout app
     rescore_commit: str | None = None  # set by `bench --rescore`
+    # What verification did (run 3): see score().
+    recall_before: float = 0.0
+    ai_recall_before: float = 0.0
+    false_alarms_before: float = 0.0
+    correct_but_discarded: int = 0
+    verification: dict = field(default_factory=dict)
 
 
 def load_planted(path: Path = BUGS_JSON) -> list[PlantedBug]:
@@ -166,50 +177,98 @@ def score(
     model: str,
     git_commit: str,
     judge: str = "",
+    clean_before: dict[str, int] | None = None,
 ) -> BenchmarkScores:
     """Compute the scores from match decisions (one list per buggy run).
 
+    Only reports that survived verification (stage "verified") count for:
     recall: average over buggy runs of (distinct planted bugs found / planted bugs).
     ai_recall: the same over the bugs that need judgement only (detection "agent"): the
     deterministic checks find the others for free, whichever model runs.
-    precision: matched reports / all reports, over all buggy runs (duplicates of a real bug
-    count as matched, not as false alarms).
+    precision: matched reports / reported reports, over all buggy runs.
     false_alarms: average number of reports per clean run.
-    """
 
-    def recall_over(bugs: list[PlantedBug]) -> list[float]:
+    What verification did: recall_before / ai_recall_before count every report but
+    duplicates; correct_but_discarded is how many discarded reports matched a planted bug (if
+    it's high, verification is too strict); false_alarms_before uses `clean_before` (reports
+    per clean run before verification); `verification` holds the counts per stage.
+    """
+    kept = {run: [d for d in ds if d.stage == "verified"] for run, ds in buggy.items()}
+    seen = {run: [d for d in ds if d.stage != "duplicate"] for run, ds in buggy.items()}
+
+    def recall_over(bugs: list[PlantedBug], runs: dict) -> list[float]:
         ids = {b.id for b in bugs}
         if not ids:
             return []
-        return [len({d.matched for d in ds} & ids) / len(ids) for ds in buggy.values()]
+        return [len({d.matched for d in ds} & ids) / len(ids) for ds in runs.values()]
 
-    recalls = recall_over(planted)
-    ai_recalls = recall_over([b for b in planted if b.detection == "agent"])
-    all_decisions = [d for ds in buggy.values() for d in ds]
+    def mean(values) -> float:
+        values = list(values)
+        return sum(values) / len(values) if values else 0.0
+
+    ai_bugs = [b for b in planted if b.detection == "agent"]
+    all_decisions = [d for ds in kept.values() for d in ds]
     matched = sum(1 for d in all_decisions if d.matched is not None)
     per_bug = {
         b.id: {
             "title": b.title,
-            "found_runs": sum(1 for ds in buggy.values() if any(d.matched == b.id for d in ds)),
+            "found_runs": sum(1 for ds in kept.values() if any(d.matched == b.id for d in ds)),
             "detection": b.detection,
         }
         for b in planted
     }
+    every = [d for ds in buggy.values() for d in ds]
+    discarded = [d for d in every if d.stage in ("judge_said_no", "could_not_replay")]
+    reasons = Counter(
+        "judge_said_no" if d.stage == "judge_said_no" else (d.failure_kind or "unknown")
+        for d in discarded
+    )
+    bugs_lost = sum(
+        len({d.matched for d in seen[run]} - {d.matched for d in kept[run]} - {None})
+        for run in buggy
+    )
+    verification = {
+        "reported": len(every),
+        "verified": len(all_decisions),
+        "duplicates": sum(1 for d in every if d.stage == "duplicate"),
+        "discarded_at_replay": len(discarded),
+        "discard_reasons": dict(sorted(reasons.items())),
+        "bugs_lost": bugs_lost,
+    }
+    clean_before = clean_reports if clean_before is None else clean_before
     return BenchmarkScores(
         provider=provider,
         model=model,
         git_commit=git_commit,
         runs_buggy=len(buggy),
-        recall=sum(recalls) / len(recalls) if recalls else 0.0,
-        ai_recall=sum(ai_recalls) / len(ai_recalls) if ai_recalls else 0.0,
+        recall=mean(recall_over(planted, kept)),
+        ai_recall=mean(recall_over(ai_bugs, kept)),
         precision=matched / len(all_decisions) if all_decisions else 0.0,
-        false_alarms=sum(clean_reports.values()) / len(clean_reports) if clean_reports else 0.0,
+        false_alarms=mean(clean_reports.values()),
         avg_cost_usd=sum(costs) / len(costs) if costs else 0.0,
         avg_duration_s=sum(durations) / len(durations) if durations else 0.0,
         per_bug=per_bug,
-        decisions=all_decisions,
+        decisions=every,
         judge=judge,
+        recall_before=mean(recall_over(planted, seen)),
+        ai_recall_before=mean(recall_over(ai_bugs, seen)),
+        false_alarms_before=mean(clean_before.values()),
+        correct_but_discarded=sum(1 for d in discarded if d.matched is not None),
+        verification=verification,
     )
+
+
+def stage_of(bug) -> tuple[str, str | None]:
+    """How verification ended for a stored bug: (stage, failure kind). See MatchDecision."""
+    if bug.duplicate_of_id is not None:
+        return "duplicate", None
+    if bug.status != "dismissed":
+        return "verified", None
+    reason = bug.dismiss_reason or ""
+    if reason.startswith("could not replay"):
+        kind = ((bug.evidence or {}).get("replay_failure") or {}).get("kind", "unknown")
+        return "could_not_replay", kind
+    return "judge_said_no", None
 
 
 def git_commit() -> str:
@@ -283,12 +342,59 @@ def _print_set(name: str, scores: BenchmarkScores) -> None:
     print(f"  recall         {scores.recall:.0%}  (all planted bugs, incl. the free checks)")
     print(f"  precision      {scores.precision:.0%}  (reports that matched a planted bug)")
     print(f"  false alarms   {scores.false_alarms:.1f}  (reports per run on the clean build)")
+    funnel = scores.verification
+    if funnel:
+        reasons = ", ".join(f"{k} {n}" for k, n in funnel["discard_reasons"].items()) or "none"
+        print(
+            f"  verification   reported {funnel['reported']} → verified {funnel['verified']}"
+            f" (duplicates {funnel['duplicates']},"
+            f" discarded at replay {funnel['discarded_at_replay']})"
+        )
+        print(f"  discarded because       {reasons}")
+        print(
+            f"  correct but discarded  {scores.correct_but_discarded}"
+            f"  (discarded reports that match a planted bug; {funnel['bugs_lost']} bug(s) lost)"
+        )
+        print(
+            f"  recall before verification {scores.recall_before:.0%},"
+            f" AI-only {scores.ai_recall_before:.0%}"
+        )
+        print(f"  false alarms before verification {scores.false_alarms_before:.1f}")
     print("  per bug (found in N of the buggy runs):")
     for bug_id, info in scores.per_bug.items():
         mark = "✓" if info["found_runs"] else "·"
         kind = "AI " if info.get("detection") == "agent" else "det"
         line = f"   {mark} {kind} {bug_id:>2}. {info['title']}"
         print(f"{line}  [{info['found_runs']}/{scores.runs_buggy}]")
+
+
+def verification_details(scores: BenchmarkScores) -> dict:
+    """What verification did, as saved in the result's details (no columns: nothing sorts or
+    filters on these; the leaderboard reads them from the row it already loads)."""
+    return {
+        **scores.verification,
+        "recall_before": scores.recall_before,
+        "ai_recall_before": scores.ai_recall_before,
+        "false_alarms_before": scores.false_alarms_before,
+        "correct_but_discarded": scores.correct_but_discarded,
+    }
+
+
+def all_reports(session: Session, run_id: str) -> list[Bug]:
+    """Every bug the run produced, including the ones verification dismissed."""
+    return session.query(Bug).filter(Bug.run_id == run_id).order_by(Bug.created_at).all()
+
+
+def staged_match(llm: LLMClient, run_id: str, report: Bug, planted: list[PlantedBug]):
+    """match_report plus how verification ended for the report. Duplicates aren't matched:
+    the report they duplicate already is, and they would only cost judge calls."""
+    stage, kind = stage_of(report)
+    if stage == "duplicate":
+        decision = MatchDecision(run_id, report.title, path_of(report.page_url), [], None, "")
+    else:
+        decision = match_report(llm, run_id, report, planted)
+    decision.stage, decision.failure_kind = stage, kind
+    return decision
 
 
 def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> BenchmarkResult:
@@ -299,11 +405,13 @@ def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> Ben
         "decisions": data["decisions"],
         "runs": run_ids,
         "judge": scores.judge,
+        "verification": verification_details(scores),
     }
     if holdout:
         details["holdout"] = {
             "per_bug": {str(k): v for k, v in asdict(holdout)["per_bug"].items()},
             "decisions": asdict(holdout)["decisions"],
+            "verification": verification_details(holdout),
         }
     result = BenchmarkResult(
         provider=scores.provider,
