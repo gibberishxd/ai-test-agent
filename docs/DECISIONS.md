@@ -512,3 +512,14 @@ numbers are the real test (Needs me).
   then overall recall; rows without AI-only recall go last instead of counting as 0%.
 - **Why:** it is the product's promise made concrete: bring any model, and see how it scores
   here before you trust it.
+
+## D51. ESLint with the platforms' own recommended configs, and e2e + planted bugs in CI (run 2, G7)
+- **Decision:** the web app uses `eslint-config-next` (core web vitals + TypeScript); both demo
+  apps use ESLint's, typescript-eslint's and the React hooks recommended rules. `npm run lint`
+  runs type checks, ESLint and ruff. CI gets an `e2e` job: Postgres service, Playwright
+  browsers, `verify-bugs` for both demo apps, then the web app's end-to-end tests with the
+  worker on the scripted FakeClient (`FAKE_SCRIPT`), so it costs nothing.
+- **Alternatives:** a custom rule set (more to maintain and explain); running e2e only locally
+  (it had already caught real breakage locally; CI makes it stick).
+- **Why:** recommended configs are what reviewers expect, and planted bugs that silently
+  disappear would make every benchmark number meaningless; CI now notices.

@@ -1,21 +1,32 @@
 # AI Test Agent
 
-**Paste a URL, get a bug report you can act on.** An AI agent explores a web app like a manual
-QA tester and reports bugs with severity, screenshots, repro steps, expected vs actual, and
-console/network evidence. It measures its own accuracy against a demo shop with planted bugs.
+**Bring any model. See how it performs on our benchmark before you trust it.**
 
-> Portfolio project. Built with Next.js, Python, Playwright, Postgres and Claude.
+Paste a URL and an AI agent explores the web app like a manual QA tester: it clicks through
+flows, tries invalid input, checks totals and layouts, and reports bugs with severity,
+screenshots, repro steps, expected vs actual, and console/network evidence. You choose the
+model (any OpenAI-compatible endpoint, Anthropic, or a local one), watch it work in a live
+browser pane, and compare models on a public benchmark with planted bugs and a holdout app.
+
+> Portfolio project. Built with Next.js, Python, Playwright, Postgres, and whatever model you bring.
 
 ![Report page](docs/screenshots/report.png)
 
 ## What makes it different
 
+- **Bring any model.** Settings → Models takes any OpenAI-compatible endpoint (OpenAI, Gemini,
+  OpenRouter, Groq, LM Studio, vLLM, Ollama) or an Anthropic key. The key is stored encrypted,
+  never shown again, and a *Test connection* check confirms the model can call tools and read
+  images before any run uses it. The [leaderboard](#benchmark) shows how each model scores.
+- **Watch it work.** The run page has a live browser pane: the screen the agent is looking at,
+  the element it is about to act on outlined, and why, with a filmstrip of every step.
 - **It measures itself.** A demo shop with 12 planted bugs (and a clean copy with none) gives
   recall, precision, false alarms and cost per run. Results are stored per provider and version
   and shown on the [benchmark page](#benchmark).
 - **It's safe to point at real sites.** Passive mode by default; interactive mode only on
-  verified domains; a deny list for destructive actions; hard budgets; and an egress proxy that
-  keeps the browser off private networks. All enforced in code, not in prompts.
+  verified domains and never on another site; a rule table that blocks payments, deletes and
+  other final actions; hard budgets; and an egress proxy that keeps the browser off private
+  networks. All enforced in code, not in prompts.
 - **It's cheap by design.** Free deterministic checks first; the model reads a compact text
   view of the page and gets screenshots only when needed; prompt caching; cost tracked per step.
 
@@ -30,7 +41,7 @@ flowchart LR
     W -->|poll every 1.5 s| DB
     WK --> P[Guard proxy]
     P -->|public addresses only| T[Target site]
-    WK <-->|tool use + vision| L[Claude / Ollama]
+    WK <-->|tool use + vision| L[Any model: OpenAI-compatible / Anthropic / local]
 ```
 
 1. **The web app** validates the request (URL, mode, quota, verified domain) and inserts a
@@ -45,7 +56,8 @@ flowchart LR
      tool → the worker checks it against the safety rules → runs it → logs it;
    - **replays** every bug the model reported in a fresh browser and dismisses what doesn't
      reproduce; merges duplicates.
-3. **The live run page** polls and shows the timeline, blocked actions, bugs as they're found,
+3. **The live run page** polls every 1.5 s and shows the live browser pane (screenshot, outlined
+   target, action and reason, filmstrip), the timeline, blocked actions, bugs as they're found,
    time, steps and cost. The report has copy-as-GitHub-issue / Jira buttons and a JSON download.
 
 ## Run it locally
