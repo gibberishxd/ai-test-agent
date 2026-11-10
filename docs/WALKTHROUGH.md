@@ -773,3 +773,27 @@ the owner's plan limit and is slow per step.
 3. *Why one OpenAI-compatible client instead of SDKs per provider?* Most providers expose the
    same chat-completions shape; one small client covers them, and its request can be read and
    explained in full.
+
+## Run 2: what the measurements taught (D52, `execute.py: replay_plans`, `agent/loop.py: element_number`, `observe.py` roles)
+
+**What:** four small, generic fixes found by reading the steps of real runs rather than the scores:
+replay also starts from the agent's last return to the start page; the prompt says a note never
+replaces report_bug; element ids written as "[10]" or "10" are understood; number inputs are
+recorded with their ARIA role, "spinbutton".
+
+**Why:** each one cost a real bug or a step in a measured run. The scores alone (0% for Gemma)
+said nothing about why; the step log did.
+
+**Weak spots:** the Sonnet run shows replay is still the bottleneck: it lost two correct reports
+for a reason not yet pinned down (Needs me #0 in PROGRESS).
+
+**Interview Q&A**
+1. *Your agent's score went down after you improved the prompt. What did you do?* Read the run's
+   steps. The model had seen the bug but used the new note tool instead of reporting it, and the
+   verifier threw away a correct report. Both were fixed in a way that helps on any site.
+2. *Why does an ARIA role matter for replay?* Replay finds elements again with Playwright's
+   `get_by_role`, which uses the browser's real role. Recording a different role means the
+   lookup can never match.
+3. *How do you make sure fixes aren't tuned to your demo shop?* Each fix is phrased as general
+   tester behaviour, a test checks no demo-app detail reaches the prompt, and the holdout app,
+   never tuned against, is scored next to the shop.
