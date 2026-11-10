@@ -28,8 +28,8 @@ class FakeCli:
         self.results = list(results)
         self.calls = []
 
-    def __call__(self, command: list[str], stdin: str) -> str:
-        self.calls.append({"command": command, "stdin": stdin})
+    def __call__(self, command: list[str], stdin: str, cwd) -> str:
+        self.calls.append({"command": command, "stdin": stdin, "cwd": cwd})
         return json.dumps(
             {
                 "type": "result",
@@ -99,3 +99,18 @@ def test_complete_uses_haiku():
     assert result.text == '{"match": 5}'
     command = cli.calls[0]["command"]
     assert command[command.index("--model") + 1] == "haiku"
+
+
+def test_the_cli_runs_outside_the_repo_and_restricted(tmp_path):
+    # Started inside the repo, Claude Code would load CLAUDE.md and could read bugs.json:
+    # the model must only ever see the page under test.
+    calls = []
+
+    def run(command, stdin, cwd):
+        calls.append((command, cwd))
+        return json.dumps({"result": '{"name": "finish", "arguments": {"summary": "x"}}'})
+
+    ClaudeCliClient(run=run, temp_dir=tmp_path).decide("s", "o", [FINISH])
+    command, cwd = calls[0]
+    assert cwd == tmp_path
+    assert "--restricted" in command

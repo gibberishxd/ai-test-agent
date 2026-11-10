@@ -9,8 +9,9 @@ schemas and asks for one JSON object `{"name": ..., "arguments": {...}}`. The an
 validated against the schema; an invalid answer is retried once with the reason, then the
 step ends with a clear error (the loop counts it as a step with no action).
 
-A screenshot is written to a temporary folder and the CLI may read just that folder (Read
-tool, --add-dir); without a screenshot it gets no tools at all.
+The CLI runs in a temporary folder outside the repo with --restricted: started inside the repo
+it would load CLAUDE.md and could read the demo apps' bugs.json, which would spoil the
+benchmark. A screenshot is written to that folder for the Read tool; without one, no tools.
 """
 
 import json
@@ -24,13 +25,19 @@ from typing import Any
 
 from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
 
-Runner = Callable[[list[str], str], str]  # (command, stdin) -> stdout
+Runner = Callable[[list[str], str, Path], str]  # (command, stdin, working directory) -> stdout
 TIMEOUT_S = 300
 
 
-def run_cli(command: list[str], stdin: str) -> str:
+def run_cli(command: list[str], stdin: str, cwd: Path) -> str:
     result = subprocess.run(
-        command, input=stdin, capture_output=True, text=True, timeout=TIMEOUT_S, check=False
+        command,
+        input=stdin,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT_S,
+        check=False,
     )
     if result.returncode != 0:
         raise RuntimeError(f"claude exited with {result.returncode}: {result.stderr[:300]}")
@@ -104,12 +111,15 @@ class ClaudeCliClient(LLMClient):
             "json",
             "--no-session-persistence",
             "--strict-mcp-config",
+            # No shell or code tools, and file tools only in the working directory: the temp
+            # folder, outside the repo, so this project's files (bugs.json!) stay out of reach.
+            "--restricted",
         ]
         if system:
             command += ["--system-prompt", system]
         if image_path:
             command += ["--allowedTools", "Read", "--add-dir", str(image_path.parent)]
-        data = json.loads(self._run(command, prompt))
+        data = json.loads(self._run(command, prompt, self._temp_dir))
         usage = data.get("usage") or {}
         return str(data.get("result") or ""), Usage(
             model=model,
