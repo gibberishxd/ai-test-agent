@@ -119,6 +119,9 @@ class ClaudeCliClient(LLMClient):
             command += ["--system-prompt", system]
         if image_path:
             command += ["--allowedTools", "Read", "--add-dir", str(image_path.parent)]
+        for folder in (self._temp_dir, image_path.parent if image_path else None):
+            if folder is not None:
+                outside_repo(folder)
         data = json.loads(self._run(command, prompt, self._temp_dir))
         usage = data.get("usage") or {}
         return str(data.get("result") or ""), Usage(
@@ -127,6 +130,19 @@ class ClaudeCliClient(LLMClient):
             output_tokens=usage.get("output_tokens", 0) or 0,
             cost_usd=0.0,  # the Pro plan: no per-call charge
         )
+
+
+def outside_repo(folder: Path) -> None:
+    """Refuse to let the CLI work in, or read, a folder that is or contains this repo.
+
+    Checked before every call: the CLI's file tools reach its working folder and --add-dir,
+    and the repo holds the demo apps' bug lists, which would spoil the benchmark.
+    """
+    from worker.config import REPO_ROOT
+
+    folder, repo = folder.resolve(), REPO_ROOT.resolve()
+    if folder == repo or repo in folder.parents or folder in repo.parents:
+        raise RuntimeError(f"claude-cli refused: {folder} is inside the repo or contains it")
 
 
 def _tool_instructions(tools: list[ToolSpec]) -> str:

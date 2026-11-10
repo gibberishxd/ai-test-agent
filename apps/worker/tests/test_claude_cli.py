@@ -114,3 +114,27 @@ def test_the_cli_runs_outside_the_repo_and_restricted(tmp_path):
     command, cwd = calls[0]
     assert cwd == tmp_path
     assert "--restricted" in command
+
+
+def test_every_call_refuses_a_working_folder_inside_the_repo():
+    # Run 3 rule: before every claude-cli call, check it can't reach the repo (bugs.json).
+    import pytest
+
+    from worker.config import REPO_ROOT
+
+    cli = FakeCli([json.dumps({"result": '{"name": "finish", "arguments": {"summary": "x"}}'})])
+    inside = REPO_ROOT / "apps" / "worker" / "data"
+    with pytest.raises(RuntimeError, match="inside the repo"):
+        ClaudeCliClient(run=cli, temp_dir=inside).decide("s", "o", [FINISH])
+    assert cli.calls == []  # refused before anything ran
+
+
+def test_every_call_refuses_a_working_folder_that_contains_the_repo(tmp_path):
+    import pytest
+
+    from worker.config import REPO_ROOT
+
+    cli = FakeCli([])
+    with pytest.raises(RuntimeError, match="inside the repo"):
+        ClaudeCliClient(run=cli, temp_dir=REPO_ROOT.parent).complete("hi")
+    assert cli.calls == []

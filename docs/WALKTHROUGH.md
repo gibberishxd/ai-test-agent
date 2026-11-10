@@ -797,3 +797,123 @@ for a reason not yet pinned down (Needs me #0 in PROGRESS).
 3. *How do you make sure fixes aren't tuned to your demo shop?* Each fix is phrased as general
    tester behaviour, a test checks no demo-app detail reaches the prompt, and the holdout app,
    never tuned against, is scored next to the shop.
+
+## Run 3: replay that waits for the page, and starts clean (`verify.py`, `execute.py: verify_and_dedupe`, `scan.py: guarded_browser`, `reverify.py`)
+
+**What:** before each element step, replay waits (at most 5 s) until the browser is on the page
+the agent was on and something matching the target exists. After the last step it waits until
+the page's DOM has been quiet for 500 ms (at most 3 s) before the judge looks. Each replay plan
+gets a fresh browser context (one browser and safety proxy for the whole run). Steps that
+errored in the agent's own run are skipped. Each failure is stored with a kind
+(`element_not_found`, `ambiguous_element`, `page_differs`, `timeout`, `navigation_error`,
+`action_failed`, `no_element_recorded`), the step number and a detail, in
+`bug.evidence.replay_failure`. `uv run worker reverify <run>` replays an old run's reports
+read-only, and adds a judge's verdict with `--judge`.
+
+**How it was found:** by replaying run be495c9f's stored steps offline. A fresh context per
+replay failed exactly like the run, which ruled out the first guess (shared context) as the
+cause of those failures. The page text showed the home page while the URL already said
+`/products/6`. A client-side (pushState) link changes the URL without a page load, so "wait for
+network idle" returns at once, and `locator.count()` doesn't wait at all.
+
+**Why:** a correct report thrown away by the verifier is worse than a miss, because nobody sees
+it. Result: 6 of 6 of Sonnet's reports from that run replay now (4 failed before), including
+bugs 5 and 8, and all 16 earlier confirmed reports still replay.
+
+**Weak spots:** a route that shows "Loading…" for more than 500 ms can still be judged too
+early. A page whose URL differs between runs (an order id) costs up to 5 s per step before
+replay tries anyway.
+
+**Interview Q&A**
+1. *Why did replay fail when the same steps worked by hand?* By hand there's always a pause.
+   Replay acted within milliseconds of a client-side navigation, before the route had drawn its
+   form, and nothing waited for it, because there was no page load to wait for.
+2. *Why a fresh browser context per replay?* Cookies and localStorage from one replay (a cart, a
+   sign-in) leaked into the next and changed what the judge saw (`Cart (6)` instead of
+   `Cart (3)`). A context is cheap; a new browser per replay isn't, so there's one browser and
+   many contexts.
+3. *How do you know the fix didn't break what worked?* `reverify` replayed every confirmed agent
+   report of 11 older runs: all 16 still replay. A new test replays two reports in a row where
+   the first leaves state behind.
+
+## Run 3: what verification throws away (`benchmark.py: score, stage_of, staged_match`, `lib/benchmark.ts: verification`)
+
+**What:** the benchmark now sends every report to the judge, including the ones verification
+dismissed, and records how each one ended: verified, judge said no, could not replay (with the
+failure kind), or duplicate. The scores the customer sees (recall, precision) still count only
+surviving reports. New numbers: recall and AI-only recall *before* verification, false alarms
+before verification, the funnel (reported → verified, duplicates, discarded at replay by
+reason), **correct but discarded**, and bugs lost. They appear in `bench` output, the
+leaderboard and each latest-score card.
+
+**Why:** run 2's lost Sonnet reports didn't show up in any number. A high "correct but
+discarded" says verification is too strict. A big drop in false alarms from before to after
+says it earns its keep.
+
+**Weak spots:** the before-verification numbers depend on the judge matching reports that
+weren't confirmed, which is the judge's least certain case. Duplicates aren't judged (they would
+only repeat their original's match).
+
+**Interview Q&A**
+1. *What is "correct but discarded"?* A report that matches a planted bug but failed
+   verification. It measures the verifier's false negatives, the cost of being strict.
+2. *Why keep recall "after verification" as the headline?* It's what the customer gets. The
+   before number is a diagnostic: it shows what the agent saw.
+3. *Why store this in JSON details rather than columns?* Nothing sorts or filters on it. The
+   page reads it from the row it already loads, so no migration was needed.
+
+## Run 3: the sign-in flake (`app/layout.tsx`, `e2e/signin.e2e.ts`, `e2e/signin-loop.mjs`)
+
+**What:** removed next-auth's `<SessionProvider>`. Nothing used `useSession`, and its
+`/api/auth/session` requests on page load raced the sign-in button's CSRF token.
+
+**How it was found:** a loop script signed in 50 times in fresh browsers and logged every auth
+response when an attempt failed. 2 of 50 failed, each with `POST /api/auth/callback/demo` sending
+the browser to Auth.js's "CSRF mismatch" redirect. Auth.js mints a new CSRF cookie for every auth
+request that arrives without one, so the page's own session requests could overwrite the cookie
+after the button had read its token. After the fix: 0 of 50 three times (one at a time, four in
+parallel, and right after a server restart). The e2e retry helper is gone.
+
+**Interview Q&A**
+1. *How do you debug a 1-in-25 flake?* Make it happen on demand (a 50× loop), record everything
+   on failure (the auth responses), and read what differs from a success.
+2. *Why remove a component instead of retrying?* A retry hides a race that real users hit. The
+   provider did nothing the app needed.
+3. *What guards against it coming back?* An e2e test asserts the sign-in page makes no auth
+   requests before the click.
+
+## Run 3: the queue under load, and leases (`queue.py: Heartbeat, recover_expired_leases`, `runner.py`, `scripts/db_perf.py`, `docs/DATABASE.md`)
+
+**What:** a test runs 8 workers at once against 300 queued runs and proves each run is claimed
+exactly once. Runs now have a lease: `heartbeat_at` is renewed every 15 s by a background
+thread. Any live worker fails runs silent for 60 s, in one conditional UPDATE, using the
+database clock. A worker that was only frozen re-reads its run under a row lock before writing
+the final status, so it can't undo the recovery. `scripts/db_perf.py` seeds 10k runs and 500k
+steps in a throwaway database and EXPLAINs the hot queries. One index came out of it
+(`benchmark_results(created_at)`). `docs/DATABASE.md` explains every table, key, index and the
+queue.
+
+**Interview Q&A:** see the end of `docs/DATABASE.md` (SKIP LOCKED, dead workers, proving an
+index helps).
+
+## Run 3: charter reminder (`agent/loop.py: untried_techniques`)
+
+**What:** every observation lists the charter techniques the run hasn't used yet: an unusual
+value in a field, double_click, reload, mobile viewport. Each one disappears once used.
+
+**Why:** over 11 runs Gemma 12B used double_click, reload and the mobile viewport 0 times, so
+bugs that need them were never triggered. A long charter in the system prompt is read once; a
+short line in every observation is in front of the model at every step.
+
+**Weak spots:** "unusual value" is a heuristic over the typed text: 0, 2+, negatives, very long
+text, special characters, empty, or a malformed email in a field whose name mentions mail. A
+weak model may tick a technique off once and never use it where it matters.
+
+**Interview Q&A**
+1. *Isn't that tuning to the benchmark?* The four techniques are standard exploratory testing
+   heuristics, and the reminder knows nothing about any site. The holdout app, never tuned
+   against, decides whether it stays.
+2. *Why not put it in the system prompt?* It's already there. The system prompt stays
+   byte-identical for caching, and a weak model follows what's in front of it each step.
+3. *How do you know it changes behaviour?* Count technique use per run before and after
+   (MISS_ANALYSIS) and compare holdout recall.
