@@ -60,6 +60,13 @@ flowchart LR
    target, action and reason, filmstrip), the timeline, blocked actions, bugs as they're found,
    time, steps and cost. The report has copy-as-GitHub-issue / Jira buttons and a JSON download.
 
+### Watch it work
+
+The run page's live browser pane shows the screen the agent is looking at, outlines the element
+it chose, and says what it did and why. The filmstrip below steps through the whole run.
+
+![Live browser pane](docs/screenshots/live-pane.png)
+
 ## Run it locally
 
 Requirements: Node.js 24+, Python 3.12+ with [uv](https://docs.astral.sh/uv/), Docker Desktop.
@@ -158,9 +165,20 @@ Results so far (shop: 3 buggy runs + 1 clean run each):
 | ollama · qwen3-vl:8b-instruct (local, 16 GB Mac) | 0% | 33% | 100% | 0.0 | $0.00 | 335 s | the model itself | e8d3a24 |
 | ollama · gemma4:12b (local) | 13% | 42% | 100% | 0.0 | $0.00 | 522 s | the model itself | e78a2ca |
 | ollama · gemma4:12b, 1200 s budget (local) | 13% | 42% | 100% | 0.0 | $0.00 | 1101 s | the model itself | 18e1975 |
-| claude · claude-sonnet-5-5 | not run yet: needs an API key | | | | | | | |
+| ollama · gemma4:12b, run-2 agent, shop (local) | 0% | 33% | 100% | 0.0 | $0.00 | 490 s | gemma4:12b (pinned) | 8453aea |
+| ollama · gemma4:12b, run-2 agent, **holdout** (local) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 8453aea |
+| claude-cli · Sonnet, **one run only** (owner's plan) | 13% | 42% | 100% | not measured | $0.00 | 302 s | gemma4:12b (pinned) | 0124950 |
+| claude · claude-sonnet-5-5 (API) | not run: needs an API key | | | | | | | |
 
-AI-only recall for these rows is computed from their per-bug results (bug 9, "$NaN" price, was
+What the run-2 rows show: with the new agent, Gemma 4 12B lost its one AI bug (it wrote the
+"$NaN" price in a note instead of reporting it) and found "Save does nothing" once, but replay
+threw that report away (fixed generically, D52). The holdout scored like the shop, so there is
+no sign of shop-specific tuning. Sonnet (one run through the `claude` CLI, so not a benchmark)
+explored much better: it reported a wrong cart total and the broken "Save changes" as well as
+the "$NaN" price, but replay dismissed the first two; that is the next thing to fix
+(see `docs/PROGRESS.md`). The bottleneck has moved from the model to verification.
+
+AI-only recall for the first three rows is computed from their per-bug results (bug 9, "$NaN" price, was
 the only AI bug found, by Gemma in 3 of 3 runs); they predate the holdout app. Bugs 1–4 were
 found in every run by the deterministic checks.
 

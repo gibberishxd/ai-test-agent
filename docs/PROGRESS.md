@@ -55,6 +55,25 @@ on `element_id: "[10]"`. Fixed generically in commit 0124950 (D52). The holdout 
 as the shop (only its 2 deterministic bugs), so there is no sign of shop-specific tuning, and
 no sign yet that the AI part helps a 12B model.
 
+### One run with Claude Sonnet through `claude -p` (G6.2)
+
+`LLM_PROVIDER=claude-cli` (Sonnet for decisions, the owner's Pro plan, $0 recorded), one
+interactive run on the buggy shop at commit 0124950, reports matched by the pinned local judge
+(ollama/gemma4:12b). Run be495c9f: 40 agent steps, 302 s, stopped by `finish`.
+
+- **Found (after replay):** bugs 1–4 (deterministic checks) and **9** ("Wool Socks price shows
+  $NaN") → AI-only 1 of 8 (13%), overall 5 of 12 (42%), 7 reports, all matched (precision 100%).
+- **Reported but dismissed by replay:** "Cart total ($89.00) doesn't match line price" (bug 5's
+  kind), "Profile 'Save changes' does nothing" (bug 8), and two quantity edge cases (a huge and a
+  fractional quantity accepted, which are not planted bugs). All four were dismissed with
+  "could not replay: type: no textbox "Quantity" on the page".
+- **What that means:** Sonnet used the charter (boundary values, double_click, reload, mobile
+  viewport) and saw two more planted bugs than any local model; the verifier lost them.
+  Replaying the same steps on their own afterwards succeeds step by step, so the fault is in
+  the replay environment during the run, not the steps. One cause was fixed (number inputs are
+  "spinbutton", commit a970ceb); the exact cause of the in-run failure isn't pinned down yet
+  (see Needs me).
+
 ## Run 2 (branch `agent-v2`, plan in `docs/RUN_PLAN_2.md`)
 
 | Goal | Status | Check |
@@ -73,6 +92,18 @@ The run stopped early because the Claude usage limit was reached. Root `npm test
 `npm run lint` and CI on `agent-v2` were not checked.
 
 ## Needs me
+0. **Run 2 follow-ups (no money needed unless you choose Claude API):**
+   - **Replay lost two of Sonnet's correct reports** (bugs 5 and 8, run be495c9f). Replaying
+     the steps standalone works (`uv run python <scratchpad>/replay_check.py`-style: load the
+     bug's steps with `replay_plans`, call `_replay_step` one by one), so look at what differs
+     inside `verify_and_dedupe`: one shared browser context for all bugs (cookies, storage),
+     the guard proxy, or timing. Then re-verify that run's dismissed bugs.
+   - **The full claude-cli benchmark** was not run on purpose: 7 runs × ~40 Sonnet calls would
+     use a large share of your Pro limit. To run it: `cd apps/worker && LLM_PROVIDER=claude-cli
+     uv run worker bench` (needs `DEV_MODE=true`, and the four demo servers running).
+   - **CI uses actions that target Node 20** (`actions/checkout@v4`, `setup-node@v4`,
+     `setup-uv@v6`): GitHub forces them onto Node 24 with a deprecation warning. Bump to their
+     Node 24 majors when they're out.
 1. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`
    and set `LLM_PROVIDER=claude`. Tonight runs on Ollama (`qwen3-vl:8b`, local, free).
 2. **(Optional) The `alias: ... not found` errors in `~/.bash_profile`.** Not touched: the

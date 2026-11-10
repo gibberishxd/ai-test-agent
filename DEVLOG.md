@@ -40,3 +40,16 @@ Benchmark scores go here too, once Phase 2 exists.
   domain-verification fetch.
 - Next: G2.1–G2.4 (viewport/double-click/reload/note tools, richer observation, QA charter,
   robust replay), then G3–G8 of docs/RUN_PLAN_2.md.
+
+## 2026-11-10 (run 2, unattended, branch agent-v2)
+- Built G1–G7 of docs/RUN_PLAN_2.md, test first: safety fixes (dev mode off by default, rule-table
+  deny list, unspoofable rate limit, atomic quota, share-link screenshots, pinned verification
+  fetch), tester's tools (double-click, reload, phone viewport, notes), field-aware observation,
+  a generic QA charter, exact-element replay, AI-only recall, a holdout app, a live browser pane,
+  "bring any model" (OpenAI-compatible client, encrypted workspace keys, Test connection,
+  leaderboard), a local claude-cli provider, ESLint, and an e2e CI job. CI green.
+- Measured: Gemma 4 12B 0% AI-only on shop and holdout (it noted a bug instead of reporting it;
+  replay lost a correct report). One Sonnet run via claude-cli: AI-only 13%, but it reported two
+  more planted bugs that replay dismissed. Verification is now the bottleneck, not the model.
+- Broke and fixed: claude-cli started inside the repo could read bugs.json (now runs restricted in
+  a temp folder); number inputs were recorded as "textbox" instead of "spinbutton".
