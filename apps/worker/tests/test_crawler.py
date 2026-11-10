@@ -67,3 +67,19 @@ def test_calls_on_page_for_each_visit():
 def test_should_stop_ends_the_crawl_early():
     pages = crawl(f"{BASE}/", fake_visit, should_stop=lambda: True)
     assert visited_urls(pages) == [f"{BASE}/"]  # the current page finishes, then it stops
+
+
+def test_follows_links_after_the_site_upgrades_to_https():
+    # The user typed http://, the site answers on https://: its links are still the same site.
+    site = {
+        "http://site.test/": ["https://site.test/about", "https://other.example/"],
+        "https://site.test/about": ["https://site.test/contact"],
+    }
+    pages = crawl(
+        "http://site.test/", lambda url: (PageResult(url=url, status=200), site.get(url, []))
+    )
+    assert visited_urls(pages) == [
+        "http://site.test/",
+        "https://site.test/about",
+        "https://site.test/contact",
+    ]

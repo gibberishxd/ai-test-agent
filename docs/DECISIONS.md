@@ -278,5 +278,7 @@ numbers are the real test (Needs me).
 - **Why:** before this, only the `navigate` tool was origin-checked. A click on an external
   link moved the agent to a third-party site, where interactive mode kept typing and
   submitting, which is exactly what domain verification is meant to prevent.
-- **Known limit:** origins are compared strictly, so `http://shop.example` redirecting to
-  `https://shop.example` counts as another site and stops the run. Enter the final URL.
+- **Same site:** the same origin, or the https version of an http target on the same host
+  and default ports (`urls.is_same_site`), so a site that upgrades `http://shop.example` to
+  `https://shop.example` still works. The crawler and the `navigate` check use the same rule.
+  Subdomains, other ports and a downgrade to http are another site.

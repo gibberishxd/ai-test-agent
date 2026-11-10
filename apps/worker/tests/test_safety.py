@@ -90,6 +90,12 @@ def test_navigation_must_stay_on_the_target_origin():
     assert g.check("https://example.com/font.woff2") is None  # subresources may be elsewhere
 
 
+def test_navigation_may_follow_the_target_to_https():
+    g = NetworkGuard(target_url="http://shop.test/", resolver=lambda host: ["93.184.215.14"])
+    assert g.check_navigation("https://shop.test/cart") is None
+    assert "origin" in g.check_navigation("https://other.test/")
+
+
 # --- 6.2 passive mode --------------------------------------------------------------------------
 
 LINK = ElementInfo(role="link", name="About", tag="a", href="/about")

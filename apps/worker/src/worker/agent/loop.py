@@ -23,7 +23,7 @@ from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
 from worker.safety.secrets import redact
-from worker.urls import is_same_origin
+from worker.urls import is_same_site
 
 ACTION_TIMEOUT_MS = 5000
 NAVIGATION_TIMEOUT_MS = 15_000
@@ -134,7 +134,7 @@ class AgentRun:
         wait_until_quiet(self.page, SETTLE_MS)
         late_exit = self._return_to_site()  # a delayed redirect since the last step
         state = read_page(self.page)
-        if is_same_origin(state.url, self.config.target_url):
+        if is_same_site(state.url, self.config.target_url):
             self._last_site_url = state.url
         events = self._drain_events(state.url)
         if late_exit:
@@ -234,9 +234,9 @@ class AgentRun:
         return None
 
     def _off_site(self, url: str) -> bool:
-        """Is `url` a web page on another origin than the target? (about:blank etc. are not.)"""
+        """Is `url` a web page on another site than the target? (about:blank etc. are not.)"""
         is_web = urlsplit(url).scheme.lower() in ("http", "https")
-        return is_web and not is_same_origin(url, self.config.target_url)
+        return is_web and not is_same_site(url, self.config.target_url)
 
     def _return_to_site(self) -> str | None:
         """If the page is on another site, go back to the last page on the target.

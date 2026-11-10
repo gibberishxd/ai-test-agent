@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from worker.urls import is_same_origin
+from worker.urls import is_same_site
 
 # Cloud metadata endpoints. Most are already non-global addresses, but list them explicitly.
 METADATA_IPS = {"169.254.169.254", "fd00:ec2::254", "100.100.100.200"}
@@ -113,7 +113,7 @@ class NetworkGuard:
     def check_navigation(self, url: str) -> str | None:
         """Like `check`, plus: top-level page loads must stay on the target's origin."""
         reason = self.check(url)
-        if reason is None and self.target_url and not is_same_origin(url, self.target_url):
+        if reason is None and self.target_url and not is_same_site(url, self.target_url):
             if urlsplit(url).scheme.lower() not in LOCAL_SCHEMES:
                 return "navigation leaves the target's origin"
         return reason

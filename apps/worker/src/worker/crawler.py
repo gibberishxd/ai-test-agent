@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Callable
 
 from worker.report import PageResult
-from worker.urls import is_same_origin, normalize
+from worker.urls import is_same_site, normalize
 
 VisitFn = Callable[[str], tuple[PageResult, list[str]]]
 
@@ -48,7 +48,7 @@ def crawl(
             continue
 
         for link in links:
-            if not is_same_origin(link, start):
+            if not is_same_site(link, start):
                 continue
             link = normalize(link)
             if link not in seen:
