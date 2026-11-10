@@ -47,6 +47,11 @@ only. In short:
 - Keep `docs/WALKTHROUGH.md` current: per component, what/how/why, weak spots, 3 interview Q&As.
 - End the night with a `DEVLOG.md` entry.
 
+## Unattended run 2 (branch `agent-v2`)
+The owner's plan and ground rules for the second unattended run are in
+[`docs/RUN_PLAN_2.md`](docs/RUN_PLAN_2.md). For that run only, its rules override "wait for a
+go-ahead" and "the AI core is the owner's to write".
+
 ## Current phase
 Demo v1 (branch `demo-v1`): milestones M1–M9 done (M4/M5 measured with a local model only).
 Next: re-run M4/M5 and the benchmark with Claude (see "Needs me" in `docs/PROGRESS.md`), then

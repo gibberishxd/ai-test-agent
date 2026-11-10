@@ -32,3 +32,8 @@ playwright-report/
 
 # Worker screenshots (local storage)
 apps/worker/data/
+
+# Session transcripts and exports (may contain private notes)
+apps/worker/AItestagent.txt
+aitestagentprogress*.txt
+*.transcript.txt
