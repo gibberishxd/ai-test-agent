@@ -167,6 +167,8 @@ Results so far (shop: 3 buggy runs + 1 clean run each):
 | ollama · gemma4:12b, 1200 s budget (local) | 13% | 42% | 100% | 0.0 | $0.00 | 1101 s | the model itself | 18e1975 |
 | ollama · gemma4:12b, run-2 agent, shop (local) | 0% | 33% | 100% | 0.0 | $0.00 | 490 s | gemma4:12b (pinned) | 8453aea |
 | ollama · gemma4:12b, run-2 agent, **holdout** (local) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 8453aea |
+| ollama · gemma4:12b, after the D52 fixes, shop (local) | 4% | 36% | 100% | 0.0 | $0.00 | 501 s | gemma4:12b (pinned) | 21e5669 |
+| ollama · gemma4:12b, after the D52 fixes, **holdout** (local) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 21e5669 |
 | claude-cli · Sonnet, **one run only** (owner's plan) | 13% | 42% | 100% | not measured | $0.00 | 302 s | gemma4:12b (pinned) | 0124950 |
 | claude · claude-sonnet-5-5 (API) | not run: needs an API key | | | | | | | |
 
