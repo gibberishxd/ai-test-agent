@@ -436,6 +436,10 @@ class AgentRun:
                 "\nWARNING: you keep repeating the same action. Repeating it once more ends "
                 "the run: do something different."
             )
+        untried = untried_techniques(self.result.steps)
+        if untried:
+            line += "\nCHARTER TECHNIQUES NOT TRIED YET in this run (use each where it fits):"
+            line += "".join(f"\n- {text}" for _, text in untried)
         return line
 
     def _drain_events(self, url: str) -> list[str]:
@@ -530,6 +534,52 @@ def describe(action: str, args: dict, element: Element | None) -> str:
     if action == "finish":
         return "Finish"
     return action
+
+
+# Charter techniques a model can visibly try with one tool call, and the reminder shown until it
+# has. Run 3: a 12B model used double_click, reload and the mobile viewport 0 times in 11 runs,
+# so the bugs only those reveal were never triggered. Generic: no site, page or bug in here.
+TECHNIQUES = [
+    (
+        "unusual_value",
+        "type an unusual value in a field: 0 or 2+ in a quantity, a very long text, special "
+        "characters, an empty required field, a malformed email",
+    ),
+    (
+        "double_click",
+        "double_click a button that submits or applies something: nothing may happen twice",
+    ),
+    ("reload", "reload after saving or logging out: the change (or the logout) must stick"),
+    ("mobile", "set_viewport mobile on a key page and look for text or elements out of their box"),
+]
+SPECIAL = re.compile(r"[<>&'\"%;{}]")
+
+
+def untried_techniques(steps) -> list[tuple[str, str]]:
+    """The TECHNIQUES not yet used in `steps` (blocked steps don't count), in charter order."""
+    tried = set()
+    for step in steps:
+        if step.blocked:
+            continue
+        args = step.args or {}
+        if step.action in ("double_click", "reload"):
+            tried.add(step.action)
+        elif step.action == "set_viewport" and args.get("size") == "mobile":
+            tried.add("mobile")
+        elif step.action == "type" and _unusual(str(args.get("text", "")), step.element or {}):
+            tried.add("unusual_value")
+    return [(key, text) for key, text in TECHNIQUES if key not in tried]
+
+
+def _unusual(text: str, element: dict) -> bool:
+    """A value a tester types on purpose to probe a field, rather than ordinary data."""
+    value = text.strip()
+    if value == "" or len(value) > 50 or SPECIAL.search(value):
+        return True
+    if re.fullmatch(r"-?\d+(\.\d+)?", value):
+        return value != "1"  # 1 is the ordinary quantity; 0, 2+, negatives and fractions probe
+    is_email_field = "mail" in str(element.get("name", "")).lower()
+    return is_email_field and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value)
 
 
 def element_number(value) -> int | None:

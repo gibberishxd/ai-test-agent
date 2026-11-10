@@ -661,3 +661,19 @@ numbers are the real test (Needs me).
   1200 s row; run 3's H6 benchmark, which ran on f1bf08a but will show a later commit). Now
   the commit is read before the runs start. Earlier rows are not changed; PROGRESS says which
   code each one really ran.
+
+## D59. Remind the model of charter techniques it hasn't tried (run 3, H6)
+- **Evidence (MISS_ANALYSIS):** 11 gemma4:12b runs (shop and holdout) used double_click,
+  reload and the mobile viewport **0 times**; the one Sonnet run used each. Gemma typed only
+  ordinary values (quantity 1, valid emails, one-night stays). The planted bugs that need those
+  techniques were never triggered: not missed by judgement, just never reached.
+- **Decision:** each observation's budget line lists the charter techniques this run hasn't
+  used yet (unusual value in a field, double_click, reload, mobile viewport), tracked from the
+  steps taken; a technique disappears once used. The system prompt is unchanged (caching).
+- **Alternatives:** a longer or louder charter in the system prompt (Gemma already ignores the
+  one it has); forcing techniques at fixed steps (scripted, not testing); per-form checklists
+  (needs form understanding the agent doesn't have).
+- **Why generic:** the four techniques are from the charter and apply to any site; the
+  "unusual value" check looks only at the typed text and whether the field's name mentions
+  mail. No page, product or bug of either app appears in it.
+- **Rule:** kept only if the holdout results don't drop (measured below in PROGRESS).

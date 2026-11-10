@@ -414,3 +414,11 @@ def test_an_element_id_written_as_text_still_finds_the_element(agent, written):
     result = run.run()
     assert page.locator("#status").inner_text() == "Saved:"  # Save was clicked
     assert result.steps[0].element["name"] == "Save"
+
+
+def test_the_observation_lists_charter_techniques_not_tried_yet(agent):
+    run, llm, _ = agent([call("double_click", element_id=SAVE), call("finish", summary="")])
+    run.run()
+    first, second = (c["observation"] for c in llm.calls if c["method"] == "decide")
+    assert "NOT TRIED YET" in first and "double_click" in first.split("NOT TRIED YET")[1]
+    assert "double_click" not in second.split("NOT TRIED YET")[1]
