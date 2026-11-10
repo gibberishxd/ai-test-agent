@@ -7,9 +7,12 @@
  * - File: https://<domain>/.well-known/ai-test-agent.txt containing the token
  *
  * The file check makes our server fetch a URL a user typed, which is SSRF territory, so it
- * first resolves the host and refuses private/internal addresses, and doesn't follow redirects.
+ * first resolves the host, refuses private/internal addresses, connects to exactly the address
+ * it checked (no second DNS lookup), and doesn't follow redirects.
  */
 import { lookup, resolveTxt } from "node:dns/promises";
+import { get as httpGet } from "node:http";
+import { get as httpsGet } from "node:https";
 
 export const TXT_PREFIX = "ai-test-agent-verification=";
 export const WELL_KNOWN_PATH = "/.well-known/ai-test-agent.txt";
@@ -17,7 +20,8 @@ export const WELL_KNOWN_PATH = "/.well-known/ai-test-agent.txt";
 export type VerifyDeps = {
   resolveTxt: (host: string) => Promise<string[][]>;
   resolveIps: (host: string) => Promise<string[]>;
-  fetchText: (url: string) => Promise<string | null>;
+  /** Fetch `url`, connecting to `ip` (an address of the URL's host that was already checked). */
+  fetchText: (url: string, ip: string) => Promise<string | null>;
 };
 
 export type VerifyResult = { ok: true; method: "dns" | "file" } | { ok: false; reason: string };
@@ -69,7 +73,7 @@ export async function verifyDomain(hostname: string, token: string, deps: Verify
   if (!ips.every(isPublicIp)) {
     return { ok: false, reason: `${hostname} points to a private address; it can't be verified.` };
   }
-  const body = await deps.fetchText(`https://${hostname}${WELL_KNOWN_PATH}`).catch(() => null);
+  const body = await deps.fetchText(`https://${hostname}${WELL_KNOWN_PATH}`, ips[0]).catch(() => null);
   if (body?.trim() === token) return { ok: true, method: "file" };
 
   return {
@@ -78,14 +82,53 @@ export async function verifyDomain(hostname: string, token: string, deps: Verify
   };
 }
 
-/** Real network lookups. Fetch: 5 s timeout, no redirects, small responses only. */
+type LookupCallback = (...args: unknown[]) => void;
+
+/**
+ * A DNS lookup that always answers `ip`. Given to the HTTP client so it connects to the
+ * address we validated instead of resolving the name a second time: between two lookups a
+ * hostile DNS server can swap a public address for a private one (DNS rebinding). The URL
+ * keeps the hostname, so the Host header and the TLS certificate check still use it.
+ */
+export function pinnedLookup(ip: string) {
+  const family = ip.includes(":") ? 6 : 4;
+  return (_hostname: string, options: { all?: boolean }, callback: LookupCallback): void => {
+    if (options.all) callback(null, [{ address: ip, family }]);
+    else callback(null, ip, family);
+  };
+}
+
+export const MAX_VERIFY_BYTES = 1024;
+const VERIFY_TIMEOUT_MS = 5000;
+
+/** GET `url` from `ip`: 5 s limit, no redirects, small 200 responses only. Otherwise null. */
+export function fetchPinned(url: string, ip: string): Promise<string | null> {
+  const get = url.startsWith("https:") ? httpsGet : httpGet;
+  return new Promise((resolve) => {
+    const request = get(url, { lookup: pinnedLookup(ip) as never, timeout: VERIFY_TIMEOUT_MS }, (response) => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        return resolve(null);
+      }
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        body += chunk;
+        if (body.length > MAX_VERIFY_BYTES) {
+          request.destroy();
+          resolve(null);
+        }
+      });
+      response.on("end", () => resolve(body));
+    });
+    request.on("timeout", () => request.destroy());
+    request.on("error", () => resolve(null));
+  });
+}
+
+/** Real network lookups. The file is fetched from the address that was just validated. */
 export const realDeps: VerifyDeps = {
   resolveTxt: (host) => resolveTxt(host),
   resolveIps: async (host) => (await lookup(host, { all: true })).map((entry) => entry.address),
-  fetchText: async (url) => {
-    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(5000) });
-    if (!response.ok) return null;
-    const text = await response.text();
-    return text.length <= 1024 ? text : null;
-  },
+  fetchText: fetchPinned,
 };

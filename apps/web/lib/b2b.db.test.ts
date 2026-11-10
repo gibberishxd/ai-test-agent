@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import type { VerifyDeps } from "@/lib/domains";
 import { getRun, listRuns, requestStop, startRun } from "@/lib/runs";
 import { addDomain, checkDomain } from "@/lib/settings-data";
-import { createShareLink, getSharedRun, revokeShareLink } from "@/lib/share";
+import { canReadFile, createShareLink, getSharedRun, revokeShareLink } from "@/lib/share";
 import type { RequestContext } from "@/lib/workspace";
 import { hasTestDb } from "../test/use-test-db";
 
@@ -93,6 +93,17 @@ describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
   });
 
   describe("quota", () => {
+    it("holds under a burst of simultaneous requests", async () => {
+      // Check-then-insert would let all of these through: each sees "1 run left".
+      const a = await workspace("a", 3);
+      const burst = Array.from({ length: 10 }, () =>
+        startRun(signedIn(a.id), { targetUrl: DEMO, mode: "passive" }, "ip"),
+      );
+      const results = await Promise.all(burst);
+      expect(results.filter((r) => r.ok)).toHaveLength(3);
+      expect(await db.run.count({ where: { workspaceId: a.id } })).toBe(3);
+    });
+
     it("refuses runs once the monthly quota is used", async () => {
       const a = await workspace("a", 2);
       await addRun(a.id);
@@ -111,6 +122,26 @@ describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
   });
 
   describe("share links", () => {
+    it("serve a shared run's screenshots, and only that run's", async () => {
+      const a = await workspace("a");
+      const b = await workspace("b");
+      const runA = await addRun(a.id);
+      const runB = await addRun(a.id);
+      const token = (await createShareLink(a.id, runA.id))!;
+
+      // Someone with the link, who is in another workspace (or signed out).
+      const outsider = { workspaceId: b.id, shareToken: token };
+      expect(await canReadFile(`${runA.id}/page-001.png`, outsider)).toBe(true);
+      expect(await canReadFile(`${runB.id}/page-001.png`, outsider)).toBe(false);
+      expect(await canReadFile(`${runA.id}/page-001.png`, { workspaceId: b.id, shareToken: null })).toBe(false);
+      expect(await canReadFile(`${runA.id}/page-001.png`, { workspaceId: b.id, shareToken: "x".repeat(32) })).toBe(false);
+
+      // The owner needs no token; a revoked token stops working.
+      expect(await canReadFile(`${runB.id}/page-001.png`, { workspaceId: a.id, shareToken: null })).toBe(true);
+      await revokeShareLink(a.id, runA.id);
+      expect(await canReadFile(`${runA.id}/page-001.png`, outsider)).toBe(false);
+    });
+
     it("work until revoked", async () => {
       const a = await workspace("a");
       const run = await addRun(a.id);

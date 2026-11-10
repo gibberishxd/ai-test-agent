@@ -18,6 +18,9 @@ from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec,
 from worker.llm.pricing import cost_usd
 
 CACHE = {"type": "ephemeral"}
+# Sonnet 5.5 always thinks, and thinking counts toward max_tokens. With a small limit a reply
+# can be cut off before the tool call, which wastes the step. Unused tokens cost nothing.
+MAX_TOKENS = 16000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
@@ -60,7 +63,7 @@ class ClaudeClient(LLMClient):
         content.append({"type": "text", "text": observation})
         response = self._client.messages.create(
             model=self.agent_model,
-            max_tokens=4096,
+            max_tokens=MAX_TOKENS,
             system=[{"type": "text", "text": system, "cache_control": CACHE}],
             tools=tool_definitions(tools),
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
@@ -78,6 +81,8 @@ class ClaudeClient(LLMClient):
                 texts.append(block.text)
         if response.stop_reason == "refusal":
             texts.append("[the model declined this request]")
+        if response.stop_reason == "max_tokens":
+            texts.append("[the reply was cut off at max_tokens before a tool call]")
         return Decision(tool_call=call, text="\n".join(texts), usage=self._usage(response))
 
     def review_screenshot(self, prompt: str, image: bytes, system: str | None = None) -> TextResult:
@@ -96,7 +101,7 @@ class ClaudeClient(LLMClient):
             kwargs["system"] = [{"type": "text", "text": system, "cache_control": CACHE}]
         response = self._client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=MAX_TOKENS,
             messages=[{"role": "user", "content": content}],
             **kwargs,
         )

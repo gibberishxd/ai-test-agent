@@ -26,9 +26,17 @@ type Props = {
   /** Signed-in members of the run's workspace can create and revoke share links. */
   canShare?: boolean;
   shareToken?: string | null;
+  /** On a shared report: the token that lets this viewer load the run's screenshots. */
+  filesToken?: string | null;
 };
 
-export function RunView({ initial, readOnly = false, canShare = false, shareToken = null }: Props) {
+export function RunView({
+  initial,
+  readOnly = false,
+  canShare = false,
+  shareToken = null,
+  filesToken = null,
+}: Props) {
   const [run, setRun] = useState(initial);
   const [now, setNow] = useState(() => Date.now());
   const [stopping, setStopping] = useState(false);
@@ -128,7 +136,7 @@ export function RunView({ initial, readOnly = false, canShare = false, shareToke
         ) : (
           <div className="grid gap-4">
             {shown.map((bug) => (
-              <BugCard key={bug.id} bug={bug} runUrl={runUrl} targetUrl={run.targetUrl} />
+              <BugCard key={bug.id} bug={bug} runUrl={runUrl} targetUrl={run.targetUrl} filesToken={filesToken} />
             ))}
           </div>
         )}
@@ -165,11 +173,11 @@ export function RunView({ initial, readOnly = false, canShare = false, shareToke
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
-              <StepTimeline steps={run.steps} />
+              <StepTimeline steps={run.steps} filesToken={filesToken} />
             </CollapsibleContent>
           </Collapsible>
         ) : (
-          <StepTimeline steps={[...run.steps].reverse()} />
+          <StepTimeline steps={[...run.steps].reverse()} filesToken={filesToken} />
         )}
       </section>
     </div>

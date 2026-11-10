@@ -55,7 +55,28 @@ def test_sonnet_cost():
 
 def test_cache_reads_are_cheap():
     usage = Usage(model="claude-sonnet-5-5", cache_read_tokens=1_000_000)
-    assert cost_usd("claude-sonnet-5-5", usage) == pytest.approx(0.20)
+    assert cost_usd("claude-sonnet-5-5", usage) == pytest.approx(0.10)
+
+
+# One realistic agent step: 600 fresh input tokens, 1,500 read from cache, 250 written, 300 out.
+STEP = {
+    "input_tokens": 600,
+    "cache_read_tokens": 1500,
+    "cache_write_tokens": 250,
+    "output_tokens": 300,
+}
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_usd"),
+    [
+        ("claude-sonnet-5-5", (600 * 2.00 + 1500 * 0.10 + 250 * 2.50 + 300 * 10.00) / 1e6),
+        ("claude-opus-5-5", (600 * 4.00 + 1500 * 0.20 + 250 * 5.00 + 300 * 20.00) / 1e6),
+        ("claude-haiku-5-5", (600 * 0.10 + 1500 * 0.01 + 250 * 0.125 + 300 * 0.50) / 1e6),
+    ],
+)
+def test_cost_of_a_step_adds_all_four_token_kinds(model, expected_usd):
+    assert cost_usd(model, Usage(model=model, **STEP)) == pytest.approx(expected_usd)
 
 
 def test_unknown_model_is_charged_the_highest_price():
@@ -103,10 +124,12 @@ def test_claude_decide_parses_the_tool_call_and_cost():
     decision = client.decide("system prompt", "observation", [CLICK], image=b"\x89PNG")
 
     assert decision.tool_call == ToolCall("click", {"element_id": 7})
-    expected = (1000 * 2.00 + 200 * 10.00 + 3000 * 0.20) / 1_000_000
+    expected = (1000 * 2.00 + 200 * 10.00 + 3000 * 0.10) / 1_000_000
     assert decision.usage.cost_usd == pytest.approx(expected)
     sent = messages.kwargs
     assert sent["tool_choice"]["type"] == "auto"  # forced tool use is rejected by Sonnet 5.5
+    # Thinking is always on and counts toward max_tokens: leave room for it and the tool call.
+    assert sent["max_tokens"] == 16000
     assert sent["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert sent["tools"][-1]["cache_control"] == {"type": "ephemeral"}
     assert sent["messages"][0]["content"][0]["type"] == "image"
@@ -118,6 +141,20 @@ def test_claude_decide_without_tool_call():
     decision = client.decide("s", "o", [CLICK])
     assert decision.tool_call is None
     assert decision.text == "I'm not sure"
+
+
+def test_claude_reply_cut_off_by_max_tokens_says_so():
+    client, _ = stub_claude(claude_response([], stop_reason="max_tokens"))
+    decision = client.decide("s", "o", [CLICK])
+    assert decision.tool_call is None
+    assert "max_tokens" in decision.text  # the step timeline shows why there was no action
+
+
+def test_claude_text_calls_use_the_same_token_limit():
+    text = SimpleNamespace(type="text", text="{}")
+    client, messages = stub_claude(claude_response([text], stop_reason="end_turn"))
+    client.complete("prompt", system="s")
+    assert messages.kwargs["max_tokens"] == 16000
 
 
 def test_tool_definitions_are_strict():

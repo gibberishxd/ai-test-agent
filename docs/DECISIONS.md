@@ -304,3 +304,71 @@ numbers are the real test (Needs me).
   model (it would break for anyone who hasn't downloaded it, and for Claude-only setups).
 - **Why:** a benchmark compares agents, so everything else has to stay fixed, including who
   decides what counts as a match.
+
+## D32. Safe mode is a table of rules, and the demo shops are fully exempt (run 2, G1.2)
+- **Decision:** `DENY_RULES` in `agent/policy.py`: each rule has a category, a phrase for the
+  block reason and a whole-word pattern. A click is checked against the control's text,
+  aria-label, button value, link path + query and form action (URL paths are split into words,
+  so `/billing/cancelSubscription` reads "cancel subscription"). Text fields are skipped: what
+  a user typed isn't an action. On our own demo shops nothing is denied.
+- **Alternatives:** the old flat list of nine words ("Place order", "Confirm" and "Cancel
+  subscription" passed); an allow list (the agent could do almost nothing on a new site); ask
+  a model whether a click is safe (a safety rule must not depend on the thing it restrains).
+- **Why:** these are the actions that commit to something or can't be undone on a real site.
+  A table is easy to read, extend and test row by row. Before, the demo shop was exempt only
+  for "buy"; it is fake end to end, so a full exemption is simpler and lets the agent test
+  checkout there.
+- **Cost:** on a real site the agent can't test deleting or removing things. That is the point
+  of safe mode; an opt-in "allow destructive actions on this domain" would be the next step.
+
+## D33. The visitor rate limit uses the socket address unless a proxy is trusted (run 2, G1.3)
+- **Decision:** `clientIp` ignores `X-Forwarded-For` unless `TRUST_PROXY=true`, and then takes
+  the entry `TRUSTED_PROXY_HOPS` from the right (the one our proxy appended). Otherwise it
+  reads `x-socket-address`, a header `instrumentation.ts` stamps on every request from the TCP
+  socket, overwriting whatever the client sent. With neither, all such requests share the
+  bucket "unknown".
+- **Alternatives:** the left-most forwarded entry (the old code: any client can write it); a
+  custom Node server to reach the socket (changes how the app starts and deploys);
+  `NextRequest.ip` (removed from Next.js).
+- **Why:** Next.js route handlers only see headers, and it fills `x-forwarded-for` from the
+  socket only when the client didn't send one. Wrapping `http.Server.prototype.emit` is a
+  small, visible hook that runs before Next.js sees the request.
+- **Weak spot:** it patches a Node built-in, and in dev the hook loads with the first request,
+  so that one request counts as "unknown". Runtimes without a Node HTTP server (edge) also
+  get "unknown", which is stricter, never looser.
+
+## D34. Limits and the insert run in one transaction that locks the workspace row (run 2, G1.3)
+- **Decision:** `startRun` opens a transaction, runs `SELECT ... FROM workspaces WHERE id = ?
+  FOR UPDATE`, counts the visitor's recent runs and the month's runs, and inserts the run.
+- **Alternatives:** a counter column updated with one conditional UPDATE (needs a monthly
+  reset and a second source of truth next to the runs table); SERIALIZABLE isolation (callers
+  must retry on serialization failures).
+- **Why:** check-then-insert let a burst of requests each see "one run left". The row lock
+  makes requests for one workspace queue up; other workspaces aren't affected. A test fires
+  10 at once with a quota of 3 and gets exactly 3.
+
+## D35. A share token opens that run's screenshots, nothing else (run 2, G1.4)
+- **Decision:** shared report pages request images as `/api/files/<run id>/<file>?share=<token>`.
+  `canReadFile` allows a file when its run is in the caller's workspace, or when the token is
+  the share token of the run named in the path.
+- **Alternatives:** make screenshots public by URL (run ids would become secrets); signed,
+  expiring URLs per image (more moving parts for the same guarantee).
+- **Why:** shared reports showed broken images to everyone outside the workspace. Revoking
+  the link clears the token, so the images stop working with it.
+
+## D36. The domain file check connects to the address it validated (run 2, G1.5)
+- **Decision:** `fetchPinned(url, ip)` uses `node:https` with a `lookup` function that always
+  answers the validated address. The URL keeps the hostname, so the Host header and the TLS
+  certificate check are unchanged.
+- **Alternatives:** `fetch(url)` after the check (resolves the name a second time: DNS
+  rebinding can answer public first and private second); fetch `https://<ip>/` with a Host
+  header (TLS would check the certificate against the IP and fail).
+- **Why:** it is the same rule the worker's proxy follows: check an address, then connect to
+  that address.
+
+## D37. Claude client: 16,000 max tokens, Sonnet 5.5 cache reads at $0.10 (run 2, G1.6)
+- **Decision:** `MAX_TOKENS = 16000` for every Claude call; a reply cut off at the limit is
+  labelled in the step. Sonnet 5.5's cache-read price is $0.10 per million tokens.
+- **Why:** Sonnet 5.5 always thinks and thinking counts toward `max_tokens`; at 4,096 a reply
+  could end before the tool call and waste the step. The price was listed as $0.20, which
+  overstated cost. Untested against the live API (no key in this run).

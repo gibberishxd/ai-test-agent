@@ -7,6 +7,8 @@ import { randomBytes } from "node:crypto";
 import { db } from "@/lib/db";
 import { isUuid } from "@/lib/runs";
 
+const SHARE_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+
 export function newShareToken(): string {
   return randomBytes(24).toString("base64url");
 }
@@ -29,9 +31,30 @@ export async function revokeShareLink(workspaceId: string, runId: string): Promi
 
 /** The shared run for a token, or null (unknown or revoked). Needs no sign-in. */
 export async function getSharedRun(token: string) {
-  if (!/^[A-Za-z0-9_-]{32}$/.test(token)) return null;
+  if (!SHARE_TOKEN.test(token)) return null;
   return db.run.findFirst({
     where: { shareToken: token },
     include: { steps: { orderBy: { index: "asc" } }, bugs: { orderBy: { createdAt: "asc" } } },
   });
+}
+
+/**
+ * May this request read a stored file (key "<run id>/<name>")? Yes if the run belongs to the
+ * caller's workspace, or if the caller holds the share token of that same run. A token never
+ * opens another run's files, and a revoked token opens nothing.
+ */
+export async function canReadFile(
+  key: string,
+  access: { workspaceId: string; shareToken: string | null },
+): Promise<boolean> {
+  const runId = key.split("/")[0] ?? "";
+  if (!isUuid(runId)) return false;
+  const byToken = access.shareToken && SHARE_TOKEN.test(access.shareToken);
+  const run = await db.run.findFirst({
+    where: byToken
+      ? { id: runId, shareToken: access.shareToken }
+      : { id: runId, workspaceId: access.workspaceId },
+    select: { id: true },
+  });
+  return run !== null;
 }

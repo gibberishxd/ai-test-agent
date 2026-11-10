@@ -16,13 +16,16 @@ export function isUuid(value: string): boolean {
   return UUID.test(value);
 }
 
+type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
+
 export async function createRun(
   workspaceId: string,
   userId: string | null,
   input: RunInput,
   meta: Record<string, string> = {},
+  client: Tx | typeof db = db,
 ) {
-  const run = await db.run.create({
+  const run = await client.run.create({
     data: {
       workspaceId,
       createdById: userId,
@@ -31,7 +34,7 @@ export async function createRun(
       focus: input.focus,
     },
   });
-  await db.auditLog.create({
+  await client.auditLog.create({
     data: {
       workspaceId,
       userId,
@@ -52,6 +55,11 @@ export type StartResult =
 /**
  * Every check in front of a new run, in one place: input, visitor rules, quota. The worker
  * repeats the safety-relevant ones (it's the security boundary); these give clear messages.
+ *
+ * The limits are counted and the run is inserted in one transaction that first locks the
+ * workspace row (SELECT ... FOR UPDATE). Two requests for the same workspace therefore run one
+ * after the other: the second counts the first one's run. Without the lock, a burst of
+ * requests would each see "one run left" and all get through.
  */
 export async function startRun(
   context: RequestContext,
@@ -65,27 +73,35 @@ export async function startRun(
   if (!context.signedIn) {
     const targetError = visitorTargetError(isDemoTarget(input.targetUrl));
     if (targetError) return { ok: false, status: 403, errors: { targetUrl: targetError } };
-    const recent = await db.auditLog.count({
-      where: {
-        workspaceId: context.workspaceId,
-        action: "run.started",
-        createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
-        metadata: { path: ["ip"], equals: ip },
-      },
-    });
-    const limitError = visitorRateLimitError(recent);
-    if (limitError) return { ok: false, status: 429, errors: { targetUrl: limitError } };
   }
 
-  const workspace = await db.workspace.findUniqueOrThrow({ where: { id: context.workspaceId } });
-  const used = await db.run.count({
-    where: { workspaceId: context.workspaceId, createdAt: { gte: startOfMonth(new Date()) } },
-  });
-  const overQuota = quotaError(used, workspace.monthlyRunQuota);
-  if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
+  return db.$transaction(async (tx): Promise<StartResult> => {
+    const locked = await tx.$queryRaw<{ monthly_run_quota: number }[]>`
+      SELECT monthly_run_quota FROM workspaces WHERE id = ${context.workspaceId}::uuid FOR UPDATE`;
+    if (locked.length === 0) throw new Error(`workspace ${context.workspaceId} not found`);
 
-  const run = await createRun(context.workspaceId, context.userId, input, { ip });
-  return { ok: true, id: run.id };
+    if (!context.signedIn) {
+      const recent = await tx.auditLog.count({
+        where: {
+          workspaceId: context.workspaceId,
+          action: "run.started",
+          createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+          metadata: { path: ["ip"], equals: ip },
+        },
+      });
+      const limitError = visitorRateLimitError(recent);
+      if (limitError) return { ok: false, status: 429, errors: { targetUrl: limitError } };
+    }
+
+    const used = await tx.run.count({
+      where: { workspaceId: context.workspaceId, createdAt: { gte: startOfMonth(new Date()) } },
+    });
+    const overQuota = quotaError(used, locked[0].monthly_run_quota);
+    if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
+
+    const run = await createRun(context.workspaceId, context.userId, input, { ip }, tx);
+    return { ok: true, id: run.id };
+  });
 }
 
 /** Origins (https://host) of this workspace's verified domains. */

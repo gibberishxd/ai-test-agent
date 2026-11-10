@@ -287,7 +287,9 @@ class AgentRun:
                 self.page.go_back(timeout=NAVIGATION_TIMEOUT_MS)
             elif action == "scroll":
                 down = args.get("direction") != "up"
-                self.page.mouse.wheel(0, SCROLL_PX if down else -SCROLL_PX)
+                # scrollBy has moved the page by the time it returns; a mouse wheel event is
+                # applied a little later, so "did it scroll?" could be read too early.
+                self.page.evaluate("y => window.scrollBy(0, y)", SCROLL_PX if down else -SCROLL_PX)
             elif action == "take_screenshot":
                 self._want_screenshot = True
                 return "ok: a screenshot is attached to the next observation", False

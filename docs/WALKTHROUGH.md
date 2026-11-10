@@ -516,3 +516,90 @@ matching calls isn't included in cost per run.
 3. *What did the benchmark tell you?* With a local 8B model, recall 33% with 100% precision:
    all from the deterministic checks. The agent explores flows but rarely judges what it
    sees, which is exactly the question a Claude run answers next.
+
+---
+
+## Run 2: safety hardening (`agent/policy.py`, `agent/loop.py`, `config.py`, `urls.py`)
+
+**What:** four rules the worker enforces whatever the model asks for.
+- *Dev mode is opt-in.* `dev_mode` defaults to `False`; only `DEV_MODE=true` lets the browser
+  reach the demo shops on localhost.
+- *Safe mode is a rule table.* `DENY_RULES` lists final or destructive actions by category
+  (payment, commitment, subscription, destructive, account, outbound).
+- *The agent stays on the target site.* Three checks in `loop.py`: at the start (the target
+  must not redirect elsewhere), before a click (a link to another site is refused) and after
+  every action (`_return_to_site` goes back if the page left).
+- *Loop detection counts repeats without effect.* `Budget.record(..., changed=)`.
+
+**How:**
+- `deny_reason(element, is_demo_target)` builds five fields from the element (text,
+  aria-label, button value, link, form action) and tries each rule's regex on each. URLs go
+  through `url_words` first: host dropped, `%20` decoded, camelCase split, punctuation turned
+  into spaces, so `\bplace\s+order\b` matches `/checkout/place-order`.
+- `is_same_site(url, target)` is true for the same origin (scheme + host + port) or for the
+  https version of an http target on the same host and default ports.
+- `_execute` returns `(result, changed)`, where changed means the URL, the page text or the
+  scroll position is different. `Budget` keeps two counters: `_idle` (identical actions in a
+  row that changed nothing, limit 3) and `_same` (identical actions in a row, limit 6).
+
+**Why:** each closes a way the agent could do harm or waste a run: reaching our own network,
+committing to a purchase on a customer's site, typing into a site nobody verified, or being
+stopped for doing legitimate repeated testing.
+
+**Weak spots:** the deny list is English only and keyword based, so an icon-only "trash"
+button with no label passes, and "Remove filter" is blocked. Origins are compared strictly, so
+a login on `auth.shop.example` can't be tested from `shop.example`. A new tab opened by a link
+isn't followed. "Changed" is text based: a change that only alters colours looks like nothing.
+
+**Interview Q&A**
+1. *Why is safe mode in the worker and not in the prompt?* A prompt is a request; the model
+   can ignore it, and page text can talk it out of it (prompt injection). The worker checks
+   every tool call before running it, so the rule holds whatever the model decides.
+2. *Why check the page's site after the action as well as before?* Before the click you can
+   only read what the element says: a link has an href, a button doesn't. A button, a form
+   submit or a script can go anywhere, so the only reliable check is where the page ended up.
+3. *Why two loop counters?* "Same action three times" stopped runs that clicked "+" three
+   times, which is exactly how you test a quantity bug. Counting only repeats that changed
+   nothing fixes that, but a model adding to the cart forever changes the page every time, so
+   a second, higher limit catches that case.
+
+## Run 2: web hardening (`lib/limits.ts`, `lib/socket-address.ts`, `instrumentation.ts`, `lib/runs.ts`, `lib/share.ts`, `lib/domains.ts`)
+
+**What:**
+- *Client IP you can't fake* for the visitor rate limit.
+- *Atomic quota:* a burst of requests can't exceed the monthly quota.
+- *Shared reports show their screenshots,* and a share token opens only its own run's files.
+- *Domain verification connects to the address it checked.*
+
+**How:**
+- `instrumentation.ts` runs once at server start and wraps `http.Server.prototype.emit`; for
+  every "request" event `stampSocketAddress` writes the socket's peer address into the
+  `x-socket-address` header, replacing anything the client sent. `clientIp` reads that header,
+  or, with `TRUST_PROXY=true`, the entry of `X-Forwarded-For` that our own proxy appended.
+- `startRun` runs in `db.$transaction`: lock the workspace row with `SELECT ... FOR UPDATE`,
+  count, then insert. A second request for the same workspace waits at the lock and then
+  counts the first one's run.
+- `canReadFile(key, {workspaceId, shareToken})` looks for the run named in the file path
+  either in the caller's workspace or with that share token. `fileUrl(key, token)` adds
+  `?share=` on shared pages.
+- `fetchPinned(url, ip)` passes `lookup: pinnedLookup(ip)` to `https.get`, so Node connects to
+  `ip` without asking DNS again.
+
+**Why:** all four were holes found in review: a spoofable header, a race, a broken feature,
+and a time-of-check/time-of-use gap.
+
+**Weak spots:** the socket stamp patches a Node built-in and doesn't exist on edge runtimes.
+The row lock serialises all starts in one workspace, including the public demo workspace all
+visitors share. Screenshots are cached by the browser for an hour, so a revoked link's images
+can still show from cache. Verified domains are never re-checked.
+
+**Interview Q&A**
+1. *Why is the left-most X-Forwarded-For entry unsafe?* Each proxy appends the address it saw.
+   The left side is whatever the client sent, so only the entries written by proxies you
+   control can be trusted, and those are on the right.
+2. *What is a check-then-act race, and how does the lock fix it?* Two requests both read
+   "49 of 50 used" before either inserts, so both insert. `FOR UPDATE` makes the second
+   request wait until the first transaction commits, so it reads 50.
+3. *What is DNS rebinding?* You resolve a name, check the address is public, then connect by
+   name; the client resolves again and the attacker's DNS now answers a private address.
+   Connecting to the address you checked removes the second lookup.

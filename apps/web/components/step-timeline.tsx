@@ -1,3 +1,4 @@
+import { fileUrl } from "@/lib/file-url";
 import { Ban, Bot, Eye, Globe, MousePointerClick } from "lucide-react";
 import type { StepView } from "@/lib/serialize";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,7 @@ function describe(step: StepView): string {
   }
 }
 
-export function StepTimeline({ steps }: { steps: StepView[] }) {
+export function StepTimeline({ steps, filesToken = null }: { steps: StepView[]; filesToken?: string | null }) {
   return (
     <ol className="grid gap-3" data-testid="timeline">
       {steps.map((step) => {
@@ -92,7 +93,7 @@ export function StepTimeline({ steps }: { steps: StepView[] }) {
             {step.screenshot && (
               // eslint-disable-next-line @next/next/no-img-element -- served by our own API route
               <img
-                src={`/api/files/${step.screenshot}`}
+                src={fileUrl(step.screenshot, filesToken)}
                 alt=""
                 className="hidden h-16 w-24 shrink-0 rounded border object-cover object-top sm:block"
                 loading="lazy"

@@ -8,11 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { evidenceLines, toGitHubIssue, toJira } from "@/lib/export";
+import { fileUrl } from "@/lib/file-url";
 import type { BugView } from "@/lib/serialize";
 
-type Props = { bug: BugView; runUrl: string; targetUrl: string };
+type Props = { bug: BugView; runUrl: string; targetUrl: string; filesToken?: string | null };
 
-export function BugCard({ bug, runUrl, targetUrl }: Props) {
+export function BugCard({ bug, runUrl, targetUrl, filesToken = null }: Props) {
   const evidence = evidenceLines(bug.evidence);
   const replay = typeof bug.evidence.replay === "string" ? bug.evidence.replay : null;
   const context = { runUrl, targetUrl };
@@ -86,7 +87,7 @@ export function BugCard({ bug, runUrl, targetUrl }: Props) {
         {bug.screenshot && (
           // eslint-disable-next-line @next/next/no-img-element -- served by our own API route
           <img
-            src={`/api/files/${bug.screenshot}`}
+            src={fileUrl(bug.screenshot, filesToken)}
             alt={`Screenshot of ${bug.pageUrl}`}
             className="max-h-80 w-full rounded-lg border object-cover object-top"
             loading="lazy"

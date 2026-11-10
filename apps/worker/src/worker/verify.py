@@ -92,7 +92,8 @@ def _replay_step(page: Page, step: ReplayStep) -> None:
     elif step.action == "go_back":
         page.go_back(timeout=NAVIGATION_TIMEOUT_MS)
     elif step.action == "scroll":
-        page.mouse.wheel(0, -700 if step.args.get("direction") == "up" else 700)
+        distance = -700 if step.args.get("direction") == "up" else 700
+        page.evaluate("y => window.scrollBy(0, y)", distance)
     # take_screenshot, report_bug, finish, blocked or failed steps: nothing to repeat
 
 
