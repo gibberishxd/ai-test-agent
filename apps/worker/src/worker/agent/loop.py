@@ -5,9 +5,11 @@ it, enforces the budgets, and records everything. Callbacks (`on_step`, `on_bug`
 `should_stop`) connect the loop to the database without the loop knowing about it.
 """
 
+import re
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from os.path import commonprefix
 from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
@@ -447,18 +449,46 @@ class AgentRun:
         return self.save_screenshot(png, f"step-{index:03d}")
 
 
-def text_changes(before: str, after: str, limit: int = 160) -> str:
-    """Lines that appeared after an action ("Added to your cart.", "Cart (2)"), shortened.
+NUMBER = re.compile(r"\d[\d.,]*")
 
-    Small models can't tell "it worked" from "ok"; seeing what changed is the signal a human
-    tester gets by looking at the screen.
+
+def text_changes(before: str, after: str, limit: int = 600) -> str:
+    """What an action changed on the page, shortened, the most telling part first.
+
+    1. Values that changed, with the old value: "Subtotal: $12.00 → $24.00".
+    2. New lines that contain a number ("Discount: -$1.20").
+    3. Other new lines ("Added to your cart.").
+    Small models can't tell "it worked" from "ok"; this is the signal a human tester gets by
+    looking at the screen, and numbers are where most functional bugs show.
     """
-    seen = {line.strip() for line in before.splitlines()}
-    added = [
-        line.strip() for line in after.splitlines() if line.strip() and line.strip() not in seen
-    ]
-    text = " | ".join(dict.fromkeys(added))
+    old = [line.strip() for line in before.splitlines() if line.strip()]
+    new = [line.strip() for line in after.splitlines() if line.strip()]
+    added = [line for line in dict.fromkeys(new) if line not in set(old)]
+    # Lines that disappeared, by shape: "Subtotal: $#" for "Subtotal: $12.00".
+    gone: dict[str, list[str]] = {}
+    for line in dict.fromkeys(old):
+        if line not in set(new) and NUMBER.search(line):
+            gone.setdefault(NUMBER.sub("#", line), []).append(line)
+
+    changed, numbers, words = [], [], []
+    for line in added:
+        previous = gone.get(NUMBER.sub("#", line)) if NUMBER.search(line) else None
+        if previous:
+            old_line = previous.pop(0)
+            changed.append(f"{old_line} → {_changed_part(old_line, line)}")
+        elif NUMBER.search(line):
+            numbers.append(line)
+        else:
+            words.append(line)
+    text = " | ".join([*changed, *numbers, *words])
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _changed_part(old: str, new: str) -> str:
+    """The part of `new` that differs from `old`, from the start of the word it begins in:
+    ("Subtotal: $12.00", "Subtotal: $24.00") → "$24.00"."""
+    shared = len(commonprefix([old, new]))
+    return new[new.rfind(" ", 0, shared) + 1 :]
 
 
 def describe(action: str, args: dict, element: Element | None) -> str:

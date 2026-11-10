@@ -245,7 +245,7 @@ def test_text_changes_lists_new_lines_only():
     from worker.agent.loop import text_changes
 
     assert text_changes("Cart (1)\nShop", "Cart (2)\nShop\nAdded to your cart.") == (
-        "Cart (2) | Added to your cart."
+        "Cart (1) → (2) | Added to your cart."
     )
     assert text_changes("same", "same") == ""
 

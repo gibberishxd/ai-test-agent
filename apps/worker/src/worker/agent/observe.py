@@ -13,6 +13,7 @@ from playwright.sync_api import Page
 from worker.safety.actions import ElementInfo
 
 MAX_ELEMENTS = 80
+MAX_MESSAGES = 10
 MAX_PAGE_TEXT = 3000
 BUTTON_INPUT_TYPES = ("submit", "button", "reset")  # their value is a label, not typed text
 
@@ -27,6 +28,15 @@ COLLECT_ELEMENTS_JS = """(max) => {
                          summary: 'button' };
   const inputRole = { checkbox: 'checkbox', radio: 'radio', submit: 'button', button: 'button',
                       reset: 'button', range: 'slider', search: 'searchbox' };
+  const shown = (n) => {
+    const box = n.getBoundingClientRect();
+    const style = getComputedStyle(n);
+    return box.width > 0 && box.height > 0 && style.visibility !== 'hidden';
+  };
+  // Visible text of the elements an attribute points at (aria-describedby="a b").
+  const referenced = (el, attribute) => (el.getAttribute(attribute) || '').split(/\\s+/)
+    .filter(Boolean).map(id => document.getElementById(id)).filter(n => n && shown(n))
+    .map(n => n.innerText.trim()).filter(Boolean).join(' ');
   const out = [];
   for (const el of document.querySelectorAll(selector)) {
     const box = el.getBoundingClientRect();
@@ -44,6 +54,8 @@ COLLECT_ELEMENTS_JS = """(max) => {
     const id = out.length + 1;
     el.setAttribute('data-agent-id', String(id));
     const isField = ['input', 'textarea', 'select'].includes(tag);
+    const described = [referenced(el, 'aria-describedby'), referenced(el, 'aria-errormessage')]
+      .filter(Boolean).join(' ').replace(/\\s+/g, ' ').slice(0, 200);
     out.push({
       id, role, name, tag,
       href: tag === 'a' ? el.href : null,
@@ -53,6 +65,11 @@ COLLECT_ELEMENTS_JS = """(max) => {
       form_action: el.form ? el.form.action : null,
       value: isField && type !== 'password' ? String(el.value).slice(0, 60) : null,
       disabled: !!el.disabled,
+      required: isField && (!!el.required || el.getAttribute('aria-required') === 'true'),
+      // The browser calls an empty required field invalid from the start; that isn't news.
+      invalid: isField && (el.getAttribute('aria-invalid') === 'true'
+        || (!!el.willValidate && el.value !== '' && !el.checkValidity())),
+      described: described || null,
       checked: ['checkbox', 'radio'].includes(type) ? el.checked : null,
       options: tag === 'select' ? Array.from(el.options).map(o => o.label).slice(0, 20) : null,
     });
@@ -60,6 +77,59 @@ COLLECT_ELEMENTS_JS = """(max) => {
   }
   return out;
 }"""
+
+
+# Error, alert and status messages, each with the field it sits next to. "Next to" is what a
+# user sees: the only field in the same group, or else the closest field above or below.
+# Run after COLLECT_ELEMENTS_JS, which numbers the fields.
+COLLECT_MESSAGES_JS = """(max) => {
+  const shown = (n) => {
+    const box = n.getBoundingClientRect();
+    const style = getComputedStyle(n);
+    return box.width > 0 && box.height > 0 && style.visibility !== 'hidden';
+  };
+  const byClass = /(^|[-_\\s])(error|errors|invalid|alert|warning|danger)([-_\\s]|$)/i;
+  const candidates = Array.from(
+    document.querySelectorAll('[role=alert], [role=status], [aria-live], [class]')
+  ).filter(n => n.matches('[role=alert], [role=status], [aria-live]')
+    || byClass.test(typeof n.className === 'string' ? n.className : ''))
+   .filter(n => shown(n) && !n.matches('input, select, textarea, button, a'));
+  const fields = Array.from(document.querySelectorAll('input, select, textarea'))
+    .filter(f => f.dataset.agentId && shown(f));
+  const out = [];
+  for (const node of candidates) {
+    if (candidates.some(other => other !== node && node.contains(other))) continue;
+    const text = node.innerText.trim().replace(/\\s+/g, ' ');
+    if (!text || text.length > 200) continue;
+    let near = null;
+    let group = node.parentElement;
+    for (let depth = 0; group && group !== document.body && depth < 4; depth++) {
+      const inside = fields.filter(f => group.contains(f));
+      if (inside.length === 1) near = inside[0];
+      if (inside.length > 0) break;
+      group = group.parentElement;
+    }
+    if (!near) {
+      const box = node.getBoundingClientRect();
+      let closest = 60;  // px: further away than this isn't "next to"
+      for (const f of fields) {
+        const r = f.getBoundingClientRect();
+        if (Math.min(box.right, r.right) - Math.max(box.left, r.left) <= 0) continue;
+        const gap = Math.max(box.top - r.bottom, r.top - box.bottom, 0);
+        if (gap < closest) { closest = gap; near = f; }
+      }
+    }
+    out.push({ text, near: near ? Number(near.dataset.agentId) : null });
+    if (out.length >= max) break;
+  }
+  return out;
+}"""
+
+
+@dataclass
+class Message:
+    text: str
+    near: int | None  # the [id] of the field it sits next to, if any
 
 
 @dataclass
@@ -74,6 +144,9 @@ class Element:
     form_action: str | None = None
     value: str | None = None
     disabled: bool = False
+    required: bool = False
+    invalid: bool = False
+    described: str | None = None  # visible text tied to it by aria-describedby/errormessage
     checked: bool | None = None
     options: list[str] | None = None
 
@@ -105,7 +178,16 @@ class Element:
             text += f" options: {', '.join(self.options)}"
         if self.disabled:
             text += " (disabled)"
+        if self.required:
+            text += " (required)"
+        if self.invalid:
+            text += " (invalid)"
+        if self.described:
+            text += f' help: "{self.described}"'
         return text
+
+    def short(self) -> str:
+        return f'[{self.id}] {self.role} "{self.name}"'
 
 
 @dataclass
@@ -114,12 +196,28 @@ class PageState:
     title: str
     elements: list[Element]
     text: str
+    messages: list[Message] = field(default_factory=list)
 
 
 def read_page(page: Page) -> PageState:
     elements = [Element(**e) for e in page.evaluate(COLLECT_ELEMENTS_JS, MAX_ELEMENTS)]
+    messages = [Message(**m) for m in page.evaluate(COLLECT_MESSAGES_JS, MAX_MESSAGES)]
     text = page.evaluate("() => document.body ? document.body.innerText : ''")
-    return PageState(url=page.url, title=page.title(), elements=elements, text=text)
+    return PageState(
+        url=page.url, title=page.title(), elements=elements, text=text, messages=messages
+    )
+
+
+def describe_messages(state: PageState) -> str:
+    """One line per message, with the field it sits next to: an error under the wrong field
+    is a bug a tester sees at a glance, and plain page text loses that."""
+    by_id = {e.id: e for e in state.elements}
+    lines = []
+    for message in state.messages:
+        field_ = by_id.get(message.near)
+        where = f"next to {field_.short()}" if field_ else "not next to a field"
+        lines.append(f'- "{message.text}" ({where})')
+    return "\n".join(lines) or "(none)"
 
 
 @dataclass
@@ -153,6 +251,9 @@ def build_observation(
         "",
         "INTERACTIVE ELEMENTS (use the [id] with click / type / select)",
         elements,
+        "",
+        "MESSAGES ON THE PAGE (errors, alerts, status)",
+        describe_messages(state),
         "",
         "NEW EVENTS SINCE LAST STEP",
         "\n".join(f"- {e}" for e in events) or "(none)",
