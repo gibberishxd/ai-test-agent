@@ -65,6 +65,7 @@ class BenchmarkScores:
     avg_duration_s: float
     per_bug: dict[int, dict] = field(default_factory=dict)
     decisions: list[MatchDecision] = field(default_factory=list)
+    judge: str = ""  # "provider/model" that matched reports to planted bugs
 
 
 def load_planted(path: Path = BUGS_JSON) -> list[PlantedBug]:
@@ -84,6 +85,11 @@ def candidates_for(page_url: str, planted: list[PlantedBug]) -> list[PlantedBug]
     """
     on_page = [b for b in planted if b.page == path_of(page_url)]
     return on_page or planted
+
+
+def judge_name(llm: LLMClient) -> str:
+    """Who judged the matches, as "provider/model" (matching uses the client's cheap model)."""
+    return f"{llm.provider}/{llm.cheap_model}"
 
 
 def ask_judge(llm: LLMClient, report: Bug, candidates: list[PlantedBug]) -> tuple[int | None, str]:
@@ -148,6 +154,7 @@ def score(
     provider: str,
     model: str,
     git_commit: str,
+    judge: str = "",
 ) -> BenchmarkScores:
     """Compute the scores from match decisions (one list per buggy run).
 
@@ -181,6 +188,7 @@ def score(
         avg_duration_s=sum(durations) / len(durations) if durations else 0.0,
         per_bug=per_bug,
         decisions=all_decisions,
+        judge=judge,
     )
 
 
@@ -238,6 +246,7 @@ def report_bugs(session: Session, run_id: str) -> list[Bug]:
 def print_scores(scores: BenchmarkScores) -> None:
     print()
     print(f"Benchmark · {scores.provider} · {scores.model} · commit {scores.git_commit}")
+    print(f"  judge          {scores.judge or 'not recorded'}")
     print(f"  buggy runs     {scores.runs_buggy}")
     print(f"  recall         {scores.recall:.0%}  (planted bugs found per run, averaged)")
     print(f"  precision      {scores.precision:.0%}  (reports that matched a planted bug)")
@@ -267,6 +276,7 @@ def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> Ben
             "per_bug": {str(k): v for k, v in data["per_bug"].items()},
             "decisions": data["decisions"],
             "runs": run_ids,
+            "judge": scores.judge,
         },
     )
     session.add(result)

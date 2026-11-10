@@ -6,6 +6,7 @@ from worker.benchmark import (
     MatchDecision,
     PlantedBug,
     candidates_for,
+    judge_name,
     load_planted,
     match_report,
     score,
@@ -126,3 +127,13 @@ def test_match_accepts_the_id_as_a_string_or_float(answer):
     # A local model answered "match": "2" while its reason said "matches known bug 2".
     llm = FakeClient(texts=[answer])
     assert match_report(llm, "r", report("Total wrong", "/cart"), PLANTED).matched == 5
+
+
+def test_judge_name_is_the_provider_and_the_model_that_answers_cheap_calls():
+    llm = SimpleNamespace(provider="claude", agent_model="claude-sonnet-5-5", cheap_model="haiku")
+    assert judge_name(llm) == "claude/haiku"
+
+
+def test_scores_record_the_judge():
+    scores = score({}, {}, PLANTED, [], [], "ollama", "qwen", "abc", judge="ollama/gemma4:12b")
+    assert scores.judge == "ollama/gemma4:12b"

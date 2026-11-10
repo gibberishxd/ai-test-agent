@@ -5,7 +5,15 @@ import httpx
 import pytest
 
 from worker.config import Settings
-from worker.llm import ConfigError, FakeClient, ToolCall, ToolSpec, Usage, make_client
+from worker.llm import (
+    ConfigError,
+    FakeClient,
+    ToolCall,
+    ToolSpec,
+    Usage,
+    make_client,
+    make_judge,
+)
 from worker.llm.claude import ClaudeClient, tool_definitions
 from worker.llm.ollama import OllamaClient, parse_text_tool_call
 from worker.llm.pricing import FALLBACK, cost_usd
@@ -176,3 +184,44 @@ def test_make_client_claude_without_key_is_an_error():
 def test_make_client_ollama():
     settings = Settings(_env_file=None, llm_provider="ollama")
     assert make_client(settings).provider == "ollama"
+
+
+# --- make_judge (benchmark matching) -----------------------------------------------------------
+
+
+def test_judge_is_the_agents_client_when_nothing_is_pinned():
+    settings = Settings(_env_file=None, llm_provider="ollama", judge_provider="", judge_model="")
+    agent = make_client(settings)
+    assert make_judge(settings, agent) is agent
+
+
+def test_pinned_judge_model_is_independent_of_the_agent_model():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="ollama",
+        ollama_model="qwen3-vl:8b-instruct",
+        judge_provider="",
+        judge_model="gemma4:12b",
+    )
+    agent = make_client(settings)
+    judge = make_judge(settings, agent)
+    assert (judge.provider, judge.cheap_model) == ("ollama", "gemma4:12b")
+    assert agent.agent_model == "qwen3-vl:8b-instruct"
+
+
+def test_judge_can_use_another_provider_than_the_agent():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="ollama",
+        anthropic_api_key="sk-ant-test-key",
+        judge_provider="claude",
+        judge_model="claude-haiku-5-5",
+    )
+    judge = make_judge(settings, make_client(settings))
+    assert (judge.provider, judge.cheap_model) == ("claude", "claude-haiku-5-5")
+
+
+def test_unknown_judge_provider_is_an_error():
+    settings = Settings(_env_file=None, llm_provider="ollama", judge_provider="gpt")
+    with pytest.raises(ValueError):
+        make_judge(settings, make_client(settings))

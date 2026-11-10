@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from worker.benchmark import (
     benchmark_workspace,
     git_commit,
+    judge_name,
     load_planted,
     match_report,
     print_scores,
@@ -30,7 +31,7 @@ from worker.config import REPO_ROOT, Settings, get_settings
 from worker.db.models import BenchmarkResult, Run
 from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
-from worker.llm import LLMClient, make_client
+from worker.llm import LLMClient, make_client, make_judge
 from worker.queue import recover_stale_runs
 from worker.report import write_report
 from worker.runner import ExecuteFn, process_next
@@ -87,11 +88,18 @@ def main(argv: list[str] | None = None) -> None:
         log.warning("marked %d stale run(s) as failed", recovered)
     log.info("ready. provider=%s model=%s", llm.provider, llm.agent_model)
 
+    if args.command == "bench":
+        judge = make_judge(settings, llm)
+        log.info("benchmark judge: %s", judge_name(judge))
+        if judge is llm and llm.provider == "ollama":
+            log.warning(
+                "the judge is the model under test; set JUDGE_MODEL to compare models fairly"
+            )
     if args.command == "bench" and args.rescore:
-        rescore_latest(sessions, llm)
+        rescore_latest(sessions, judge)
         return
     if args.command == "bench":
-        run_benchmark(settings, llm, sessions, execute, args.runs, args.mode)
+        run_benchmark(settings, llm, judge, sessions, execute, args.runs, args.mode)
         return
     if args.once:
         if not process_next(sessions, llm, execute):
@@ -105,22 +113,23 @@ def main(argv: list[str] | None = None) -> None:
 def run_benchmark(
     settings: Settings,
     llm: LLMClient,
+    judge: LLMClient,
     sessions: sessionmaker[Session],
     execute: ExecuteFn,
     runs: int,
     mode: str,
 ) -> None:
-    """Queue the benchmark runs, process them here, then score and save them."""
+    """Queue the benchmark runs, process them with `llm`, then score them with `judge`."""
     with sessions() as session:
         workspace = benchmark_workspace(session)
         buggy_ids = queue_runs(session, workspace.id, [settings.demo_url] * runs, mode)
         clean_ids = queue_runs(session, workspace.id, [settings.clean_demo_url], mode)
     log.info("benchmark: %d buggy + %d clean %s runs queued", runs, len(clean_ids), mode)
     wait_for(sessions, buggy_ids + clean_ids, lambda: process_next(sessions, llm, execute))
-    score_runs(sessions, llm, buggy_ids, clean_ids)
+    score_runs(sessions, judge, buggy_ids, clean_ids)
 
 
-def rescore_latest(sessions: sessionmaker[Session], llm: LLMClient) -> None:
+def rescore_latest(sessions: sessionmaker[Session], judge: LLMClient) -> None:
     """Re-match the reports of the latest benchmark's runs (after a matching fix), save anew."""
     with sessions() as session:
         latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
@@ -129,11 +138,11 @@ def rescore_latest(sessions: sessionmaker[Session], llm: LLMClient) -> None:
             return
         runs = latest.details["runs"]
     log.info("rescoring %d buggy + %d clean runs", len(runs["buggy"]), len(runs["clean"]))
-    score_runs(sessions, llm, runs["buggy"], runs["clean"])
+    score_runs(sessions, judge, runs["buggy"], runs["clean"])
 
 
 def score_runs(
-    sessions: sessionmaker[Session], llm: LLMClient, buggy_ids: list[str], clean_ids: list[str]
+    sessions: sessionmaker[Session], judge: LLMClient, buggy_ids: list[str], clean_ids: list[str]
 ) -> None:
     """Match every reported bug to bugs.json, compute the scores, print and save them."""
     planted = load_planted()
@@ -141,7 +150,7 @@ def score_runs(
         finished = [session.get(Run, run_id) for run_id in buggy_ids + clean_ids]
         buggy = {
             run_id: [
-                match_report(llm, run_id, bug, planted) for bug in report_bugs(session, run_id)
+                match_report(judge, run_id, bug, planted) for bug in report_bugs(session, run_id)
             ]
             for run_id in buggy_ids
         }
@@ -157,9 +166,10 @@ def score_runs(
             planted,
             costs=[run.cost_usd for run in finished],
             durations=durations,
-            provider=finished[0].provider or llm.provider,
-            model=finished[0].model or llm.agent_model,
+            provider=finished[0].provider or judge.provider,
+            model=finished[0].model or judge.agent_model,
             git_commit=git_commit(),
+            judge=judge_name(judge),
         )
         save_scores(session, scores, {"buggy": buggy_ids, "clean": clean_ids})
     print_scores(scores)

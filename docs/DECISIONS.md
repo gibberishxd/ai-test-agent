@@ -293,3 +293,14 @@ numbers are the real test (Needs me).
   budget).
 - **Why:** repeating an action that works is testing; repeating one that does nothing is
   being stuck. The step result already knew the difference ("nothing on the page changed").
+
+## D31. The benchmark judge is pinned separately from the agent (after demo v1)
+- **Decision:** `JUDGE_PROVIDER` / `JUDGE_MODEL` choose the model that matches reports to
+  planted bugs (`llm.make_judge`). The judge's name is saved with every benchmark result
+  (`details.judge`) and printed. Empty settings keep the old behaviour, with a warning when a
+  local model judges itself.
+- **Alternatives:** keep using the agent's client (with Ollama the judge was the model under
+  test, so the qwen and gemma results were graded by different judges); hard-code one judge
+  model (it would break for anyone who hasn't downloaded it, and for Claude-only setups).
+- **Why:** a benchmark compares agents, so everything else has to stay fixed, including who
+  decides what counts as a match.

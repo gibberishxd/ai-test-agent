@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     cheap_model: str = "claude-haiku-5-5"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-vl:8b-instruct"
+    # Benchmark judge: the model that matches reports to planted bugs. Empty = the agent's own
+    # provider / cheap model, which makes scores of different models hard to compare.
+    judge_provider: str = ""
+    judge_model: str = ""
 
     # Run budgets, enforced by the worker
     max_steps: int = 40
