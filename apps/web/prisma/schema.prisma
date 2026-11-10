@@ -66,10 +66,11 @@ model Workspace {
   verificationToken String   @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @map("verification_token")
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  users    User[]
-  runs     Run[]
-  auditLog AuditLog[]
-  domains  Domain[]
+  users        User[]
+  runs         Run[]
+  auditLog     AuditLog[]
+  domains      Domain[]
+  modelConfigs ModelConfig[]
 
   @@map("workspaces")
 }
@@ -130,6 +131,9 @@ model Run {
   @@index([status, createdAt])
   @@index([workspaceId, createdAt])
   @@map("runs")
+  /// The workspace model this run uses; null = the worker's own (server default) model.
+  modelConfigId String?      @map("model_config_id") @db.Uuid
+  modelConfig   ModelConfig? @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
 }
 
 /// One thing the worker did during a run: visit a page, click, type, report a bug...
@@ -279,4 +283,34 @@ model Domain {
 
   @@unique([workspaceId, hostname])
   @@map("domains")
+}
+
+/// A model a workspace brings: any OpenAI-compatible endpoint, or Anthropic. The API key is
+/// encrypted with AES-256-GCM (server key MODEL_KEYS_SECRET, workspace id as associated data)
+/// and never sent back to the browser: only its last 4 characters are shown.
+model ModelConfig {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  label            String
+  /// "openai-compat" or "claude".
+  provider         String
+  baseUrl          String?  @map("base_url")
+  model            String
+  cheapModel       String?  @map("cheap_model")
+  apiKeyCiphertext String?  @map("api_key_ciphertext")
+  apiKeyLast4      String?  @map("api_key_last4")
+  /// USD per million tokens, for the run's cost budget.
+  inputPrice       Float    @default(0) @map("input_price")
+  outputPrice      Float    @default(0) @map("output_price")
+  isDefault        Boolean  @default(false) @map("is_default")
+  /// The last "Test connection" result: { ok, answers, tools, vision, error, checkedAt }.
+  probe            Json?
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      Run[]
+
+  @@index([workspaceId])
+  @@map("model_configs")
 }

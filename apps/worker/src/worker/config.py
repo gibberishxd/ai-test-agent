@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # Benchmark judge: the model that matches reports to planted bugs. Empty = the agent's own
     # provider / cheap model, which makes scores of different models hard to compare.
     judge_provider: str = ""
+    # Decrypts workspace model API keys (32 random bytes, base64); shared with the web app.
+    model_keys_secret: SecretStr = SecretStr("")
     # LLM_PROVIDER=fake only: the agent's tool calls as JSON, [["click", {"element_id": 1}], ...].
     # Lets the end-to-end test run a real worker whose agent acts, without a model.
     fake_script: str = ""

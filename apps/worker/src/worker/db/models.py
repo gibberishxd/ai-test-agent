@@ -115,6 +115,10 @@ class Run(Base):
     error: Mapped[str | None]
     summary: Mapped[dict | None] = mapped_column(JSONB)
     share_token: Mapped[str | None] = mapped_column(unique=True)
+    # The workspace model this run uses; None = the worker's own model.
+    model_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_configs.id")
+    )
     created_at: Mapped[datetime] = _created_at()
     started_at: Mapped[datetime | None] = mapped_column(_timestamp())
     finished_at: Mapped[datetime | None] = mapped_column(_timestamp())
@@ -252,3 +256,25 @@ class Domain(Base):
     verified_at: Mapped[datetime | None] = mapped_column(_timestamp())
     method: Mapped[str | None]
     created_at: Mapped[datetime] = _created_at()
+
+
+class ModelConfig(Base):
+    """A workspace's own model (web: lib/model-configs.ts). The key is AES-GCM encrypted."""
+
+    __tablename__ = "model_configs"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    label: Mapped[str]
+    provider: Mapped[str]
+    base_url: Mapped[str | None]
+    model: Mapped[str]
+    cheap_model: Mapped[str | None]
+    api_key_ciphertext: Mapped[str | None]
+    api_key_last4: Mapped[str | None]
+    input_price: Mapped[float] = mapped_column(server_default=text("0"))
+    output_price: Mapped[float] = mapped_column(server_default=text("0"))
+    is_default: Mapped[bool] = mapped_column(server_default=text("false"))
+    probe: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()

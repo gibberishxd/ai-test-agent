@@ -4,15 +4,18 @@ import { connection } from "next/server";
 import { RunForm } from "@/components/run-form";
 import { RunHistory } from "@/components/run-history";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { listModelConfigs } from "@/lib/model-configs";
 import { listRuns } from "@/lib/runs";
 import { demoUrl } from "@/lib/targets";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { currentContext } from "@/lib/workspace";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   await connection();
-  const runs = await listRuns(await currentWorkspaceId(), 5);
+  const context = await currentContext();
+  const runs = await listRuns(context.workspaceId, 5);
+  const models = context.signedIn ? await listModelConfigs(context.workspaceId) : [];
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-4 py-10">
@@ -25,7 +28,10 @@ export default async function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <RunForm demoUrl={demoUrl()} />
+          <RunForm
+            demoUrl={demoUrl()}
+            models={models.map((m) => ({ id: m.id, label: m.label, model: m.model, usable: m.usable, isDefault: m.isDefault }))}
+          />
         </CardContent>
       </Card>
 

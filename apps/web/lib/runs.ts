@@ -6,6 +6,7 @@
  * change another's runs.
  */
 import { db } from "@/lib/db";
+import { usableModel } from "@/lib/model-configs";
 import { quotaError, startOfMonth, visitorRateLimitError, visitorTargetError } from "@/lib/limits";
 import { isDemoTarget, parseRunInput, type FieldErrors, type RunInput } from "@/lib/targets";
 import type { RequestContext } from "@/lib/workspace";
@@ -24,6 +25,7 @@ export async function createRun(
   input: RunInput,
   meta: Record<string, string> = {},
   client: Tx | typeof db = db,
+  modelConfigId: string | null = null,
 ) {
   const run = await client.run.create({
     data: {
@@ -32,6 +34,7 @@ export async function createRun(
       targetUrl: input.targetUrl,
       mode: input.mode,
       focus: input.focus,
+      modelConfigId,
     },
   });
   await client.auditLog.create({
@@ -63,12 +66,22 @@ export type StartResult =
  */
 export async function startRun(
   context: RequestContext,
-  body: { targetUrl?: unknown; mode?: unknown; focus?: unknown },
+  body: { targetUrl?: unknown; mode?: unknown; focus?: unknown; modelConfigId?: unknown },
   ip: string,
 ): Promise<StartResult> {
   const parsed = parseRunInput(body, await verifiedOrigins(context.workspaceId));
   if (!parsed.ok) return { ok: false, status: 400, errors: parsed.errors };
   const input = parsed.value;
+
+  // A workspace model must be this workspace's own and have passed Test connection; without
+  // one, the worker's own (server default) model runs.
+  const modelConfigId = typeof body.modelConfigId === "string" && body.modelConfigId ? body.modelConfigId : null;
+  if (modelConfigId) {
+    const usable = isUuid(modelConfigId)
+      ? await usableModel(context.workspaceId, modelConfigId)
+      : ({ ok: false, error: "Choose one of your workspace's models." } as const);
+    if (!usable.ok) return { ok: false, status: 400, errors: { model: usable.error } };
+  }
 
   if (!context.signedIn) {
     const targetError = visitorTargetError(isDemoTarget(input.targetUrl));
@@ -99,7 +112,7 @@ export async function startRun(
     const overQuota = quotaError(used, locked[0].monthly_run_quota);
     if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
 
-    const run = await createRun(context.workspaceId, context.userId, input, { ip }, tx);
+    const run = await createRun(context.workspaceId, context.userId, input, { ip }, tx, modelConfigId);
     return { ok: true, id: run.id };
   });
 }

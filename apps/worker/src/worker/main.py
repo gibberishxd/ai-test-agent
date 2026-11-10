@@ -34,6 +34,7 @@ from worker.db.models import BenchmarkResult, Run
 from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
 from worker.llm import LLMClient, make_client, make_judge
+from worker.model_configs import client_for_run
 from worker.queue import recover_stale_runs
 from worker.report import write_report
 from worker.runner import ExecuteFn, process_next
@@ -96,6 +97,9 @@ def main(argv: list[str] | None = None) -> None:
         log.warning("marked %d stale run(s) as failed", recovered)
     log.info("ready. provider=%s model=%s", llm.provider, llm.agent_model)
 
+    def client_for(session, run, default):
+        return client_for_run(session, run, default, settings)
+
     if args.command == "bench":
         judge = make_judge(settings, llm)
         log.info("benchmark judge: %s", judge_name(judge))
@@ -112,11 +116,11 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
     if args.once:
-        if not process_next(sessions, llm, execute):
+        if not process_next(sessions, llm, execute, client_for):
             log.info("queue is empty")
         return
     while True:
-        if not process_next(sessions, llm, execute):
+        if not process_next(sessions, llm, execute, client_for):
             time.sleep(POLL_INTERVAL_S)
 
 

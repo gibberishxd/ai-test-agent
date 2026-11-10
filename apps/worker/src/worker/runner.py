@@ -29,8 +29,14 @@ def noop_execute(session: Session, run: Run, llm: LLMClient) -> None:
     """Placeholder work until the scan and agent loop exist: just proves the plumbing."""
 
 
+ClientFor = Callable[[Session, Run, LLMClient], LLMClient]
+
+
 def process_next(
-    sessions: sessionmaker[Session], llm: LLMClient, execute: ExecuteFn = noop_execute
+    sessions: sessionmaker[Session],
+    llm: LLMClient,
+    execute: ExecuteFn = noop_execute,
+    client_for: ClientFor | None = None,
 ) -> bool:
     """Claim and process one run. Returns False when the queue was empty."""
     with sessions() as session:
@@ -38,12 +44,14 @@ def process_next(
         if run is None:
             return False
         log.info("claimed run %s (%s, %s)", run.id, run.mode, run.target_url)
-        run.provider = llm.provider
-        run.model = llm.agent_model
-        session.commit()
 
         try:
-            execute(session, run, llm)
+            # The run's own model (a workspace model) or the worker's default.
+            run_llm = client_for(session, run, llm) if client_for else llm
+            run.provider = run_llm.provider
+            run.model = run_llm.agent_model
+            session.commit()
+            execute(session, run, run_llm)
         except Exception as error:  # any failure ends the run as "failed", with the reason
             session.rollback()
             log.exception("run %s failed", run.id)
