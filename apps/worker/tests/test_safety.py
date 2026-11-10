@@ -162,3 +162,27 @@ def test_log_filter_redacts(caplog):
         logger.info("calling API with %s", "sk-live-123456")
     assert "sk-live-123456" not in caplog.text
     assert MASK in caplog.text
+
+
+# --- dev mode is off unless switched on ---------------------------------------------------------
+
+
+def test_without_dev_mode_the_local_demo_shops_are_refused():
+    from worker.config import Settings
+    from worker.scan import make_guard
+
+    settings = Settings(_env_file=None)  # nothing set: must be the safe choice
+    assert settings.dev_mode is False
+    guard = make_guard(settings, settings.demo_url)
+    assert "private or internal" in guard.check("http://localhost:5173/")
+    assert "private or internal" in guard.check("http://localhost:5174/")
+
+
+def test_dev_mode_has_to_be_switched_on_explicitly():
+    from worker.config import Settings
+    from worker.scan import make_guard
+
+    settings = Settings(_env_file=None, dev_mode=True)
+    guard = make_guard(settings, settings.demo_url)
+    assert guard.check("http://localhost:5173/") is None
+    assert guard.check("http://localhost:3000/") is not None  # only the demo shops' ports

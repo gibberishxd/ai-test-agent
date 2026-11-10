@@ -8,42 +8,93 @@ def button(name, **fields) -> ElementInfo:
     return ElementInfo(role="button", name=name, tag="button", **fields)
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "Pay now",
-        "Purchase",
-        "Delete account",
-        "Remove account",
-        "Unsubscribe",
-        "Change password",
-        "Change email",
-        "Send message",
-        "Transfer funds",
-    ],
-)
-def test_deny_list_blocks_destructive_buttons(name):
-    assert deny_reason(button(name), allow_buy=False)
+# (what the user sees on the control, the category safe mode files it under)
+BLOCKED_BUTTONS = [
+    ("Pay now", "payment"),
+    ("PAY", "payment"),
+    ("Purchase", "payment"),
+    ("Buy now", "payment"),
+    ("Place order", "payment"),
+    ("Place your order", "payment"),
+    ("Complete purchase", "payment"),
+    ("Complete my order", "payment"),
+    ("Submit payment", "payment"),
+    ("Confirm", "commitment"),
+    ("Confirm booking", "commitment"),
+    ("Subscribe", "subscription"),
+    ("Unsubscribe", "subscription"),
+    ("Cancel subscription", "subscription"),
+    ("Cancel my plan", "subscription"),
+    ("Delete account", "destructive"),
+    ("delete", "destructive"),
+    ("Remove item", "destructive"),
+    ("Deactivate", "destructive"),
+    ("Close account", "destructive"),
+    ("Close my account", "destructive"),
+    ("Change password", "account"),
+    ("Change your email", "account"),
+    ("Send message", "outbound"),
+    ("Transfer funds", "outbound"),
+]
 
 
-def test_deny_list_checks_link_urls_and_form_actions():
-    assert deny_reason(ElementInfo(role="link", name="Settings", href="/account/delete"), False)
-    assert deny_reason(button("OK", form_action="https://site.test/transfer"), False)
+@pytest.mark.parametrize(("name", "category"), BLOCKED_BUTTONS)
+def test_deny_list_blocks_final_and_destructive_actions(name, category):
+    reason = deny_reason(button(name), is_demo_target=False)
+    assert reason and category in reason
 
 
-@pytest.mark.parametrize("name", ["Add to cart", "Place order", "Log in", "Apply", "Save changes"])
+ALLOWED_BUTTONS = [
+    "Add to cart",
+    "Log in",
+    "Apply",
+    "Save changes",
+    "Search",
+    "Checkout",  # going to the checkout page commits nothing
+    "Continue",
+    "Cancel",  # backing out of a dialog
+    "Close",
+    "Repay schedule",  # not "pay"
+    "Sender details",  # not "send"
+    "Removal policy",  # not "remove"
+    "Confirmation emails",  # not "confirm"
+]
+
+
+@pytest.mark.parametrize("name", ALLOWED_BUTTONS)
 def test_normal_buttons_are_allowed(name):
-    assert deny_reason(button(name), allow_buy=False) is None
+    assert deny_reason(button(name), is_demo_target=False) is None
 
 
-def test_buy_is_allowed_only_on_the_demo_shop():
-    assert deny_reason(button("Buy now"), allow_buy=False)
-    assert deny_reason(button("Buy now"), allow_buy=True) is None
+# Every place a control can say what it does, not only its visible text.
+BLOCKED_BY_FIELD = [
+    ("aria-label", button("", aria_label="Delete account")),
+    ("value", ElementInfo(role="button", tag="input", input_type="submit", value="Place order")),
+    ("form action", button("Continue", form_action="https://site.test/orders/place-order")),
+    ("form action", button("OK", form_action="https://site.test/transfer")),
+    ("link", ElementInfo(role="link", name="Settings", href="/account/delete")),
+    ("link", ElementInfo(role="link", name="Manage", href="/billing/cancelSubscription?id=7")),
+    ("link", ElementInfo(role="link", name="Bye", href="https://site.test/close_account")),
+]
 
 
-def test_words_inside_other_words_dont_match():
-    assert deny_reason(button("Repay schedule"), allow_buy=False) is None  # not "pay"
-    assert deny_reason(button("Sender details"), allow_buy=False) is None  # not "send"
+@pytest.mark.parametrize(("field", "element"), BLOCKED_BY_FIELD)
+def test_deny_list_reads_every_field_that_names_the_action(field, element):
+    reason = deny_reason(element, is_demo_target=False)
+    assert reason and field in reason
+
+
+def test_deny_list_ignores_what_is_typed_in_a_text_field():
+    # A search box containing "delete" is not a delete button.
+    field = ElementInfo(role="textbox", name="Search", tag="input", value="how to delete")
+    assert deny_reason(field, is_demo_target=False) is None
+
+
+def test_the_demo_shops_are_the_only_exception():
+    # They are ours and fake: placing an order there is the point of the demo.
+    assert deny_reason(button("Place order"), is_demo_target=True) is None
+    assert deny_reason(button("Delete account"), is_demo_target=True) is None
+    assert deny_reason(button("Place order"), is_demo_target=False)
 
 
 def test_card_numbers_only_on_the_demo_shop():

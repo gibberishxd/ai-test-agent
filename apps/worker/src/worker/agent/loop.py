@@ -230,7 +230,7 @@ class AgentRun:
         if action == "click" and info:
             if info.href and self._off_site(info.href):
                 return OFF_SITE.format(host=urlsplit(info.href).hostname)
-            return deny_reason(info, allow_buy=self.config.is_demo_target)
+            return deny_reason(info, is_demo_target=self.config.is_demo_target)
         if action == "type":
             return card_number_reason(str(args.get("text", "")), self.config.is_demo_target)
         if action == "navigate":

@@ -14,6 +14,7 @@ from worker.safety.actions import ElementInfo
 
 MAX_ELEMENTS = 80
 MAX_PAGE_TEXT = 3000
+BUTTON_INPUT_TYPES = ("submit", "button", "reset")  # their value is a label, not typed text
 
 COLLECT_ELEMENTS_JS = """(max) => {
   const selector = [
@@ -46,6 +47,7 @@ COLLECT_ELEMENTS_JS = """(max) => {
     out.push({
       id, role, name, tag,
       href: tag === 'a' ? el.href : null,
+      aria_label: el.getAttribute('aria-label'),
       input_type: tag === 'button' ? (el.getAttribute('type') || (el.form ? 'submit' : 'button'))
         : (tag === 'input' ? (type || 'text') : null),
       form_action: el.form ? el.form.action : null,
@@ -67,6 +69,7 @@ class Element:
     name: str
     tag: str
     href: str | None = None
+    aria_label: str | None = None
     input_type: str | None = None
     form_action: str | None = None
     value: str | None = None
@@ -86,6 +89,8 @@ class Element:
             href=self.href,
             input_type=self.input_type,
             form_action=self.form_action,
+            aria_label=self.aria_label,
+            value=self.value if self.input_type in BUTTON_INPUT_TYPES else None,
         )
 
     def describe(self) -> str:

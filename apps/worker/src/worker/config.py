@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     # Targets and storage
     demo_url: str = "http://localhost:5173"
     clean_demo_url: str = "http://localhost:5174"
-    dev_mode: bool = True
+    # Off unless DEV_MODE=true is set explicitly: a deployment that forgets the variable must
+    # not let the browser reach localhost (fail safe).
+    dev_mode: bool = False
     data_dir: str = "apps/worker/data"
 
     def provider(self) -> str:

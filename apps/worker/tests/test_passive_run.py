@@ -99,7 +99,8 @@ def test_interactive_run_records_agent_steps_bugs_and_cost(
     llm = FakeClient(
         decisions=[
             ToolCall("type", {"element_id": 1, "text": "Test User", "reasoning": "fill the name"}),
-            ToolCall("click", {"element_id": 3, "reasoning": "try delete"}),  # blocked
+            # Blocked. (A deny-list click wouldn't be: this site plays the demo shop.)
+            ToolCall("navigate", {"url": "https://example.com/", "reasoning": "leave"}),
             ToolCall(
                 "report_bug",
                 {
@@ -127,12 +128,12 @@ def test_interactive_run_records_agent_steps_bugs_and_cost(
     agent_steps = [s for s in steps if s.action != "visit"]
     assert [s.action for s in agent_steps] == [
         "type",
-        "click",
+        "navigate",
         "report_bug",
         "finish",
         "verify_bug",  # no "dedupe": fewer than two bugs survive, so there's nothing to merge
     ]
-    assert agent_steps[1].blocked and "delete" in agent_steps[1].block_reason
+    assert agent_steps[1].blocked and "origin" in agent_steps[1].block_reason
     assert agent_steps[0].reasoning == "fill the name"
     assert [s.index for s in steps] == list(range(len(steps)))  # one numbering for the run
     [agent_bug] = [b for b in bugs if b.source == "agent"]

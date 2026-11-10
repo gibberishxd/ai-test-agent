@@ -21,6 +21,8 @@ class ElementInfo:
     href: str | None = None
     input_type: str | None = None  # e.g. "submit" for <input type=submit>
     form_action: str | None = None  # the action URL of the enclosing form, if any
+    aria_label: str | None = None
+    value: str | None = None  # the label of an <input type=submit|button>, not typed text
 
     @property
     def is_plain_link(self) -> bool:
