@@ -9,6 +9,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from worker.browser import VIEWPORTS
 from worker.llm import LLMClient, Usage
 from worker.report import BugReport, PageResult
 from worker.safety.secrets import redact
@@ -58,35 +59,55 @@ def parse_issues(text: str) -> list[dict]:
     return [i for i in items if isinstance(i, dict) and isinstance(i.get("title"), str)]
 
 
+MOBILE_WIDTH = VIEWPORTS["mobile"]["width"]
+
+
 def review_screenshots(
     pages: list[PageResult], llm: LLMClient, storage: Storage, limit: int, budget_usd: float
 ) -> ReviewResult:
-    """Review up to `limit` pages (first pages first), stopping if the spend reaches budget_usd."""
+    """Review up to `limit` pages (first pages first), stopping if the spend reaches budget_usd.
+
+    Each page is looked at twice when it has both screenshots: on a desktop screen, and at
+    phone width, where text that overflows or elements that overlap only then show.
+    """
     bugs: list[BugReport] = []
     usages: list[Usage] = []
     spent = 0.0
     for page in [p for p in pages if p.screenshot and p.status == 200][:limit]:
-        if spent >= budget_usd:
-            break
-        prompt = f"Page: {page.url} (title: {page.title or 'none'}). Review this screenshot."
-        result = llm.review_screenshot(prompt, storage.load(page.screenshot), system=REVIEW_SYSTEM)
-        usages.append(result.usage)
-        spent += result.usage.cost_usd
-        for issue in parse_issues(result.text):
-            severity = str(issue.get("severity", "medium")).lower()
-            bugs.append(
-                BugReport(
-                    title=redact(issue["title"])[:200],
-                    severity=severity if severity in SEVERITIES else "medium",
-                    category="visual",
-                    page_url=page.url,
-                    expected=redact(str(issue.get("expected") or "")) or None,
-                    actual=redact(str(issue.get("actual") or "")) or None,
-                    repro_steps=[f"Open {page.url}", "Look at the page"],
-                    reasoning="Found by the model's screenshot review.",
-                    screenshot=page.screenshot,
-                    source="agent",
-                    status="candidate",
+        for viewport, screenshot in (
+            ("desktop", page.screenshot),
+            ("mobile", page.mobile_screenshot),
+        ):
+            if not screenshot or spent >= budget_usd:
+                continue
+            mobile = viewport == "mobile"
+            prompt = f"Page: {page.url} (title: {page.title or 'none'}). Review this screenshot."
+            if mobile:
+                prompt += (
+                    f" It was taken on a phone-sized screen, {MOBILE_WIDTH} px wide: look for "
+                    "text or elements that are cut off, overlap or run out of their box."
                 )
-            )
+            result = llm.review_screenshot(prompt, storage.load(screenshot), system=REVIEW_SYSTEM)
+            usages.append(result.usage)
+            spent += result.usage.cost_usd
+            look = f"Look at the page at {MOBILE_WIDTH} px width" if mobile else "Look at the page"
+            for issue in parse_issues(result.text):
+                severity = str(issue.get("severity", "medium")).lower()
+                bugs.append(
+                    BugReport(
+                        title=redact(issue["title"])[:200],
+                        severity=severity if severity in SEVERITIES else "medium",
+                        category="layout" if mobile else "visual",
+                        page_url=page.url,
+                        expected=redact(str(issue.get("expected") or "")) or None,
+                        actual=redact(str(issue.get("actual") or "")) or None,
+                        repro_steps=[f"Open {page.url}", look],
+                        # Replay verification has to look at the same screen size.
+                        evidence={"viewport": "mobile"} if mobile else {},
+                        reasoning="Found by the model's screenshot review.",
+                        screenshot=screenshot,
+                        source="agent",
+                        status="candidate",
+                    )
+                )
     return ReviewResult(bugs=bugs, usages=usages)

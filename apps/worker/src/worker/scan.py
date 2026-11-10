@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from playwright.sync_api import Browser, BrowserContext, sync_playwright
 
-from worker.browser import VisitOptions, visit_page
+from worker.browser import VIEWPORTS, VisitOptions, visit_page
 from worker.config import Settings
 from worker.crawler import crawl
 from worker.findings import findings_from_pages
@@ -20,7 +20,7 @@ from worker.safety.proxy import GuardProxy
 from worker.storage import Storage
 from worker.urls import is_same_origin
 
-VIEWPORT = {"width": 1280, "height": 800}
+VIEWPORT = VIEWPORTS["desktop"]
 
 
 def make_guard(settings: Settings, target_url: str) -> NetworkGuard:
@@ -68,11 +68,18 @@ def passive_scan(
     started = datetime.now(UTC)
     counter = itertools.count(1)
 
+    number = 0
+
     def save(png: bytes, url: str) -> str:
-        return storage.save(f"{key_prefix}/page-{next(counter):03d}.png", png)
+        nonlocal number
+        number = next(counter)
+        return storage.save(f"{key_prefix}/page-{number:03d}.png", png)
+
+    def save_mobile(png: bytes, url: str) -> str:
+        return storage.save(f"{key_prefix}/page-{number:03d}-mobile.png", png)
 
     with guarded_context(settings, target_url, browser) as (context, guard):
-        options = VisitOptions(save_screenshot=save)
+        options = VisitOptions(save_screenshot=save, save_mobile_screenshot=save_mobile)
 
         def visit(url: str) -> tuple[PageResult, list[str]]:
             blocked_before = len(guard.blocked)

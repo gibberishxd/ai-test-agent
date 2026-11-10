@@ -17,7 +17,7 @@ from worker.agent.observe import Element, Memory, PageState, build_observation, 
 from worker.agent.policy import Budget, card_number_reason, deny_reason
 from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.tools import TOOL_NAMES, TOOLS
-from worker.browser import listen, wait_until_quiet
+from worker.browser import VIEWPORTS, listen, viewport_label, wait_until_quiet
 from worker.llm import LLMClient, ToolCall, Usage
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
@@ -29,7 +29,10 @@ ACTION_TIMEOUT_MS = 5000
 NAVIGATION_TIMEOUT_MS = 15_000
 SETTLE_MS = 2000
 SCROLL_PX = 700
-ELEMENT_ACTIONS = {"click", "type", "select"}
+ELEMENT_ACTIONS = {"click", "double_click", "type", "select"}
+CLICK_ACTIONS = {"click", "double_click"}
+MAX_NOTES = 20
+MAX_NOTE_CHARS = 200
 OFF_SITE = "safe mode: this leads to another site ({host}); testing stays on the target site"
 
 
@@ -99,6 +102,8 @@ class AgentRun:
         self._want_screenshot = True
         self._seen_urls: set[str] = set()
         self._last_site_url = config.target_url  # where to return to if a step leaves the site
+        self._viewport = "desktop"
+        page.set_viewport_size(VIEWPORTS[self._viewport])
         listen(page, self._console, self._failed)
 
     # --- the loop ---------------------------------------------------------------------------
@@ -137,7 +142,12 @@ class AgentRun:
         """One turn: look at the page, let the model choose, check and run it, record it."""
         state, events, image = self._observe()
         observation = build_observation(
-            state, self._task(), self._budget_line(), events, self.memory
+            state,
+            self._task(),
+            self._budget_line(),
+            events,
+            self.memory,
+            viewport_label(self._viewport),
         )
         decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
         index = len(self.result.steps) + 1
@@ -218,7 +228,7 @@ class AgentRun:
         reason = check_mode(self.config.mode, action, info)
         if reason:
             return reason
-        if action == "click" and info:
+        if action in CLICK_ACTIONS and info:
             if info.href and self._off_site(info.href):
                 return OFF_SITE.format(host=urlsplit(info.href).hostname)
             return deny_reason(info, is_demo_target=self.config.is_demo_target)
@@ -265,6 +275,14 @@ class AgentRun:
         try:
             if action == "click":
                 self.page.locator(element.locator).click(timeout=ACTION_TIMEOUT_MS)
+            elif action == "double_click":
+                self.page.locator(element.locator).dblclick(timeout=ACTION_TIMEOUT_MS)
+            elif action == "reload":
+                self.page.reload(timeout=NAVIGATION_TIMEOUT_MS)
+            elif action == "set_viewport":
+                return self._set_viewport(str(args.get("size", "")))
+            elif action == "note":
+                return self._note(str(args.get("text", ""))), False
             elif action == "type":
                 self.page.locator(element.locator).fill(
                     str(args.get("text", "")), timeout=ACTION_TIMEOUT_MS
@@ -295,11 +313,35 @@ class AgentRun:
             self._want_screenshot = True
             return f"ok, now on {self.page.url}", True
         after_text = self._page_text()
-        if action in ("click", "go_back") and after_text == before_text:
-            return "ok, but nothing on the page changed", False
         new_lines = text_changes(before_text, after_text)
+        if action == "reload":
+            # What a refresh keeps or loses is the point of reloading, so always say which.
+            seen = f"new on the page: {new_lines}" if new_lines else "it looks the same as before"
+            return f"ok, the page was reloaded; {seen}", after_text != before_text
+        if action in (*CLICK_ACTIONS, "go_back") and after_text == before_text:
+            return "ok, but nothing on the page changed", False
         changed = after_text != before_text or self._scroll_position() != before_scroll
         return (f"ok; new on the page: {new_lines}" if new_lines else "ok"), changed
+
+    def _set_viewport(self, size: str) -> tuple[str, bool]:
+        if size not in VIEWPORTS:
+            return f"error: size must be one of {', '.join(VIEWPORTS)}", False
+        if size == self._viewport:
+            return f"ok, the viewport already is {viewport_label(size)}", False
+        self.page.set_viewport_size(VIEWPORTS[size])
+        self._viewport = size
+        self._want_screenshot = True
+        wait_until_quiet(self.page, SETTLE_MS)
+        return f"ok, the viewport is now {viewport_label(size)}", True
+
+    def _note(self, text: str) -> str:
+        text = redact(text.strip())[:MAX_NOTE_CHARS]
+        if not text:
+            return "error: the note is empty"
+        if len(self.memory.notes) >= MAX_NOTES:
+            return f"error: the notepad is full ({MAX_NOTES} notes)"
+        self.memory.notes.append(text)
+        return "noted"
 
     def _scroll_position(self) -> float:
         try:
@@ -426,6 +468,14 @@ def describe(action: str, args: dict, element: Element | None) -> str:
     )
     if action == "click":
         return f"Click {target}"
+    if action == "double_click":
+        return f"Double-click {target}"
+    if action == "reload":
+        return "Reload the page"
+    if action == "set_viewport":
+        return f"Switch to the {args.get('size', '')} viewport"
+    if action == "note":
+        return f'Note: "{args.get("text", "")}"'
     if action == "type":
         return f'Type "{args.get("text", "")}" into {target}'
     if action == "select":

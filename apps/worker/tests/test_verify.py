@@ -80,3 +80,37 @@ def test_find_duplicates_ignores_invalid_numbers():
 def test_parse_json_object():
     assert parse_json_object('Sure: {"a": 1}') == {"a": 1}
     assert parse_json_object("no json") is None
+
+
+MORE = {"role": "button", "name": "Increase quantity"}
+
+
+def test_replay_keeps_a_double_click_a_double_click(context, site_url):
+    page = context.new_page()
+    replay(page, f"{site_url}/counter.html", [ReplayStep("double_click", {}, MORE)])
+    assert page.locator("#quantity").inner_text() == "3"
+
+
+def test_replay_repeats_reload_and_viewport_changes(context, site_url):
+    page = context.new_page()
+    replay(
+        page,
+        f"{site_url}/counter.html",
+        [
+            ReplayStep("click", {}, MORE),
+            ReplayStep("reload", {}, None),
+            ReplayStep("set_viewport", {"size": "mobile"}, None),
+            ReplayStep("note", {"text": "x"}, None),  # nothing to repeat
+        ],
+    )
+    assert page.locator("#quantity").inner_text() == "1"
+    assert page.viewport_size == {"width": 375, "height": 812}
+
+
+def test_verification_can_look_at_the_page_on_a_phone_screen(context, site_url):
+    # A layout bug found on the 375 px screenshot must be checked at 375 px, not on desktop.
+    llm = FakeClient(texts=['{"reproduced": true, "reason": "clipped"}'])
+    verify_bug(context, llm, f"{site_url}/counter.html", [], "Title clipped", None, None, "mobile")
+    image = llm.calls[0]["image"]
+    assert int.from_bytes(image[16:20], "big") == 375
+    assert "375" in llm.calls[0]["prompt"]

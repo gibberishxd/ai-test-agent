@@ -8,7 +8,17 @@ from dataclasses import dataclass
 from worker.db.models import RunMode
 
 # Actions that can't change anything on the target site.
-READ_ONLY_ACTIONS = {"navigate", "go_back", "scroll", "take_screenshot", "report_bug", "finish"}
+READ_ONLY_ACTIONS = {
+    "navigate",
+    "go_back",
+    "reload",
+    "scroll",
+    "set_viewport",
+    "take_screenshot",
+    "note",
+    "report_bug",
+    "finish",
+}
 
 
 @dataclass(frozen=True)

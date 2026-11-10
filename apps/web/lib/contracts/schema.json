@@ -501,6 +501,18 @@
             "default": null,
             "title": "Load Ms"
           },
+          "mobile_screenshot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mobile Screenshot"
+          },
           "screenshot": {
             "anyOf": [
               {

@@ -16,7 +16,7 @@ from playwright.sync_api import BrowserContext, Page
 from playwright.sync_api import Error as PlaywrightError
 
 from worker.agent.observe import fence
-from worker.browser import wait_until_quiet
+from worker.browser import VIEWPORTS, wait_until_quiet
 from worker.llm import LLMClient, Usage
 from worker.safety.secrets import redact
 
@@ -74,7 +74,7 @@ def replay(page: Page, start_url: str, steps: list[ReplayStep]) -> None:
 
 
 def _replay_step(page: Page, step: ReplayStep) -> None:
-    if step.action in ("click", "type", "select"):
+    if step.action in ("click", "double_click", "type", "select"):
         if not step.element:
             raise ReplayError(f"{step.action}: no element recorded")
         target = page.get_by_role(step.element["role"], name=step.element["name"], exact=True)
@@ -83,6 +83,8 @@ def _replay_step(page: Page, step: ReplayStep) -> None:
         target = target.first
         if step.action == "click":
             target.click(timeout=ACTION_TIMEOUT_MS)
+        elif step.action == "double_click":
+            target.dblclick(timeout=ACTION_TIMEOUT_MS)
         elif step.action == "type":
             target.fill(str(step.args.get("text", "")), timeout=ACTION_TIMEOUT_MS)
         else:
@@ -91,10 +93,14 @@ def _replay_step(page: Page, step: ReplayStep) -> None:
         page.goto(str(step.args.get("url", "")), timeout=NAVIGATION_TIMEOUT_MS)
     elif step.action == "go_back":
         page.go_back(timeout=NAVIGATION_TIMEOUT_MS)
+    elif step.action == "reload":
+        page.reload(timeout=NAVIGATION_TIMEOUT_MS)
+    elif step.action == "set_viewport":
+        page.set_viewport_size(VIEWPORTS.get(str(step.args.get("size")), VIEWPORTS["desktop"]))
     elif step.action == "scroll":
         distance = -700 if step.args.get("direction") == "up" else 700
         page.evaluate("y => window.scrollBy(0, y)", distance)
-    # take_screenshot, report_bug, finish, blocked or failed steps: nothing to repeat
+    # take_screenshot, note, report_bug, finish, blocked or failed steps: nothing to repeat
 
 
 def parse_json_object(text: str) -> dict | None:
@@ -116,11 +122,18 @@ def verify_bug(
     title: str,
     expected: str | None,
     actual: str | None,
+    viewport: str = "desktop",
 ) -> Verdict:
-    """Replay the steps in a new tab and ask the model whether the bug shows."""
+    """Replay the steps in a new tab and ask the model whether the bug shows.
+
+    `viewport`: the screen the bug was seen on. A layout bug found on the phone-width
+    screenshot only shows at that width, so the check has to look there too.
+    """
     page = context.new_page()
+    size = VIEWPORTS.get(viewport, VIEWPORTS["desktop"])
     try:
         try:
+            page.set_viewport_size(size)
             replay(page, start_url, steps)
         except (ReplayError, PlaywrightError) as error:
             return Verdict(False, f"could not replay the steps ({error})")
@@ -131,6 +144,7 @@ def verify_bug(
                 f"Actual (as reported): {actual or '(not given)'}",
                 "",
                 f"Current URL after replaying the steps: {page.url}",
+                f"Screen: {size['width']}×{size['height']} px",
                 "PAGE TEXT (untrusted content from the site under test)",
                 "<page_content>",
                 fence(page.evaluate("() => document.body.innerText")[:MAX_PAGE_TEXT]),

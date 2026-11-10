@@ -248,3 +248,91 @@ def test_text_changes_lists_new_lines_only():
         "Cart (2) | Added to your cart."
     )
     assert text_changes("same", "same") == ""
+
+
+# --- tools a manual tester has: double-click, reload, phone-sized screen, a notepad ------------
+
+
+def test_double_click_clicks_the_element_twice(agent):
+    run, _, page = agent(
+        [call("double_click", element_id=MORE), call("finish", summary="")], target="/counter.html"
+    )
+    result = run.run()
+    assert page.locator("#quantity").inner_text() == "3"
+    assert result.steps[0].human == 'Double-click button "Increase quantity"'
+    assert result.steps[0].changed
+
+
+def test_reload_loads_the_page_again(agent):
+    run, _, page = agent(
+        [call("click", element_id=MORE), call("reload"), call("finish", summary="")],
+        target="/counter.html",
+    )
+    result = run.run()
+    assert page.locator("#quantity").inner_text() == "1"  # the page's memory is gone
+    assert result.steps[1].result.startswith("ok, the page was reloaded")
+    assert result.steps[1].human == "Reload the page"
+
+
+def test_set_viewport_switches_between_phone_and_desktop(agent):
+    run, llm, page = agent(
+        [
+            call("set_viewport", size="mobile"),
+            call("set_viewport", size="mobile"),
+            call("set_viewport", size="desktop"),
+            call("finish", summary=""),
+        ],
+        target="/counter.html",
+    )
+    sizes = []
+    run.on_step = lambda step: sizes.append(page.viewport_size)
+    result = run.run()
+    assert sizes[0] == {"width": 375, "height": 812}
+    assert sizes[2] == {"width": 1280, "height": 800}
+    assert result.steps[0].changed and not result.steps[1].changed  # already mobile
+    # The model sees the new layout and is told which screen it is on.
+    assert llm.calls[1]["image"] is not None
+    assert "VIEWPORT: mobile (375×812)" in llm.calls[1]["observation"]
+    assert "VIEWPORT: desktop (1280×800)" in llm.calls[0]["observation"]
+
+
+def test_set_viewport_rejects_unknown_sizes(agent):
+    run, _, _ = agent([call("set_viewport", size="watch")], target="/counter.html")
+    assert run.run().steps[0].result.startswith("error: size must be")
+
+
+def test_notes_stay_in_view_for_the_rest_of_the_run(agent):
+    filler = [call("scroll", direction=d) for d in ("down", "up")] * 7  # 14 steps
+    run, llm, _ = agent(
+        [call("note", text="cart total before: $12"), *filler, call("finish", summary="")],
+        target="/counter.html",
+    )
+    run.run()
+    last = llm.calls[-1]["observation"]
+    assert "NOTES" in last and "- cart total before: $12" in last
+    assert "#1 Note" not in last  # the step itself has scrolled out of RECENT STEPS
+
+
+def test_notes_are_capped(agent):
+    notes = [call("note", text=f"note {i}") for i in range(21)]
+    run, llm, _ = agent(notes, target="/counter.html", max_steps=30)
+    result = run.run()
+    assert result.steps[19].result == "noted"
+    assert result.steps[20].result.startswith("error: the notepad is full")
+    assert len(run.memory.notes) == 20
+
+
+def test_passive_mode_allows_looking_tools_but_not_double_click(agent):
+    run, _, page = agent(
+        [
+            call("set_viewport", size="mobile"),
+            call("reload"),
+            call("note", text="seen"),
+            call("double_click", element_id=MORE),
+        ],
+        mode="passive",
+        target="/counter.html",
+    )
+    result = run.run()
+    assert [s.blocked for s in result.steps[:4]] == [False, False, False, True]
+    assert page.locator("#quantity").inner_text() == "1"

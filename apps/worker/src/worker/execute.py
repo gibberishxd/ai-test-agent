@@ -310,7 +310,14 @@ def verify_and_dedupe(
                 ]
                 start_url = run.target_url if replay_steps else bug.page_url
                 verdict = verify_bug(
-                    context, llm, start_url, replay_steps, bug.title, bug.expected, bug.actual
+                    context,
+                    llm,
+                    start_url,
+                    replay_steps,
+                    bug.title,
+                    bug.expected,
+                    bug.actual,
+                    viewport=(bug.evidence or {}).get("viewport", "desktop"),
                 )
                 bug.status = "confirmed" if verdict.reproduced else "dismissed"
                 bug.dismiss_reason = None if verdict.reproduced else f"replay: {verdict.reason}"

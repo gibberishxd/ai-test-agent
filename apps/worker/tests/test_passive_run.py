@@ -39,8 +39,11 @@ def test_passive_run_writes_steps_bugs_and_cost(
 ):
     run = queue_run(sessions, workspace, f"{site_url}/problems.html")
     issue = [{"title": "Price shows NaN", "severity": "high", "expected": "$5", "actual": "$NaN"}]
-    # 1st answer: the screenshot review; 2nd: replay confirms it; then dedup finds nothing.
-    llm = FakeClient(texts=[json.dumps(issue), '{"reproduced": true, "reason": "NaN is shown"}'])
+    # Answers in order: the desktop screenshot review, the phone-width review (nothing more),
+    # the replay that confirms the bug; then dedup finds nothing.
+    llm = FakeClient(
+        texts=[json.dumps(issue), "[]", '{"reproduced": true, "reason": "NaN is shown"}']
+    )
 
     process_next(sessions, llm, make_execute(settings, LocalStorage(tmp_path), browser))
 
@@ -52,6 +55,7 @@ def test_passive_run_writes_steps_bugs_and_cost(
 
     assert [s.action for s in steps][:2] == ["visit", "visit"]  # problems.html, then its links
     assert [s.action for s in steps if s.action != "visit"] == [
+        "review_screenshot",
         "review_screenshot",
         "verify_bug",
         "dedupe",
