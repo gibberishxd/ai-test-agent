@@ -640,7 +640,8 @@ numbers are the real test (Needs me).
 - **Docs:** `docs/DATABASE.md` (tables, keys, indexes, queue, lease, plans, Prisma/SQLAlchemy).
 
 ## D57. CI actions on their Node 24 majors (run 3, H5)
-- **Decision:** `actions/checkout@v7`, `actions/setup-node@v7`, `astral-sh/setup-uv@v10` (all
+- **Decision:** `actions/checkout@v7`, `actions/setup-node@v7`, `astral-sh/setup-uv@v10.3.3`
+  (exact: from v8 on setup-uv publishes no moving major tag, so `@v10` failed to resolve) (all
   declare `runs.using: node24`; latest releases July–October 2026). GitHub was forcing the v4/v6
   versions onto Node 24 with a deprecation annotation.
 - **Checked:** the breaking changes between our versions and these (setup-uv: cache defaults,

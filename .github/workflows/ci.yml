@@ -53,7 +53,7 @@ jobs:
         working-directory: apps/worker
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: uv sync
       - run: uv run playwright install --with-deps chromium
       - run: uv run ruff check .
@@ -86,7 +86,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: npm ci
       - run: npx -w apps/demo playwright install --with-deps chromium
       - run: uv sync
