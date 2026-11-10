@@ -262,3 +262,18 @@ def test_unknown_judge_provider_is_an_error():
     settings = Settings(_env_file=None, llm_provider="ollama", judge_provider="gpt")
     with pytest.raises(ValueError):
         make_judge(settings, make_client(settings))
+
+
+def test_fake_client_can_be_scripted_from_the_environment():
+    # For the end-to-end test: a real worker process whose agent clicks, without a model.
+    script = '[["click", {"element_id": 1}], ["finish", {"summary": "done"}]]'
+    settings = Settings(_env_file=None, llm_provider="fake", fake_script=script)
+    client = make_client(settings)
+    first = client.decide("s", "o", [])
+    assert first.tool_call == ToolCall("click", {"element_id": 1, "reasoning": "scripted step"})
+
+
+def test_a_broken_fake_script_is_a_config_error():
+    settings = Settings(_env_file=None, llm_provider="fake", fake_script="[not json")
+    with pytest.raises(ConfigError):
+        make_client(settings)

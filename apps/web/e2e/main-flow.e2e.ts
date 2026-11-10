@@ -30,6 +30,31 @@ test("start a run from the dashboard and see bugs on the report", async ({ page 
   await expect(page.getByRole("link", { name: "Download JSON" })).toBeVisible();
 });
 
+test("the live browser pane shows the agent's screen and outlines what it clicks", async ({ page }) => {
+  await page.goto("/signin");
+  await page.getByRole("button", { name: "Sign in as demo user" }).click();
+  await page.waitForURL("**/dashboard");
+  await page.getByRole("button", { name: /Use the demo shop/ }).click();
+  await page.getByText("Interactive test").click();
+  await page.getByRole("button", { name: "Start test" }).click();
+  await page.waitForURL(/\/runs\/[0-9a-f-]{36}$/);
+
+  // During the run: the pane shows a screenshot as soon as the first page is visited.
+  const pane = page.getByTestId("live-pane");
+  await expect(pane.getByRole("img").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("live-pane-counter")).toHaveText(/Step \d+ of \d+/);
+
+  // The scripted agent clicks the first element: picking that step outlines it.
+  await expect(page.getByTestId("run-status")).toHaveText(/done/i, { timeout: 150_000 });
+  await pane.getByRole("button", { name: /: Clicked / }).click();
+  const outline = page.getByTestId("live-pane-outline");
+  await expect(outline).toBeVisible();
+  const box = await outline.boundingBox();
+  expect(box!.width).toBeGreaterThan(2);
+  expect(box!.height).toBeGreaterThan(2);
+  await expect(pane.getByText(/^Clicked /)).toBeVisible();
+});
+
 test("the form explains what's wrong with an invalid URL", async ({ page }) => {
   await page.goto("/dashboard");
   await page.getByLabel("URL to test").fill("not a url");

@@ -63,6 +63,9 @@ class StepRecord:
     block_reason: str | None = None
     # Role and name of the element acted on, so replay can find it again in a fresh browser.
     element: dict | None = None
+    # For the live browser pane: where the target was on the screenshot, and the screen size.
+    box: dict | None = None
+    viewport: dict | None = None
     changed: bool = False  # did the action change the page? (loop detection only counts no)
 
 
@@ -142,7 +145,7 @@ class AgentRun:
 
     def _step(self) -> StepRecord:
         """One turn: look at the page, let the model choose, check and run it, record it."""
-        state, events, image = self._observe()
+        state, events, image, screenshot = self._observe()
         observation = build_observation(
             state,
             self._task(),
@@ -159,7 +162,8 @@ class AgentRun:
             url=state.url,
             events=events,
             usage=decision.usage,
-            screenshot=self._thumbnail(index),
+            screenshot=self._save(screenshot, index),
+            viewport=VIEWPORTS[self._viewport],
             **outcome,
         )
         self.result.steps.append(step)
@@ -167,8 +171,10 @@ class AgentRun:
         self.on_step(step)
         return step
 
-    def _observe(self) -> tuple[PageState, list[str], bytes | None]:
-        """The page as the model will see it: state, new events, and a screenshot if due."""
+    def _observe(self) -> tuple[PageState, list[str], bytes | None, bytes | None]:
+        """The page as the model will see it: state, new events, the image for the model (if
+        due) and the step's screenshot. The step's screenshot is taken now, before the action,
+        so it shows what the agent looked at when it chose, with the target where it was."""
         wait_until_quiet(self.page, SETTLE_MS)
         late_exit = self._return_to_site()  # a delayed redirect since the last step
         state = read_page(self.page)
@@ -177,12 +183,16 @@ class AgentRun:
         events = self._drain_events(state.url)
         if late_exit:
             events.append(f"the page went to another site and was brought back ({late_exit})")
+        try:
+            screenshot = self.page.screenshot()
+        except PlaywrightError:
+            screenshot = None
         image = None
         if self._want_screenshot or state.url not in self._seen_urls:
-            image = self.page.screenshot()
+            image = screenshot
         self._seen_urls.add(state.url)
         self._want_screenshot = False
-        return state, events, image
+        return state, events, image, screenshot
 
     def _act(self, call: ToolCall | None, state: PageState, index: int) -> dict:
         """Check the model's choice and run it. Returns the StepRecord fields that describe it."""
@@ -202,6 +212,7 @@ class AgentRun:
             "reasoning": redact(str(args.get("reasoning") or ""))[:300] or None,
             "human": describe(call.name, args, element),
             "element": element.target() if element else None,
+            "box": element.box if element else None,
         }
         blocked = self._check(call.name, args, element)
         if blocked:
@@ -439,12 +450,8 @@ class AgentRun:
         self._failed.clear()
         return events
 
-    def _thumbnail(self, index: int) -> str | None:
-        if not self.save_screenshot:
-            return None
-        try:
-            png = self.page.screenshot()
-        except PlaywrightError:
+    def _save(self, png: bytes | None, index: int) -> str | None:
+        if not self.save_screenshot or png is None:
             return None
         return self.save_screenshot(png, f"step-{index:03d}")
 

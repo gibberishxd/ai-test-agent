@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ModeBadge, StatusBadge } from "@/components/badges";
 import { BugCard } from "@/components/bug-card";
 import { EmptyState } from "@/components/empty-state";
+import { LivePane } from "@/components/live-pane";
 import { StepTimeline } from "@/components/step-timeline";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -117,6 +118,8 @@ export function RunView({
           </CardContent>
         </Card>
       )}
+
+      <LivePane steps={run.steps} live={!final && !readOnly} filesToken={filesToken} />
 
       <section className="grid gap-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

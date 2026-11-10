@@ -22,7 +22,14 @@ export default defineConfig({
     {
       // The worker has no port to wait for: it logs "ready" when it starts polling the queue.
       command: "uv run --project ../worker worker",
-      env: { LLM_PROVIDER: "fake", REVIEW_PAGES: "0" },
+      // FAKE_SCRIPT: in interactive runs the scripted agent clicks the first element, then
+      // finishes, so the live browser pane has a step with an outline to show.
+      env: {
+        LLM_PROVIDER: "fake",
+        REVIEW_PAGES: "0",
+        DEV_MODE: "true",
+        FAKE_SCRIPT: '[["click", {"element_id": 1}], ["finish", {"summary": "done"}]]',
+      },
       wait: { stderr: /ready\./ },
       timeout: 120_000,
     },

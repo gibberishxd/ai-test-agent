@@ -357,3 +357,51 @@ def test_the_same_prompt_object_is_sent_on_every_step(agent):
     run.run()
     assert len(Recording.systems) == 3
     assert all(system is SYSTEM_PROMPT for system in Recording.systems)  # cacheable prefix
+
+
+# --- what the live browser pane shows: the page before the action, and where the target is ----
+
+
+def test_step_records_the_page_before_the_action_and_the_targets_box(context, site_url):
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+    page = context.new_page()
+    saved = {}
+
+    def save(png, name):
+        saved[name] = png
+        return f"{name}.png"
+
+    llm = FakeClient(decisions=[call("click", element_id=SAVE), call("finish", summary="")])
+    config = AgentConfig(target_url=f"{site_url}/form.html", mode="interactive", budget=budget())
+    result = AgentRun(page, llm, guard, config, save_screenshot=save).run()
+
+    click = result.steps[0]
+    # The step's screenshot is the very image the model looked at before it chose the click.
+    assert saved["step-001"] == llm.calls[0]["image"]
+    assert click.screenshot == "step-001.png"
+    assert click.viewport == {"width": 1280, "height": 800}
+    box = click.box
+    save_button = page.locator("#save").bounding_box()
+    assert box == {
+        "x": round(save_button["x"]),
+        "y": round(save_button["y"]),
+        "width": round(save_button["width"]),
+        "height": round(save_button["height"]),
+    }
+    assert result.steps[1].box is None  # finish acts on nothing
+
+
+def test_the_box_is_where_the_element_is_on_screen_after_scrolling(agent):
+    run, _, page = agent(
+        [
+            call("scroll", direction="down"),
+            call("click", element_id=MORE),
+            call("finish", summary=""),
+        ],
+        target="/counter.html",
+    )
+    result = run.run()
+    # The button is near the top, so after scrolling 700 px down it is above the screen.
+    assert result.steps[1].box["y"] < 0

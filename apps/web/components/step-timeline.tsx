@@ -10,7 +10,8 @@ const ICONS: Record<string, typeof Globe> = {
   verify_bug: Eye,
 };
 
-function describe(step: StepView): string {
+/** A step in plain words, for the timeline and the live browser pane. */
+export function describeStep(step: StepView): string {
   const args = step.args;
   const element = args.element as { role?: string; name?: string } | null | undefined;
   const target = element?.name ? `${element.role ?? "element"} "${element.name}"` : "";
@@ -19,6 +20,14 @@ function describe(step: StepView): string {
       return `Visited ${step.url ?? ""}${args.status ? ` (HTTP ${args.status})` : ""}`;
     case "click":
       return `Clicked ${target || "an element"}`;
+    case "double_click":
+      return `Double-clicked ${target || "an element"}`;
+    case "reload":
+      return "Reloaded the page";
+    case "set_viewport":
+      return `Switched to the ${String(args.size ?? "")} screen`;
+    case "note":
+      return `Noted: ${String(args.text ?? "")}`;
     case "type":
       return `Typed "${String(args.text ?? "")}" into ${target || "a field"}`;
     case "select":
@@ -71,7 +80,7 @@ export function StepTimeline({ steps, filesToken = null }: { steps: StepView[]; 
             <div className="grid min-w-0 flex-1 gap-1 text-sm">
               <p className="font-medium break-words">
                 <span className="mr-2 text-muted-foreground tabular-nums">#{step.index + 1}</span>
-                {describe(step)}
+                {describeStep(step)}
               </p>
               {step.reasoning && <p className="text-muted-foreground">{step.reasoning}</p>}
               {step.blocked && step.blockReason && (

@@ -112,6 +112,9 @@ COLLECT_ELEMENTS_JS = """(max) => {
       options: tag === 'select' ? Array.from(el.options).map(o => o.label).slice(0, 20) : null,
       context: contextOf(el),
       css: cssPathOf(el),
+      // Where it is on the screen right now (viewport pixels), for the live browser pane.
+      box: { x: Math.round(box.x), y: Math.round(box.y),
+             width: Math.round(box.width), height: Math.round(box.height) },
     });
     if (out.length >= max) break;
   }
@@ -191,6 +194,7 @@ class Element:
     options: list[str] | None = None
     context: str | None = None  # nearby text, e.g. the product name in its card
     css: str | None = None  # a selector for exactly this element, at the time it was read
+    box: dict | None = None  # {x, y, width, height} in viewport pixels when the page was read
     nth: int = 0  # its place among elements with the same role and name (0-based)
     count: int = 1  # how many elements on the page have this role and name
 

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Benchmark judge: the model that matches reports to planted bugs. Empty = the agent's own
     # provider / cheap model, which makes scores of different models hard to compare.
     judge_provider: str = ""
+    # LLM_PROVIDER=fake only: the agent's tool calls as JSON, [["click", {"element_id": 1}], ...].
+    # Lets the end-to-end test run a real worker whose agent acts, without a model.
+    fake_script: str = ""
     judge_model: str = ""
 
     # Run budgets, enforced by the worker

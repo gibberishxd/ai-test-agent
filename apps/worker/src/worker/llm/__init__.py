@@ -1,6 +1,8 @@
 """Swappable model clients. `make_client(settings)` returns the one LLM_PROVIDER selects;
 `make_judge(settings, agent)` returns the one that judges benchmark matches."""
 
+import json
+
 from worker.config import Settings
 from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
 from worker.llm.fake import FakeClient
@@ -35,7 +37,21 @@ def make_client(settings: Settings) -> LLMClient:
         from worker.llm.ollama import OllamaClient
 
         return OllamaClient(settings.ollama_url, settings.ollama_model)
-    return FakeClient()
+    return FakeClient(decisions=_fake_script(settings.fake_script))
+
+
+def _fake_script(text: str) -> list[ToolCall]:
+    """FAKE_SCRIPT as tool calls; each gets a reasoning line like a real model's would."""
+    if not text.strip():
+        return []
+    try:
+        return [
+            ToolCall(name, {**args, "reasoning": "scripted step"})
+            for name, args in json.loads(text)
+        ]
+    except (ValueError, TypeError) as error:
+        message = f"FAKE_SCRIPT must be a JSON list of [name, args] pairs: {error}"
+        raise ConfigError(message) from error
 
 
 def make_judge(settings: Settings, agent: LLMClient) -> LLMClient:
