@@ -22,8 +22,8 @@ jobs:
       DATABASE_URL: postgresql://agent:agent@localhost:5432/agent
       REQUIRE_DB: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -52,8 +52,8 @@ jobs:
       run:
         working-directory: apps/worker
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv sync
       - run: uv run playwright install --with-deps chromium
       - run: uv run ruff check .
@@ -81,12 +81,12 @@ jobs:
       DEV_MODE: "true"
       LLM_PROVIDER: fake
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
       - run: npm ci
       - run: npx -w apps/demo playwright install --with-deps chromium
       - run: uv sync

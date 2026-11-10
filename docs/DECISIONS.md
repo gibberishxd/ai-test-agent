@@ -638,3 +638,15 @@ numbers are the real test (Needs me).
   `benchmark_results(created_at)` (0.87 → 0.09 ms for 200 rows, 0.96 → 0.01 ms for 1). Nothing
   else added. `HOT_QUERY_INDEXES` in the drift test names each index and its query.
 - **Docs:** `docs/DATABASE.md` (tables, keys, indexes, queue, lease, plans, Prisma/SQLAlchemy).
+
+## D57. CI actions on their Node 24 majors (run 3, H5)
+- **Decision:** `actions/checkout@v7`, `actions/setup-node@v7`, `astral-sh/setup-uv@v10` (all
+  declare `runs.using: node24`; latest releases July–October 2026). GitHub was forcing the v4/v6
+  versions onto Node 24 with a deprecation annotation.
+- **Checked:** the breaking changes between our versions and these (setup-uv: cache defaults,
+  removed `pyproject-file`/`uv-file` inputs and old manifest format; setup-node: automatic
+  caching when `packageManager` is set). We pass no setup-uv inputs and set `cache: npm`
+  explicitly, so none changes our behaviour; uv's cache may be off on some events (slower,
+  not wrong).
+- **Alternative:** pin each action to a commit SHA (stronger supply-chain protection, but the
+  owner would need to update SHAs by hand; noted for later).
