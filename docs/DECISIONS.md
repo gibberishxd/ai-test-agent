@@ -266,3 +266,17 @@ numbers are the real test (Needs me).
   `REQUIRE_DB=1`). CI's TypeScript job now has a Postgres service.
 - **Why:** workspace isolation is a property of real queries; mocking the database would test
   the mock.
+
+## D29. The agent never acts on another site (after demo v1)
+- **Decision:** the agent loop checks the origin in three places: the target itself must not
+  redirect to another origin (the run stops), a link to another origin is refused before the
+  click, and after every action the worker checks where the page is and goes back to the last
+  page on the target if it left (the step is marked blocked, so replay skips it).
+- **Alternatives:** block off-origin main-frame navigations in the proxy (it can't tell a page
+  load from an image or script request); allow the origin the target redirects to (a verified
+  domain could then point the agent at a site its owner doesn't control).
+- **Why:** before this, only the `navigate` tool was origin-checked. A click on an external
+  link moved the agent to a third-party site, where interactive mode kept typing and
+  submitting, which is exactly what domain verification is meant to prevent.
+- **Known limit:** origins are compared strictly, so `http://shop.example` redirecting to
+  `https://shop.example` counts as another site and stops the run. Enter the final URL.

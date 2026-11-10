@@ -27,11 +27,11 @@ def agent(context, site_url):
         allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
     )
 
-    def make(decisions, mode="interactive", **budget_fields):
+    def make(decisions, mode="interactive", target="/form.html", **budget_fields):
         llm = FakeClient(decisions=decisions)
         page = context.new_page()
         config = AgentConfig(
-            target_url=f"{site_url}/form.html", mode=mode, budget=budget(**budget_fields)
+            target_url=f"{site_url}{target}", mode=mode, budget=budget(**budget_fields)
         )
         return AgentRun(page, llm, guard, config), llm, page
 
@@ -77,6 +77,44 @@ def test_navigate_off_origin_is_blocked(agent):
     run, _, _ = agent([call("navigate", url="https://example.com/")])
     result = run.run()
     assert result.steps[0].blocked
+
+
+PARTNER_LINK, REDIRECT_BUTTON = 1, 2  # element ids on offsite.html
+
+
+def test_link_to_another_site_is_blocked_before_the_click(agent, site_url):
+    run, llm, page = agent(
+        [call("click", element_id=PARTNER_LINK), call("finish", summary="")],
+        target="/offsite.html",
+    )
+    result = run.run()
+    blocked = result.steps[0]
+    assert blocked.blocked and "another site" in blocked.block_reason
+    assert page.url == f"{site_url}/offsite.html"  # the click never happened
+    assert "BLOCKED" in llm.calls[1]["observation"]  # the model is told
+
+
+def test_button_that_leaves_the_site_is_undone(agent, site_url):
+    # A button gives no warning where it leads: the worker notices afterwards and goes back.
+    run, llm, page = agent(
+        [call("click", element_id=REDIRECT_BUTTON), call("finish", summary="")],
+        target="/offsite.html",
+    )
+    result = run.run()
+    left = result.steps[0]
+    assert left.blocked and "another site" in left.block_reason  # blocked: replay skips it
+    assert page.url == f"{site_url}/offsite.html"
+    assert "URL: http://localhost" not in llm.calls[1]["observation"]  # never observed there
+
+
+def test_target_that_redirects_to_another_site_stops_the_run(agent, site_url):
+    other = site_url.replace("127.0.0.1", "localhost")
+    run, llm, _ = agent(
+        [call("type", element_id=NAME, text="x")], target=f"/redirect?to={other}/form.html"
+    )
+    result = run.run()
+    assert "another site" in result.stop_reason
+    assert result.steps == [] and llm.calls == []
 
 
 def test_step_budget_stops_the_run(agent):

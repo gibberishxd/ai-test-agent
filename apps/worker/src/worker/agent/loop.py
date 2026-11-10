@@ -8,7 +8,7 @@ it, enforces the budgets, and records everything. Callbacks (`on_step`, `on_bug`
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
@@ -23,12 +23,14 @@ from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
 from worker.safety.secrets import redact
+from worker.urls import is_same_origin
 
 ACTION_TIMEOUT_MS = 5000
 NAVIGATION_TIMEOUT_MS = 15_000
 SETTLE_MS = 2000
 SCROLL_PX = 700
 ELEMENT_ACTIONS = {"click", "type", "select"}
+OFF_SITE = "safe mode: this leads to another site ({host}); testing stays on the target site"
 
 
 @dataclass
@@ -95,6 +97,7 @@ class AgentRun:
         self._failed: list[FailedRequest] = []
         self._want_screenshot = True
         self._seen_urls: set[str] = set()
+        self._last_site_url = config.target_url  # where to return to if a step leaves the site
         listen(page, self._console, self._failed)
 
     # --- the loop ---------------------------------------------------------------------------
@@ -105,6 +108,10 @@ class AgentRun:
             self.page.goto(self.config.target_url, timeout=NAVIGATION_TIMEOUT_MS)
         except PlaywrightError as error:
             self.result.stop_reason = f"could not open the target: {_first_line(error)}"
+            return self.result
+        if self._off_site(self.page.url):
+            host = urlsplit(self.page.url).hostname
+            self.result.stop_reason = f"the target redirects to another site ({host})"
             return self.result
 
         while True:
@@ -125,8 +132,13 @@ class AgentRun:
 
     def _step(self) -> StepRecord:
         wait_until_quiet(self.page, SETTLE_MS)
+        late_exit = self._return_to_site()  # a delayed redirect since the last step
         state = read_page(self.page)
+        if is_same_origin(state.url, self.config.target_url):
+            self._last_site_url = state.url
         events = self._drain_events(state.url)
+        if late_exit:
+            events.append(f"the page went to another site and was brought back ({late_exit})")
         image = None
         if self._want_screenshot or state.url not in self._seen_urls:
             image = self.page.screenshot()
@@ -174,6 +186,7 @@ class AgentRun:
                 )
             else:
                 result = self._execute(call.name, args, element, state, index)
+                left = self._return_to_site()
                 step = StepRecord(
                     index,
                     call.name,
@@ -181,9 +194,12 @@ class AgentRun:
                     reasoning,
                     state.url,
                     human,
-                    result,
+                    f"BLOCKED: {left}; you are back on {self.page.url}" if left else result,
                     events,
                     decision.usage,
+                    # Marked blocked so replay doesn't repeat a step that leaves the site.
+                    blocked=bool(left),
+                    block_reason=left,
                 )
 
         if call is not None and call.name in TOOL_NAMES:
@@ -208,12 +224,36 @@ class AgentRun:
         if reason:
             return reason
         if action == "click" and info:
+            if info.href and self._off_site(info.href):
+                return OFF_SITE.format(host=urlsplit(info.href).hostname)
             return deny_reason(info, allow_buy=self.config.is_demo_target)
         if action == "type":
             return card_number_reason(str(args.get("text", "")), self.config.is_demo_target)
         if action == "navigate":
             return self.guard.check_navigation(urljoin(self.page.url, str(args.get("url", ""))))
         return None
+
+    def _off_site(self, url: str) -> bool:
+        """Is `url` a web page on another origin than the target? (about:blank etc. are not.)"""
+        is_web = urlsplit(url).scheme.lower() in ("http", "https")
+        return is_web and not is_same_origin(url, self.config.target_url)
+
+    def _return_to_site(self) -> str | None:
+        """If the page is on another site, go back to the last page on the target.
+
+        A link shows where it leads, so it's refused before the click. A button, a form or a
+        script doesn't, so this check runs after every action: the agent must never act on a
+        site the workspace hasn't verified. Returns why it went back, or None if it didn't.
+        """
+        if not self._off_site(self.page.url):
+            return None
+        reason = OFF_SITE.format(host=urlsplit(self.page.url).hostname)
+        try:
+            self.page.goto(self._last_site_url, timeout=NAVIGATION_TIMEOUT_MS)
+            wait_until_quiet(self.page, SETTLE_MS)
+        except PlaywrightError:
+            self.page.goto("about:blank")  # can't get back: at least don't stay over there
+        return reason
 
     # --- acting ------------------------------------------------------------------------------
 

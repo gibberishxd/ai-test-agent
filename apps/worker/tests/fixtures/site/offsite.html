@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ways off the site</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <h1>Ways off the site</h1>
+    <!-- "localhost" and "127.0.0.1" are the same test server but different origins, so the
+         tests have "another site" without needing the internet. -->
+    <a id="partner" href="#">Partner shop</a>
+    <button id="redirect" type="button">Continue</button>
+    <script>
+      const other = location.origin.replace("127.0.0.1", "localhost") + "/form.html";
+      document.getElementById("partner").href = other;
+      document.getElementById("redirect").onclick = () => { location.href = other; };
+    </script>
+  </body>
+</html>
