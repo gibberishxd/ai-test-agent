@@ -282,3 +282,14 @@ numbers are the real test (Needs me).
   and default ports (`urls.is_same_site`), so a site that upgrades `http://shop.example` to
   `https://shop.example` still works. The crawler and the `navigate` check use the same rule.
   Subdomains, other ports and a downgrade to http are another site.
+
+## D30. Loop detection counts repeats without effect (after demo v1)
+- **Decision:** the same action 3 times in a row is a loop only when none of them changed the
+  page (URL, page text or scroll position). The same action 6 times in a row
+  (2 × `MAX_REPEATED_ACTIONS`) is a loop even when the page changes every time.
+- **Alternatives:** keep "same action 3 times" (it ended runs that clicked "+" three times or
+  scrolled a long page, which is what finding bugs 5 and 7 takes); count only no-effect
+  repeats with no upper limit (a model that adds to the cart forever would run to the step
+  budget).
+- **Why:** repeating an action that works is testing; repeating one that does nothing is
+  being stuck. The step result already knew the difference ("nothing on the page changed").

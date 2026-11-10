@@ -57,11 +57,13 @@ class Budget:
     max_steps: int
     max_seconds: float
     max_cost_usd: float
-    max_repeats: int = 3
+    max_repeats: int = 3  # the same action this often in a row, changing nothing, is a loop
     started: float = field(default_factory=time.monotonic)
     steps: int = 0
     cost_usd: float = 0.0
-    _recent: list[str] = field(default_factory=list)
+    _last_action: str = ""
+    _same: int = 0  # how many times in a row the last action was chosen
+    _idle: int = 0  # how many of the latest of those changed nothing on the page
 
     def exhausted(self) -> str | None:
         """Why the run must stop now, or None."""
@@ -73,18 +75,36 @@ class Budget:
             return f"cost budget reached (${self.max_cost_usd:.2f})"
         return None
 
-    def repeating(self) -> bool:
-        """True when the last two actions were identical (one more ends the run)."""
-        return len(self._recent) >= 2 and self._recent[-1] == self._recent[-2]
+    @property
+    def max_same(self) -> int:
+        """The same action this often in a row is a loop even if the page changes each time."""
+        return self.max_repeats * 2
 
-    def record(self, action: str, args: dict, cost_usd: float) -> str | None:
-        """Count one step; return a reason to stop if the same action repeats too often."""
+    def repeating(self) -> bool:
+        """True when repeating the last action once more would end the run."""
+        return self._idle == self.max_repeats - 1 or self._same == self.max_same - 1
+
+    def record(self, action: str, args: dict, cost_usd: float, changed: bool = False) -> str | None:
+        """Count one step; return a reason to stop if the agent is stuck in a loop.
+
+        `changed`: did the action change the page? Repeating an action that works (clicking
+        "+" three times) is testing, so only repeats without effect count, up to `max_repeats`.
+        `max_same` catches the other loop: "Add to cart" forever, changing the page every time.
+        """
         self.steps += 1
         self.cost_usd += cost_usd
         key = action + json.dumps(
             {k: v for k, v in args.items() if k != "reasoning"}, sort_keys=True
         )
-        self._recent = [*self._recent, key][-self.max_repeats :]
-        if len(self._recent) == self.max_repeats and len(set(self._recent)) == 1:
-            return f"loop detected: the same action repeated {self.max_repeats} times"
+        if key != self._last_action:
+            self._last_action, self._same, self._idle = key, 0, 0
+        self._same += 1
+        self._idle = 0 if changed else self._idle + 1
+        if self._idle >= self.max_repeats:
+            return (
+                f"loop detected: the same action repeated {self.max_repeats} times "
+                "without changing the page"
+            )
+        if self._same >= self.max_same:
+            return f"loop detected: the same action repeated {self.max_same} times in a row"
         return None

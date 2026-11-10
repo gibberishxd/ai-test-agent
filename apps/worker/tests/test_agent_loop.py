@@ -126,10 +126,29 @@ def test_step_budget_stops_the_run(agent):
 
 
 def test_repeated_action_is_detected_as_a_loop(agent):
-    run, _, _ = agent([call("click", element_id=SAVE)] * 5)
+    # The first Save writes "Saved: "; the next three change nothing, and that is the loop.
+    run, _, _ = agent([call("click", element_id=SAVE)] * 6)
     result = run.run()
-    assert len(result.steps) == 3
+    assert len(result.steps) == 4
     assert "loop" in result.stop_reason
+
+
+MORE = 1  # element id on counter.html
+
+
+def test_repeating_a_click_that_works_is_not_a_loop(agent):
+    clicks = [call("click", element_id=MORE)] * 4
+    run, llm, page = agent([*clicks, call("finish", summary="")], target="/counter.html")
+    result = run.run()
+    assert result.stop_reason == "finished"
+    assert page.locator("#quantity").inner_text() == "5"
+    assert not any("WARNING" in c["observation"] for c in llm.calls)
+
+
+def test_scrolling_down_a_long_page_is_not_a_loop(agent):
+    scrolls = [call("scroll", direction="down")] * 4
+    run, _, _ = agent([*scrolls, call("finish", summary="")], target="/counter.html")
+    assert run.run().stop_reason == "finished"
 
 
 def test_cost_budget_stops_the_run(agent):
@@ -219,7 +238,7 @@ def test_model_is_warned_before_loop_detection_ends_the_run(agent):
     run, llm, _ = agent([call("scroll", direction="down")] * 3)
     run.run()
     assert "WARNING" not in llm.calls[1]["observation"]
-    assert "WARNING: your last two actions were identical" in llm.calls[2]["observation"]
+    assert "WARNING: you keep repeating the same action" in llm.calls[2]["observation"]
 
 
 def test_text_changes_lists_new_lines_only():

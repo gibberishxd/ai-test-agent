@@ -82,3 +82,30 @@ def test_different_actions_dont_count_as_a_loop():
     budget = Budget(max_steps=10, max_seconds=60, max_cost_usd=1)
     for element_id in (1, 2, 1, 2):
         assert budget.record("click", {"element_id": element_id}, 0) is None
+
+
+def test_repeats_that_change_the_page_are_not_a_loop():
+    # Clicking "+" three times is testing, not being stuck.
+    budget = Budget(max_steps=10, max_seconds=60, max_cost_usd=1)
+    for _ in range(3):
+        assert budget.record("click", {"element_id": 4}, 0, changed=True) is None
+    assert not budget.repeating()
+
+
+def test_a_change_resets_the_count_of_repeats_without_effect():
+    budget = Budget(max_steps=10, max_seconds=60, max_cost_usd=1)
+    for changed in (False, False, True, False, False):
+        assert budget.record("click", {"element_id": 4}, 0, changed=changed) is None
+    assert budget.repeating()  # one more without effect ends the run
+    assert "without changing" in budget.record("click", {"element_id": 4}, 0, changed=False)
+
+
+def test_endless_repeats_are_a_loop_even_when_the_page_changes():
+    # "Add to cart" forever changes the page every time, and is still a loop.
+    budget = Budget(max_steps=20, max_seconds=60, max_cost_usd=1)
+    for _ in range(4):
+        assert budget.record("click", {"element_id": 4}, 0, changed=True) is None
+    assert not budget.repeating()
+    assert budget.record("click", {"element_id": 4}, 0, changed=True) is None
+    assert budget.repeating()
+    assert "loop" in budget.record("click", {"element_id": 4}, 0, changed=True)

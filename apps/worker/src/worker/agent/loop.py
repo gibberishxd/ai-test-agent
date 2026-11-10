@@ -58,6 +58,7 @@ class StepRecord:
     block_reason: str | None = None
     # Role and name of the element acted on, so replay can find it again in a fresh browser.
     element: dict | None = None
+    changed: bool = False  # did the action change the page? (loop detection only counts no)
 
 
 @dataclass
@@ -120,7 +121,9 @@ class AgentRun:
                 self.result.stop_reason = reason
                 break
             step = self._step()
-            loop_reason = budget.record(step.action, step.args, step.usage.cost_usd)
+            loop_reason = budget.record(
+                step.action, step.args, step.usage.cost_usd, changed=step.changed
+            )
             if step.action == "finish" and not step.blocked:
                 self.result.stop_reason = "finished"
                 self.result.summary = step.args.get("summary")
@@ -185,7 +188,7 @@ class AgentRun:
                     block_reason=blocked,
                 )
             else:
-                result = self._execute(call.name, args, element, state, index)
+                result, changed = self._execute(call.name, args, element, state, index)
                 left = self._return_to_site()
                 step = StepRecord(
                     index,
@@ -200,6 +203,7 @@ class AgentRun:
                     # Marked blocked so replay doesn't repeat a step that leaves the site.
                     blocked=bool(left),
                     block_reason=left,
+                    changed=changed and not left,
                 )
 
         if call is not None and call.name in TOOL_NAMES:
@@ -259,11 +263,14 @@ class AgentRun:
 
     def _execute(
         self, action: str, args: dict, element: Element | None, state: PageState, index: int
-    ) -> str:
+    ) -> tuple[str, bool]:
+        """Run one allowed action. Returns what to tell the model, and whether the page changed
+        (its URL, its text or its scroll position)."""
         if action in ELEMENT_ACTIONS and element is None:
-            return f"error: there is no element [{args.get('element_id')}] on this page"
+            return f"error: there is no element [{args.get('element_id')}] on this page", False
         before = self.page.url
         before_text = self._page_text()
+        before_scroll = self._scroll_position()
         try:
             if action == "click":
                 self.page.locator(element.locator).click(timeout=ACTION_TIMEOUT_MS)
@@ -283,22 +290,29 @@ class AgentRun:
                 self.page.mouse.wheel(0, SCROLL_PX if down else -SCROLL_PX)
             elif action == "take_screenshot":
                 self._want_screenshot = True
-                return "ok: a screenshot is attached to the next observation"
+                return "ok: a screenshot is attached to the next observation", False
             elif action == "report_bug":
-                return self._report_bug(args, state, index)
+                return self._report_bug(args, state, index), False
             elif action == "finish":
-                return "finished"
+                return "finished", False
         except PlaywrightError as error:
-            return f"error: {_first_line(error)}"
+            return f"error: {_first_line(error)}", False
         wait_until_quiet(self.page, SETTLE_MS)
         if self.page.url != before:
             self._want_screenshot = True
-            return f"ok, now on {self.page.url}"
+            return f"ok, now on {self.page.url}", True
         after_text = self._page_text()
         if action in ("click", "go_back") and after_text == before_text:
-            return "ok, but nothing on the page changed"
+            return "ok, but nothing on the page changed", False
         new_lines = text_changes(before_text, after_text)
-        return f"ok; new on the page: {new_lines}" if new_lines else "ok"
+        changed = after_text != before_text or self._scroll_position() != before_scroll
+        return (f"ok; new on the page: {new_lines}" if new_lines else "ok"), changed
+
+    def _scroll_position(self) -> float:
+        try:
+            return self.page.evaluate("() => window.scrollY")
+        except PlaywrightError:
+            return 0
 
     def _page_text(self) -> str:
         try:
@@ -371,7 +385,7 @@ class AgentRun:
         )
         if b.repeating():
             line += (
-                "\nWARNING: your last two actions were identical. Repeating it once more ends "
+                "\nWARNING: you keep repeating the same action. Repeating it once more ends "
                 "the run: do something different."
             )
         return line

@@ -326,7 +326,7 @@ reviews the first N pages rather than choosing the most interesting ones.
 
 **What:** interactive mode. Each step: observe the page → the model calls exactly one tool →
 the worker checks it against the safety rules → runs it → logs it. Ends on `finish`, a budget
-(steps, time, cost), loop detection (same action 3× in a row) or the Stop button.
+(steps, time, cost), loop detection (same action 3× in a row without changing the page, or 6× in a row) or the Stop button.
 
 **How:**
 - `observe.py` tags visible interactive elements with `data-agent-id`, lists them as
