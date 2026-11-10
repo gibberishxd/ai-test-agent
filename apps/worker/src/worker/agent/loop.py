@@ -201,7 +201,7 @@ class AgentRun:
             "args": args,
             "reasoning": redact(str(args.get("reasoning") or ""))[:300] or None,
             "human": describe(call.name, args, element),
-            "element": {"role": element.role, "name": element.name} if element else None,
+            "element": element.target() if element else None,
         }
         blocked = self._check(call.name, args, element)
         if blocked:

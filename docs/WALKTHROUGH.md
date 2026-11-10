@@ -603,3 +603,74 @@ can still show from cache. Verified domains are never re-checked.
 3. *What is DNS rebinding?* You resolve a name, check the address is public, then connect by
    name; the client resolves again and the attacker's DNS now answers a private address.
    Connecting to the address you checked removes the second lookup.
+
+## Run 2: tester's tools and a richer observation (`agent/tools.py`, `agent/observe.py`, `agent/prompt.py`, `review.py`)
+
+**What:** new tools (`double_click`, `reload`, `set_viewport`, `note`), phone-width screenshots
+in the passive scan, field states and positioned messages in the observation, changed values
+first in "what changed", and a QA test charter in the system prompt.
+
+**How:**
+- `_execute` handles the new actions; `set_viewport` resizes the page and asks for a screenshot
+  next step; `note` appends to `Memory.notes`, which `build_observation` prints every step.
+- `COLLECT_ELEMENTS_JS` adds `required`, `invalid` and `described` per field.
+  `COLLECT_MESSAGES_JS` finds visible `[role=alert|status]`, `[aria-live]` and error-looking
+  classes, and assigns each the field in the same group (walking up at most 4 parents) or the
+  closest overlapping field within 60 px.
+- `text_changes` groups lines by "shape" (digits replaced by #), so `Subtotal: $12.00` and
+  `Subtotal: $24.00` pair up and print as a change.
+- `visit_page` takes a second full-page screenshot at 375×812; `review_screenshots` reviews
+  both and marks phone findings `evidence.viewport = "mobile"` so `verify_bug` checks at 375 px.
+
+**Why:** each one closes a gap between what a human tester can see or do and what the agent
+could. The charter is generic on purpose; a test fails if any demo-app detail leaks into it.
+
+**Weak spots:** "next to" is a heuristic: unusual layouts (errors in a toast at the top of the
+page) won't be tied to a field. Error classes are English-ish (`error`, `invalid`, `alert`).
+Phone screenshots double the review cost of a passive scan. The charter makes the prompt longer,
+which small local models follow less reliably.
+
+**Interview Q&A**
+1. *Why not just give the model the HTML?* It is large and mostly noise, so it costs more and
+   small models get lost in it. A short list of numbered controls with their state, plus the
+   messages and where they sit, carries what a tester actually looks at.
+2. *How do you keep the prompt from overfitting to your own demo?* The charter only names
+   techniques, never sites or bugs, and a unit test reads `bugs.json` of both demo apps and
+   fails if any title, product name, code or address appears in the prompt or tool text.
+3. *Why does the note tool help?* Each model call only sees the current observation. To check
+   "did the total double?", the agent needs the old total; a note keeps it in view.
+
+## Run 2: replay that clicks the right thing (`verify.py: find_target`, `execute.py: replay_plans`)
+
+**What:** replay finds the exact element the agent acted on or fails with a reason; it tries a
+short replay from the last navigation first; dedup runs before replay.
+
+**How:**
+- `Element.target()` stores role, name, `nth`/`count` among same role+name, `context` (first
+  nearby line that isn't its own label, from `CONTEXT_JS`) and `css` (from `CSS_PATH_JS`).
+- `find_target` tries, each only if it yields exactly one element: role+name, then the match
+  whose `CONTEXT_JS` equals the recorded context, then the CSS path if it points at one of the
+  matches, then `nth` if today's count equals the recorded count. Otherwise `ReplayError`.
+- `replay_plans` returns `[(last navigate URL, steps after it), (target, all steps)]`; blocked
+  steps are dropped; a viewport change before the navigate is carried into the short plan.
+- `verify_and_dedupe` runs `_dedupe` first (keeping deterministic findings as the original),
+  then replays only agent candidates.
+
+**Why:** "first match" made verdicts about the wrong element; full replays repeated side
+effects; and agent restatements of server errors were dismissed by a replay that can't show a
+failed request.
+
+**Weak spots:** context is the first nearby line, which may be the same for two cards ("Sale!").
+A CSS path breaks when the page structure changes. Starting at the last navigation can miss
+state built earlier in local storage; the full replay is the fallback, at the cost of a second
+model call. Dedup quality depends on the cheap model.
+
+**Interview Q&A**
+1. *Why fail instead of clicking the first match?* A wrong click produces a confident wrong
+   verdict, which is worse than "could not replay": the latter is visible and honest.
+2. *Why replay from the last navigation first?* A full page load resets in-memory state, so
+   earlier steps matter less, and skipping them avoids repeating side effects like placing an
+   order. If it doesn't reproduce, the full replay still runs.
+3. *Why dedup before replay?* Deterministic findings have hard evidence. If the agent reports
+   the same failed request, replaying it can only fail (the model can't see a network error in
+   a screenshot) and would dismiss a real bug. Merging it first avoids that.

@@ -55,7 +55,8 @@ def test_steps_that_cant_be_replayed_dismiss_the_bug(context, site_url):
     llm = FakeClient(texts=['{"reproduced": true, "reason": "x"}'])
     verdict = verify_bug(context, llm, f"{site_url}/form.html", [missing], "x", None, None)
     assert verdict.reproduced is False
-    assert "could not replay" in verdict.reason
+    assert verdict.replayed is False  # the run summary then says "could not replay: ..."
+    assert 'no button "Does not exist"' in verdict.reason
     assert llm.calls == []  # no model call when replay fails
 
 
@@ -114,3 +115,65 @@ def test_verification_can_look_at_the_page_on_a_phone_screen(context, site_url):
     image = llm.calls[0]["image"]
     assert int.from_bytes(image[16:20], "big") == 375
     assert "375" in llm.calls[0]["prompt"]
+
+
+# --- exact targets: never click "the first one" ------------------------------------------------
+
+import pytest  # noqa: E402
+
+from worker.verify import ReplayError  # noqa: E402
+
+ADD = {"role": "button", "name": "Add to cart", "nth": 3, "count": 6, "context": "Product 4"}
+
+
+def cart_after(context, site_url, element):
+    page = context.new_page()
+    replay(page, f"{site_url}/cards.html", [ReplayStep("click", {}, element)])
+    return page.locator("#cart").inner_text()
+
+
+def test_replay_picks_the_button_in_the_right_card(context, site_url):
+    assert cart_after(context, site_url, {**ADD, "css": None}) == "Cart: Product 4"
+
+
+def test_replay_uses_the_css_path_when_surroundings_dont_settle_it(context, site_url):
+    element = {**ADD, "context": "Gone", "css": "main > section > article:nth-of-type(5) > button"}
+    assert cart_after(context, site_url, element) == "Cart: Product 5"
+
+
+def test_replay_uses_the_position_only_when_the_page_has_the_same_shape(context, site_url):
+    element = {**ADD, "nth": 1, "context": None, "css": None}
+    assert cart_after(context, site_url, element) == "Cart: Product 2"
+
+
+def test_replay_fails_loudly_instead_of_clicking_the_first_match(context, site_url):
+    element = {**ADD, "count": 7, "context": "Gone", "css": None}  # the page changed shape
+    with pytest.raises(ReplayError, match='6 elements match button "Add to cart"'):
+        cart_after(context, site_url, element)
+
+
+def test_replay_fails_loudly_when_the_element_is_gone(context, site_url):
+    element = {"role": "button", "name": "Remove all", "nth": 0, "count": 1}
+    with pytest.raises(ReplayError, match='no button "Remove all" on the page'):
+        cart_after(context, site_url, element)
+
+
+def test_unreplayable_bug_says_could_not_replay(context, site_url):
+    element = {"role": "button", "name": "Remove all", "nth": 0, "count": 1}
+    verdict = verify_bug(
+        context,
+        FakeClient(),
+        f"{site_url}/cards.html",
+        [ReplayStep("click", {}, element)],
+        "x",
+        None,
+        None,
+    )
+    assert not verdict.reproduced and not verdict.replayed
+    assert verdict.reason.startswith('click: no button "Remove all" on the page')
+
+
+def test_replay_resolves_a_relative_navigate(context, site_url):
+    page = context.new_page()
+    replay(page, f"{site_url}/form.html", [ReplayStep("navigate", {"url": "/cards.html"}, None)])
+    assert page.url == f"{site_url}/cards.html"

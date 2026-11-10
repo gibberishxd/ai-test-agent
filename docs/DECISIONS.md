@@ -372,3 +372,52 @@ numbers are the real test (Needs me).
 - **Why:** Sonnet 5.5 always thinks and thinking counts toward `max_tokens`; at 4,096 a reply
   could end before the tool call and waste the step. The price was listed as $0.20, which
   overstated cost. Untested against the live API (no key in this run).
+
+## D38. Four more tester's tools: double_click, reload, set_viewport, note (run 2, G2.1)
+- **Decision:** the agent gets `double_click`, `reload`, `set_viewport` ("desktop" 1280×800 or
+  "mobile" 375×812) and `note` (up to 20 lines kept in every later observation). Replay repeats
+  each one exactly (a double-click stays a double-click). The passive scan also stores a 375 px
+  screenshot of every page, the model reviews both widths, and a phone-width finding is
+  verified at phone width.
+- **Alternatives:** free-form viewport sizes (more to get wrong for little gain); a scratchpad
+  inside the model's reasoning (lost after each step: the loop is stateless per call).
+- **Why:** these are things a manual tester does all the time: double-submit a button, refresh
+  to see what survives, check a phone screen, write down a total before changing it. Without
+  them some bug kinds were impossible to find, whatever the model.
+
+## D39. The observation shows field state and where each message sits (run 2, G2.2)
+- **Decision:** every field lists required/invalid and the visible text tied to it by
+  `aria-describedby`/`aria-errormessage`. A new MESSAGES section lists visible error, alert and
+  status messages with the field they sit next to: the only field in the same group, else the
+  closest field within 60 px above or below. "What changed" keeps 600 characters and lists
+  changed values first, with the old value ("Subtotal: $12.00 → $24.00").
+- **Alternatives:** send the HTML (expensive, and the model would have to work out layout);
+  rely on the screenshot (small models read layout poorly and screenshots aren't sent every step).
+- **Why:** "the error appears under the wrong field" is invisible in plain page text, and most
+  functional bugs show up as a number that didn't change the way it should.
+
+## D40. A generic QA test charter in the system prompt (run 2, G2.3)
+- **Decision:** eight techniques: boundary values, invalid input and where its error sits,
+  arithmetic on totals, doing things twice, state after reload/logout, small screens, actions
+  that do nothing, nonsensical values. A test fails if any name, code or address from our demo
+  apps appears in the prompt or tool descriptions.
+- **Alternatives:** per-site instructions (overfitting: it would score well on our shop and
+  teach nothing about other sites); no guidance (the old prompt; small models clicked around
+  without checking results).
+- **Why:** it is what a careful human tester does on any site. The prompt stays byte-identical
+  across steps so it can be cached.
+
+## D41. Replay finds the exact element or fails loudly, starts at the last navigation, and runs after dedup (run 2, G2.4)
+- **Decision:** each step records role, name, its place among same role+name elements, the
+  nearby text and a CSS path. Replay uses role+name, then nearby text, then the CSS path, then
+  the position only if the page has the same number of matches; otherwise it raises, and the
+  bug is dismissed with "could not replay: <why>". Replay first starts at the last `navigate`
+  before the report (carrying a viewport change along); if that doesn't reproduce the bug, it
+  replays from the start. Dedup now runs before replay, and deterministic findings are never
+  replayed.
+- **Alternatives:** keep "first match" (it clicked the wrong "Add to cart" and confirmed or
+  dismissed the wrong thing); replay only the steps the model listed (models forget the step
+  that set up the state); record coordinates (break on any layout change).
+- **Why:** a verdict on the wrong element is worse than no verdict. Starting late avoids
+  repeating side effects such as a second order. Before, an agent report of a server error was
+  replayed, the model couldn't see a failed request on screen, and a real bug was dismissed.

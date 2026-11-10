@@ -7,7 +7,7 @@ import pytest
 from worker.config import Settings
 from worker.db.models import Bug, Run, RunStatus, Step
 from worker.execute import make_execute
-from worker.llm import FakeClient
+from worker.llm import FakeClient, ToolCall
 from worker.review import parse_issues
 from worker.runner import process_next
 from worker.storage import LocalStorage
@@ -40,9 +40,14 @@ def test_passive_run_writes_steps_bugs_and_cost(
     run = queue_run(sessions, workspace, f"{site_url}/problems.html")
     issue = [{"title": "Price shows NaN", "severity": "high", "expected": "$5", "actual": "$NaN"}]
     # Answers in order: the desktop screenshot review, the phone-width review (nothing more),
-    # the replay that confirms the bug; then dedup finds nothing.
+    # dedup (nothing to merge), then the replay that confirms the bug.
     llm = FakeClient(
-        texts=[json.dumps(issue), "[]", '{"reproduced": true, "reason": "NaN is shown"}']
+        texts=[
+            json.dumps(issue),
+            "[]",
+            '{"duplicates": []}',
+            '{"reproduced": true, "reason": "NaN is shown"}',
+        ]
     )
 
     process_next(sessions, llm, make_execute(settings, LocalStorage(tmp_path), browser))
@@ -57,8 +62,8 @@ def test_passive_run_writes_steps_bugs_and_cost(
     assert [s.action for s in steps if s.action != "visit"] == [
         "review_screenshot",
         "review_screenshot",
+        "dedupe",  # before replay: a restated finding is merged, not replayed
         "verify_bug",
-        "dedupe",
     ]
     assert stored.pages_visited >= 2
     assert stored.step_count == len(steps)
@@ -162,3 +167,63 @@ def test_interactive_mode_is_refused_on_other_targets(sessions, workspace, setti
         stored = session.get(Run, run.id)
     assert stored.status == RunStatus.FAILED
     assert "interactive mode" in stored.error
+
+
+class MergingJudge(FakeClient):
+    """Dedup answer computed from the listing: the agent's report duplicates the HTTP 500."""
+
+    def complete(self, prompt, system=None, cheap=True):
+        self.calls.append({"method": "complete", "prompt": prompt, "cheap": cheap})
+        numbers = {}
+        for line in prompt.splitlines():
+            number, _, rest = line.partition(". ")
+            if number.isdigit():
+                numbers[rest] = int(number)
+        agent = next(n for text, n in numbers.items() if "Data fails to load" in text)
+        server = next(n for text, n in numbers.items() if "HTTP 500" in text)
+        return self._usage_text(json.dumps({"duplicates": [[agent, server]]}), prompt)
+
+    def _usage_text(self, text, prompt):
+        from worker.llm import TextResult
+
+        return TextResult(text=text, usage=self._usage(self.cheap_model, prompt))
+
+
+def test_an_agent_report_of_a_deterministic_finding_is_merged_not_replayed(
+    sessions, workspace, settings, site_url, browser
+):
+    # The agent restates the server error the checks already found. Replay can't show a failed
+    # request on screen, so replaying it would dismiss a real bug.
+    with sessions() as session:
+        run = Run(
+            workspace_id=workspace.id, target_url=f"{site_url}/problems.html", mode="interactive"
+        )
+        session.add(run)
+        session.commit()
+    report = {
+        "title": "Data fails to load",
+        "severity": "high",
+        "category": "functional",
+        "expected": "data",
+        "actual": "server error",
+        "step_ids": [],
+        "evidence": "",
+        "reasoning": "seen",
+    }
+    llm = MergingJudge(
+        decisions=[
+            ToolCall("report_bug", report),
+            ToolCall("finish", {"summary": "done", "reasoning": "done"}),
+        ]
+    )
+    process_next(sessions, llm, make_execute(settings, LocalStorage(settings.data_path()), browser))
+
+    with sessions() as session:
+        bugs = session.query(Bug).filter_by(run_id=run.id).all()
+        steps = session.query(Step).filter_by(run_id=run.id).all()
+    agent = next(b for b in bugs if b.source == "agent")
+    server = next(b for b in bugs if "HTTP 500" in b.title)
+    assert agent.status == "dismissed" and agent.duplicate_of_id == server.id
+    assert server.status == "confirmed"
+    assert not any(s.action == "verify_bug" for s in steps)
+    assert all(b.status == "confirmed" for b in bugs if b.source == "deterministic")

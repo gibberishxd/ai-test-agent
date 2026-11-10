@@ -11,11 +11,12 @@ Deterministic findings have hard evidence and count as confirmed without replay.
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
-from playwright.sync_api import BrowserContext, Page
+from playwright.sync_api import BrowserContext, Locator, Page
 from playwright.sync_api import Error as PlaywrightError
 
-from worker.agent.observe import fence
+from worker.agent.observe import CONTEXT_JS, fence
 from worker.browser import VIEWPORTS, wait_until_quiet
 from worker.llm import LLMClient, Usage
 from worker.safety.secrets import redact
@@ -55,6 +56,7 @@ class Verdict:
     reproduced: bool
     reason: str
     usage: Usage | None = None
+    replayed: bool = True  # False: the steps couldn't be repeated, so nothing was judged
 
 
 class ReplayError(Exception):
@@ -68,19 +70,60 @@ def replay(page: Page, start_url: str, steps: list[ReplayStep]) -> None:
         wait_until_quiet(page, SETTLE_MS)
         try:
             _replay_step(page, step)
+        except ReplayError as error:
+            raise ReplayError(f"{step.action}: {error}") from error
         except PlaywrightError as error:
             raise ReplayError(f"{step.action} failed: {str(error).splitlines()[0]}") from error
     wait_until_quiet(page, SETTLE_MS)
 
 
+def find_target(page: Page, element: dict) -> Locator:
+    """The one element `element` describes, or ReplayError saying why there isn't one.
+
+    Tried in order, each only if it singles out exactly one element:
+    1. role + name;  2. among those, the one with the same nearby text;  3. the recorded CSS
+    path, if it points at one of them;  4. the same position, if the page has the same number
+    of such elements as when it was recorded. Never "the first match": clicking the wrong
+    "Add to cart" would make replay confirm or dismiss the wrong thing.
+    """
+    role, name = element.get("role", ""), element.get("name", "")
+    matches = page.get_by_role(role, name=name, exact=True) if name else None
+    found = matches.count() if matches is not None else 0
+    if found == 0 and name:
+        matches = page.get_by_text(
+            name, exact=True
+        )  # roles we derived may differ from the browser's
+        found = matches.count()
+    if found == 1:
+        return matches.first
+
+    css = element.get("css")
+    by_css = page.locator(css) if css else None
+    if found == 0:
+        if by_css is not None and by_css.count() == 1:
+            return by_css
+        raise ReplayError(f'no {role} "{name}" on the page')
+
+    context = element.get("context")
+    if context:
+        same_place = [i for i in range(found) if matches.nth(i).evaluate(CONTEXT_JS) == context]
+        if len(same_place) == 1:
+            return matches.nth(same_place[0])
+    if by_css is not None and by_css.count() == 1:
+        handle = by_css.element_handle()
+        if any(matches.nth(i).evaluate("(e, other) => e === other", handle) for i in range(found)):
+            return by_css
+    nth = element.get("nth")
+    if element.get("count") == found and isinstance(nth, int) and 0 <= nth < found:
+        return matches.nth(nth)
+    raise ReplayError(f'{found} elements match {role} "{name}" and none matches its recorded place')
+
+
 def _replay_step(page: Page, step: ReplayStep) -> None:
     if step.action in ("click", "double_click", "type", "select"):
         if not step.element:
-            raise ReplayError(f"{step.action}: no element recorded")
-        target = page.get_by_role(step.element["role"], name=step.element["name"], exact=True)
-        if target.count() == 0:  # roles we derived ourselves may differ from the browser's
-            target = page.get_by_text(step.element["name"], exact=True)
-        target = target.first
+            raise ReplayError("no element was recorded")
+        target = find_target(page, step.element)
         if step.action == "click":
             target.click(timeout=ACTION_TIMEOUT_MS)
         elif step.action == "double_click":
@@ -90,7 +133,7 @@ def _replay_step(page: Page, step: ReplayStep) -> None:
         else:
             target.select_option(label=str(step.args.get("option", "")), timeout=ACTION_TIMEOUT_MS)
     elif step.action == "navigate":
-        page.goto(str(step.args.get("url", "")), timeout=NAVIGATION_TIMEOUT_MS)
+        page.goto(urljoin(page.url, str(step.args.get("url", ""))), timeout=NAVIGATION_TIMEOUT_MS)
     elif step.action == "go_back":
         page.go_back(timeout=NAVIGATION_TIMEOUT_MS)
     elif step.action == "reload":
@@ -136,7 +179,7 @@ def verify_bug(
             page.set_viewport_size(size)
             replay(page, start_url, steps)
         except (ReplayError, PlaywrightError) as error:
-            return Verdict(False, f"could not replay the steps ({error})")
+            return Verdict(False, str(error).splitlines()[0], replayed=False)
         prompt = "\n".join(
             [
                 f"BUG REPORT: {title}",

@@ -17,7 +17,45 @@ MAX_MESSAGES = 10
 MAX_PAGE_TEXT = 3000
 BUTTON_INPUT_TYPES = ("submit", "button", "reset")  # their value is a label, not typed text
 
+# The first line of text near an element that isn't its own label: for an "Add to cart" button
+# in a product card, the product's name. Shared with replay (verify.py), so both compute it the
+# same way.
+CONTEXT_JS = r"""(el) => {
+  const own = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+  let node = el.parentElement;
+  for (let depth = 0; node && node !== document.body && depth < 5; depth++) {
+    const lines = node.innerText.split('\n').map(l => l.trim()).filter(l => l && l !== own);
+    if (lines.length) return lines[0].slice(0, 80);
+    node = node.parentElement;
+  }
+  return null;
+}"""
+
+# A CSS selector for exactly this element: tag names with :nth-of-type where needed, from the
+# nearest ancestor with an id (or <body>).
+CSS_PATH_JS = r"""(el) => {
+  const parts = [];
+  let node = el;
+  while (node && node.nodeType === 1 && node !== document.body) {
+    if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) {
+      parts.unshift('#' + node.id);
+      return parts.join(' > ');
+    }
+    let part = node.tagName.toLowerCase();
+    const parent = node.parentElement;
+    if (parent) {
+      const same = Array.from(parent.children).filter(c => c.tagName === node.tagName);
+      if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
+    }
+    parts.unshift(part);
+    node = parent;
+  }
+  return ['body', ...parts].join(' > ');
+}"""
+
 COLLECT_ELEMENTS_JS = """(max) => {
+  const contextOf = /*CONTEXT*/;
+  const cssPathOf = /*CSS_PATH*/;
   const selector = [
     'a[href]', 'button', 'input:not([type=hidden])', 'select', 'textarea', 'summary',
     '[role=button]', '[role=link]', '[role=checkbox]', '[role=radio]', '[role=tab]',
@@ -72,11 +110,13 @@ COLLECT_ELEMENTS_JS = """(max) => {
       described: described || null,
       checked: ['checkbox', 'radio'].includes(type) ? el.checked : null,
       options: tag === 'select' ? Array.from(el.options).map(o => o.label).slice(0, 20) : null,
+      context: contextOf(el),
+      css: cssPathOf(el),
     });
     if (out.length >= max) break;
   }
   return out;
-}"""
+}""".replace("/*CONTEXT*/", CONTEXT_JS).replace("/*CSS_PATH*/", CSS_PATH_JS)
 
 
 # Error, alert and status messages, each with the field it sits next to. "Next to" is what a
@@ -149,6 +189,10 @@ class Element:
     described: str | None = None  # visible text tied to it by aria-describedby/errormessage
     checked: bool | None = None
     options: list[str] | None = None
+    context: str | None = None  # nearby text, e.g. the product name in its card
+    css: str | None = None  # a selector for exactly this element, at the time it was read
+    nth: int = 0  # its place among elements with the same role and name (0-based)
+    count: int = 1  # how many elements on the page have this role and name
 
     @property
     def locator(self) -> str:
@@ -166,8 +210,21 @@ class Element:
             value=self.value if self.input_type in BUTTON_INPUT_TYPES else None,
         )
 
+    def target(self) -> dict:
+        """Everything replay needs to find this element again in a fresh browser."""
+        return {
+            "role": self.role,
+            "name": self.name,
+            "nth": self.nth,
+            "count": self.count,
+            "context": self.context,
+            "css": self.css,
+        }
+
     def describe(self) -> str:
         text = f'[{self.id}] {self.role} "{self.name}"'
+        if self.count > 1 and self.context:
+            text += f' in "{self.context}"'  # six "Add to cart" buttons: which one is this?
         if self.href:
             text += f" → {self.href}"
         if self.value is not None:
@@ -201,6 +258,12 @@ class PageState:
 
 def read_page(page: Page) -> PageState:
     elements = [Element(**e) for e in page.evaluate(COLLECT_ELEMENTS_JS, MAX_ELEMENTS)]
+    groups: dict[tuple[str, str], list[Element]] = {}
+    for element in elements:
+        groups.setdefault((element.role, element.name), []).append(element)
+    for same in groups.values():
+        for nth, element in enumerate(same):
+            element.nth, element.count = nth, len(same)
     messages = [Message(**m) for m in page.evaluate(COLLECT_MESSAGES_JS, MAX_MESSAGES)]
     text = page.evaluate("() => document.body ? document.body.innerText : ''")
     return PageState(

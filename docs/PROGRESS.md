@@ -41,9 +41,9 @@ considered. Real false alarms: 0. Matcher change is open (owner's call).
 
 | Goal | Status | Check |
 |---|---|---|
-| G0 Finish what's running | partly done | Benchmark finished and recorded above. Transcripts are git-ignored. **Not done:** no normal worker was started, so the two runs queued from the dashboard (99e6cd3c, 92cc0e45) are still queued. |
+| G0 Finish what's running | done | Benchmark finished and recorded above. Transcripts are git-ignored. The two runs queued from the dashboard were processed with `uv run worker --once` (gemma4:12b): 92cc0e45 done (35 steps, 6 bugs), 99e6cd3c done (33 steps, 7 bugs), both stopped by the 470 s time budget. |
 | G1 Safety and correctness fixes (1–6) | done | Worker `uv run pytest`: 241 passed, 1 skipped. Web `npm test -w apps/web`: 79 passed. Web typecheck and worker ruff clean. Decisions D32–D37. |
-| G2 Findable bugs | in progress | G2.5 done (`_step` split, duplicate visit code removed; 241 worker tests pass). G2.1–G2.4 not started. |
+| G2 Findable bugs (1–5) | done | Worker `uv run pytest`: 281 passed, 1 skipped; ruff clean. New tests: `test_observe.py`, `test_prompt.py`, `test_replay_plan.py`, `test_review.py`, new cases in `test_agent_loop.py`, `test_verify.py`, `test_passive_run.py` (incl. six identical "Add to cart" buttons). Decisions D38–D41. |
 | G3 Honest benchmark | not started | |
 | G4 Live browser pane | not started | |
 | G5 Any model | not started | |

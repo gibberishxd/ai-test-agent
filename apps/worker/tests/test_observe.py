@@ -76,3 +76,32 @@ def test_what_changed_keeps_600_characters():
     after = "\n".join(f"Line number {i} of the new content" for i in range(100))
     result = text_changes("", after)
     assert 500 < len(result) <= 600 and result.endswith("…")
+
+
+# --- precise targets, so replay can find the same element again --------------------------------
+
+
+def test_identical_buttons_get_their_place_and_surroundings(context, site_url):
+    page = context.new_page()
+    page.goto(f"{site_url}/cards.html")
+    buttons = [e for e in read_page(page).elements if e.name == "Add to cart"]
+    assert len(buttons) == 6
+    fourth = buttons[3]
+    assert (fourth.nth, fourth.count, fourth.context) == (3, 6, "Product 4")
+    assert page.locator(fourth.css).count() == 1
+    assert page.locator(fourth.css).evaluate("e => e.dataset.agentId") == str(fourth.id)
+    target = fourth.target()
+    assert target == {
+        "role": "button",
+        "name": "Add to cart",
+        "nth": 3,
+        "count": 6,
+        "context": "Product 4",
+        "css": fourth.css,
+    }
+    # The model can tell them apart too.
+    assert fourth.describe() == f'[{fourth.id}] button "Add to cart" in "Product 4"'
+
+
+def test_a_unique_element_doesnt_mention_its_surroundings(state):
+    assert " in " not in field(state, "City").describe()
