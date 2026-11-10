@@ -537,3 +537,41 @@ numbers are the real test (Needs me).
 - **Why:** all three are about how agents behave on any site, not about the demo shop. The
   first one matters most: a correct report thrown away by the verifier is worse than a missed
   one, because nobody sees it.
+
+## D53. Why replay threw away correct reports, and the fix (run 3, H1)
+- **What was wrong (three causes, found by reproducing run be495c9f's replays offline):**
+  1. *Timing on single-page apps (the main cause).* A client-side link changes the URL with
+     pushState, so there is no page load and "network idle" is already true: the next step
+     looked for its field (`count()` doesn't wait) before the route had drawn it → "no textbox
+     Quantity on the page". A fresh browser context per replay failed in exactly the same way,
+     so the run-2 first guess (the shared context) was not the cause of those failures.
+  2. *Judging too early.* The router renders a navigation in a transition: after the last click
+     the URL was `/cart` but the text was still the product page, so the judge said "not the
+     cart page" (bug 5).
+  3. *Shared context (real, but secondary).* All replays shared one browser context, so a
+     second replay saw the first one's cart (`Cart (6)` instead of `Cart (3)`): wrong verdicts,
+     not failures.
+  Plus: steps that errored in the agent's own run (typing letters into a number field) were
+  repeated and failed replay.
+- **Decision:** before an element step, wait (≤ 5 s) until the browser is on the page the
+  agent was on and something matching the target exists; after the last step, wait until the
+  DOM has been quiet for 500 ms (≤ 3 s); one fresh context per replay plan (one browser and
+  proxy for the run, `guarded_browser`); skip steps whose recorded result was an error. Every
+  failure gets a kind (`element_not_found`, `ambiguous_element`, `page_differs`, `timeout`,
+  `navigation_error`, `action_failed`, `no_element_recorded`), the step number and a detail,
+  stored as `evidence.replay_failure`.
+- **Alternatives:** a fixed sleep after each step (slow everywhere, still too short somewhere);
+  Playwright's auto-waiting `locator.click()` alone (it waits for one locator, but our target
+  search tries role, text, CSS and position, and must not pick "the first match"); restoring a
+  storage snapshot instead of replaying the sign-in (faster, but the replay would no longer
+  prove the steps lead to the bug).
+- **Why:** each wait is bounded and only as long as the page needs, and none of it is specific
+  to the demo shop: any React/Vue/Svelte app with client-side routing behaves this way.
+- **Weak spots:** a route that shows a loading state and then waits more than 500 ms for data
+  can still be judged on the loading state; a page whose URL legitimately differs between runs
+  (an order id) costs up to 5 s of waiting per step before it is tried anyway.
+- **Measured (offline, `uv run worker reverify be495c9f`, no Sonnet calls):** before, 1 of 6
+  agent reports confirmed and 4 "could not replay"; after, 6 of 6 replay, and with the pinned
+  local judge (gemma4:12b) 6 of 6 are confirmed, incl. bug 5 (cart total) and bug 8 (Save
+  changes). The original verdicts came from Sonnet, so the judge differs: the stored run is not
+  changed. All 16 previously confirmed agent reports of 11 older runs still replay.

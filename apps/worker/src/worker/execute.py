@@ -7,6 +7,7 @@ finding becomes a bug, and tokens and cost are added to the run as they're spent
 import itertools
 import time
 from collections import Counter
+from collections.abc import Callable
 from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext
@@ -22,7 +23,7 @@ from worker.report import BugReport, PageResult
 from worker.review import review_screenshots
 from worker.runner import ExecuteFn
 from worker.safety.network import BlockedError
-from worker.scan import guarded_context, is_demo_target, passive_scan
+from worker.scan import guarded_browser, guarded_context, is_demo_target, passive_scan
 from worker.storage import Storage
 from worker.urls import normalize
 from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
@@ -316,11 +317,13 @@ def verify_and_dedupe(
     candidates = [b for b in bugs if b.status == "candidate" and b.source != "deterministic"]
 
     if candidates and not run.stop_requested:
-        with guarded_context(settings, run.target_url, browser) as (context, _guard):
+        with guarded_browser(settings, run.target_url, browser) as (new_context, _guard):
             for bug in candidates:
                 if run.cost_usd >= settings.max_run_cost_usd:
                     break  # out of budget: leave the rest as unverified candidates
-                verdict, start_url = _replay_bug(session, run, llm, settings, context, bug, steps)
+                verdict, start_url = _replay_bug(
+                    session, run, llm, settings, new_context, bug, steps
+                )
                 if verdict.reproduced:
                     bug.status, bug.dismiss_reason = "confirmed", None
                 elif verdict.replayed:
@@ -328,11 +331,10 @@ def verify_and_dedupe(
                 else:
                     bug.status = "dismissed"
                     bug.dismiss_reason = f"could not replay: {verdict.reason}"
-                bug.evidence = {
-                    **(bug.evidence or {}),
-                    "replay": verdict.reason,
-                    "replay_start": start_url,
-                }
+                evidence = {k: v for k, v in (bug.evidence or {}).items() if k != "replay_failure"}
+                bug.evidence = {**evidence, "replay": verdict.reason, "replay_start": start_url}
+                if verdict.failure:
+                    bug.evidence["replay_failure"] = verdict.failure
                 stats["confirmed" if verdict.reproduced else "dismissed"] += 1
     session.commit()
     return stats
@@ -367,23 +369,32 @@ def _replay_bug(
     run: Run,
     llm: LLMClient,
     settings: Settings,
-    context: BrowserContext,
+    new_context: Callable[[], BrowserContext],
     bug: Bug,
     steps: dict[int, Step],
 ) -> tuple[Verdict, str]:
-    """Try each replay plan until one reproduces the bug; returns the last verdict and start."""
+    """Try each replay plan until one reproduces the bug; returns the last verdict and start.
+
+    Every plan runs in a new browser context: cookies, localStorage and sessions left by the
+    replay before it (a cart, a sign-in) would otherwise change what this one sees. The steps
+    themselves rebuild the state the agent had (they include its sign-in and its cart).
+    """
     verdict, start_url = Verdict(False, "nothing to replay", replayed=False), run.target_url
     for start_url, replay_steps in replay_plans(bug, steps, run.target_url):
-        verdict = verify_bug(
-            context,
-            llm,
-            start_url,
-            replay_steps,
-            bug.title,
-            bug.expected,
-            bug.actual,
-            viewport=(bug.evidence or {}).get("viewport", "desktop"),
-        )
+        context = new_context()
+        try:
+            verdict = verify_bug(
+                context,
+                llm,
+                start_url,
+                replay_steps,
+                bug.title,
+                bug.expected,
+                bug.actual,
+                viewport=(bug.evidence or {}).get("viewport", "desktop"),
+            )
+        finally:
+            context.close()
         _log_model_step(session, run, "verify_bug", {"bug": bug.title}, verdict.usage)
         if verdict.reproduced or run.cost_usd >= settings.max_run_cost_usd:
             break
@@ -403,7 +414,7 @@ def replay_plans(bug, steps: dict, target_url: str) -> list[tuple[str, list[Repl
     indexes = replay_indexes(bug)
     if not indexes:
         return [(bug.page_url, [])]
-    kept = [(i, steps[i]) for i in indexes if i in steps and not steps[i].blocked]
+    kept = [(i, steps[i]) for i in indexes if i in steps and _took_effect(steps[i])]
     full = [_replay_step_of(step) for _, step in kept]
     # Shorter replays first, latest start first: what happened before a page load, or before
     # the agent's last return to the start page, matters less, and one of those earlier steps
@@ -429,6 +440,14 @@ def replay_plans(bug, steps: dict, target_url: str) -> list[tuple[str, list[Repl
     return unique
 
 
+def _took_effect(step) -> bool:
+    """Did this step do something in the agent's run? Blocked steps and steps that errored
+    (an element that wasn't there, text a number field refused) left the page as it was, so
+    they aren't part of how the bug was reached, and repeating them would only fail replay."""
+    result = str((step.args or {}).get("result") or "")
+    return not step.blocked and not result.startswith("error:")
+
+
 def _viewport_before(kept: list, n: int) -> list[ReplayStep]:
     """The last viewport change before step n: it outlives a page load, so it is set again."""
     return [_replay_step_of(s) for _, s in kept[:n] if s.action == "set_viewport"][-1:]
@@ -441,7 +460,7 @@ def _on_start_page(step, target_url: str) -> bool:
 
 def _replay_step_of(step) -> ReplayStep:
     args = step.args or {}
-    return ReplayStep(step.action, args, args.get("element"))
+    return ReplayStep(step.action, args, args.get("element"), step.url)
 
 
 def replay_indexes(bug: Bug) -> list[int]:

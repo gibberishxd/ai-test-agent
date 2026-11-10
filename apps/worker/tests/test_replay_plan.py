@@ -83,3 +83,18 @@ def test_replay_also_tries_from_the_last_time_the_agent_was_on_the_start_page():
         (TARGET, ["click", "type"]),  # from step 13, taken on the start page
         (TARGET, ["click", "type", "click", "click", "type"]),
     ]
+
+
+def test_steps_that_failed_in_the_agents_run_are_not_repeated():
+    # Typing letters into a number field errored for the agent too: the page didn't change, so
+    # the step is not part of how the bug was reached. Repeating it only fails the replay.
+    steps = {
+        10: step("click", element={}),
+        11: step("type", text="abc", element={}, result="error: Locator.fill: Cannot type text"),
+        12: step("type", text="1.5", element={}, result="ok"),
+    }
+    assert [plan_actions(p) for p in replay_plans(agent_bug(13), steps, TARGET)] == [
+        (TARGET, ["click", "type"])
+    ]
+    [(_, kept)] = replay_plans(agent_bug(13), steps, TARGET)
+    assert kept[1].args["text"] == "1.5"

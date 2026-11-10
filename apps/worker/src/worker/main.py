@@ -4,11 +4,15 @@ uv run worker             poll the run queue forever (what `npm run dev` starts)
 uv run worker --once      process at most one queued run, then exit
 uv run worker scan URL    passive scan without the database; writes reports/<time>/report.json
 uv run worker bench       benchmark: N runs on the buggy shop + 1 on the clean shop, scored
+uv run worker reverify ID replay an old run's agent reports again (read-only); --judge asks
+                          the pinned judge model too
 """
 
 import argparse
+import json
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -73,6 +77,9 @@ def main(argv: list[str] | None = None) -> None:
     bench.add_argument(
         "--rescore", action="store_true", help="re-match the latest benchmark's runs, no new runs"
     )
+    again = sub.add_parser("reverify", help="replay an old run's agent reports (read-only)")
+    again.add_argument("run_id", help="the run's id (a unique prefix is enough)")
+    again.add_argument("--judge", action="store_true", help="also ask JUDGE_* whether it shows")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -85,6 +92,10 @@ def main(argv: list[str] | None = None) -> None:
         log.info("%d pages, %d bugs → %s", len(report.pages), len(report.bugs), out / "report.json")
         for bug in report.bugs:
             log.info("  [%s] %s", bug.severity, bug.title)
+        return
+
+    if args.command == "reverify":
+        reverify(settings, args.run_id, args.judge)
         return
 
     llm = make_client(settings)
@@ -122,6 +133,19 @@ def main(argv: list[str] | None = None) -> None:
     while True:
         if not process_next(sessions, llm, execute, client_for):
             time.sleep(POLL_INTERVAL_S)
+
+
+def reverify(settings: Settings, run_prefix: str, use_judge: bool) -> None:
+    from sqlalchemy import String, cast
+
+    from worker.reverify import reverify_run
+
+    sessions = make_session_factory(make_engine(settings))
+    judge = make_judge(settings, make_client(settings)) if use_judge else None
+    with sessions() as session:
+        [run_id] = session.query(Run.id).filter(cast(Run.id, String).like(f"{run_prefix}%")).all()
+        outcomes = reverify_run(session, uuid.UUID(str(run_id[0])), settings, judge=judge)
+    print(json.dumps(outcomes, indent=2))
 
 
 def run_benchmark(

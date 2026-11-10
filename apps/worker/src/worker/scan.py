@@ -37,6 +37,24 @@ def guarded_context(
 
     Pass `browser` to reuse one (tests); otherwise a browser is launched and closed here.
     """
+    with guarded_browser(settings, target_url, browser) as (new_context, guard):
+        context = new_context()
+        try:
+            yield context, guard
+        finally:
+            context.close()
+
+
+@contextmanager
+def guarded_browser(
+    settings: Settings, target_url: str, browser: Browser | None = None
+) -> Iterator[tuple[Callable[[], BrowserContext], NetworkGuard]]:
+    """One browser and safety proxy, and a function that opens fresh contexts through it.
+
+    For work that needs a clean browser state several times (replaying each report): a new
+    context is cheap (no cookies, no storage, nothing from the one before), launching a
+    browser and proxy isn't. The caller closes each context it opens.
+    """
     guard = make_guard(settings, target_url)
     reason = guard.check(target_url)
     if reason:
@@ -46,9 +64,12 @@ def guarded_context(
             playwright = stack.enter_context(sync_playwright())
             browser = playwright.chromium.launch()
             stack.callback(browser.close)
-        context = browser.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
-        stack.callback(context.close)
-        yield context, guard
+        launched = browser
+
+        def new_context() -> BrowserContext:
+            return launched.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
+
+        yield new_context, guard
 
 
 def passive_scan(

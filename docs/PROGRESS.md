@@ -95,6 +95,29 @@ interactive run on the buggy shop at commit 0124950, reports matched by the pinn
 The run stopped early because the Claude usage limit was reached. Root `npm test`,
 `npm run lint` and CI on `agent-v2` were not checked.
 
+## Run 3 (branch `agent-v3`, plan in `docs/RUN_PLAN_3.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| H0 Plan | done | `docs/RUN_PLAN_3.md` committed; root `npm test` (web 120, demo 7, demo2 3, worker 330 + 1 skipped) and `npm run lint` exit 0 on `agent-v3` before any change. |
+| H1 Replay fix | done | New failing-first tests: `test_replay_isolation.py` (two+ replays in one run: no leftover cart, no leftover viewport, failure reason stored; read-only re-verify), late-drawn routes and failure kinds in `test_verify.py`, errored steps in `test_replay_plan.py`. Offline re-check of run be495c9f below. D53. |
+
+### H1: run be495c9f re-checked offline (`uv run worker reverify be495c9f [--judge]`)
+
+| Agent report (Sonnet, run be495c9f) | Recorded in run 2 | Replay now | Judge now (gemma4:12b) |
+|---|---|---|---|
+| Wool Socks price shows $NaN (bug 9) | confirmed | replays | confirmed |
+| Quantity 0 accepted | dismissed (judge: field shows 1) | replays | confirmed |
+| Huge quantity accepted | could not replay | replays | confirmed |
+| Cart total doesn't match line price (**bug 5**) | could not replay | replays | confirmed |
+| Profile "Save changes" does nothing (**bug 8**) | could not replay | replays | confirmed |
+| Fractional quantity 1.5 accepted | could not replay | replays | confirmed |
+
+The stored run isn't changed (its verdicts came from Sonnet; the re-check uses the pinned local
+judge). No previously verified report is lost: all 16 confirmed agent reports of 11 older runs
+(804c2a85, 99e6cd3c, 92cc0e45, db550019, cbc7ca2c, 28a9bd8f, 6657cffb, edf089fb, ecbd578c,
+4873e406, 54b934f1) still replay.
+
 ## Needs me
 0. **Run 2 follow-ups (no money needed unless you choose Claude API):**
    - **Replay lost two of Sonnet's correct reports** (bugs 5 and 8, run be495c9f). Replaying
