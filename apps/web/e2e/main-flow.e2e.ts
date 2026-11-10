@@ -69,3 +69,33 @@ test("interactive mode is refused on an unverified domain", async ({ page }) => 
   await page.getByRole("button", { name: "Start test" }).click();
   await expect(page.getByText(/only on the demo shop and on domains you've verified/)).toBeVisible();
 });
+
+test("a workspace model is stored with its key hidden and can't run until tested", async ({ page }) => {
+  await page.goto("/signin");
+  await page.getByRole("button", { name: "Sign in as demo user" }).click();
+  await page.waitForURL("**/dashboard");
+  await page.goto("/settings");
+
+  const name = `E2E model ${Date.now()}`;
+  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("Base URL").fill("https://api.example.test/v1");
+  await page.getByLabel("Model", { exact: true }).fill("e2e-model");
+  await page.getByLabel("API key").fill("sk-e2e-secret-7391");
+  await page.getByRole("button", { name: "Add model" }).click();
+
+  const item = page.getByTestId("model-list").locator("li").filter({ hasText: name });
+  await expect(item).toContainText("•••• 7391");
+  await expect(item).toContainText("Not tested");
+  await expect(page.getByText("sk-e2e-secret-7391")).toHaveCount(0);
+  expect(await page.content()).not.toContain("sk-e2e-secret-7391");
+
+  // The run form offers it, but not before it has passed Test connection.
+  await page.goto("/dashboard");
+  const option = page.getByRole("option", { name: new RegExp(name) });
+  await expect(option).toBeDisabled();
+
+  // Clean up so the dashboard stays tidy across runs.
+  await page.goto("/settings");
+  await item.getByRole("button", { name: "Delete" }).click();
+  await expect(item).toHaveCount(0);
+});
