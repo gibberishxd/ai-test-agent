@@ -104,6 +104,7 @@ The run stopped early because the Claude usage limit was reached. Root `npm test
 | H2 Verification funnel | done | Failing-first tests: funnel, before/after recall, correct-but-discarded, bugs lost, false alarms before/after, stage of a stored bug, printed output (`test_benchmark.py`), saved details and matching of discarded reports (`test_benchmark_db.py`), web `verification()` (`lib/benchmark.test.ts`). Shown in `bench` output, the leaderboard (reported → verified, correct but discarded) and each latest-score card. D54. |
 | H3 Sign-in flake | done | `node e2e/signin-loop.mjs 50`: before 2 of 50 (and 4 of 60) landed on `/signin`; after 0 of 50, 0 of 50 with 4 in parallel, 0 of 50 after a dev-server restart. `e2e/signin.e2e.ts` failed first (two `/api/auth/session` calls before the click). Retry helper and CI `retries` removed. D55. |
 | H4 Database hardening | done | `test_queue_concurrency.py`: 8 concurrent workers × 300 runs, each claimed exactly once; lease tests (starts at claim, expired → failed by another worker, long live run untouched, heartbeat renews, late worker can't undo). `scripts/db_perf.py` on 10k runs / 500k steps: one index added (`benchmark_results(created_at)`, 0.87 → 0.09 ms), all other hot queries already indexed. Migrations `20261111010000_run_lease`, `20261111020000_benchmark_results_newest` (Prisma `migrate diff` against a migrated database: no difference for them), SQLAlchemy mirror, drift test now checks hot-query indexes. `docs/DATABASE.md`. D56. |
+| H5 CI cleanup | done | `actions/checkout@v7`, `actions/setup-node@v7`, `astral-sh/setup-uv@v10.3.3` (Node 24). CI run 42912487613: all three jobs green; the only annotation left is GitHub's notice about the `ubuntu-latest` label, no Node 20 deprecation. D57. |
 
 ### H1: run be495c9f re-checked offline (`uv run worker reverify be495c9f [--judge]`)
 
@@ -120,6 +121,16 @@ The stored run isn't changed (its verdicts came from Sonnet; the re-check uses t
 judge). No previously verified report is lost: all 16 confirmed agent reports of 11 older runs
 (804c2a85, 99e6cd3c, 92cc0e45, db550019, cbc7ca2c, 28a9bd8f, 6657cffb, edf089fb, ecbd578c,
 4873e406, 54b934f1) still replay.
+
+### H6: Gemma 4 12B re-measured (same settings as run 2's 1200 s row, judge ollama/gemma4:12b)
+
+| Run | Agent code | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | Precision | False alarms | Correct but discarded | Avg run |
+|---|---|---|---|---|---|---|---|---|---|
+| Run 2, G6 rerun | 21e5669 (480 s) | 4% | 36% | 0% | 33% | 100% | 0.0 / 0.0 | not measured | 501 s |
+| Run 3, R3a | f1bf08a, replay fix (row labelled 984755e, D58) | **8%** (bug 8 in 2/3) | 39% | 0% | 33% | 100% | 0.0 / 0.0 | 0 (18 + 8 reports, none discarded) | 1083 s |
+
+R3a's result row `a4d5781c` was scored by the old code; `1eccde57` is its `--rescore` with the
+funnel (same runs, same judge). Why each bug was found or missed: `docs/MISS_ANALYSIS.md`.
 
 ## Needs me
 0. **Run 2 follow-ups (no money needed unless you choose Claude API):**
