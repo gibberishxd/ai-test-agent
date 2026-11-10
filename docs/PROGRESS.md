@@ -45,8 +45,8 @@ considered. Real false alarms: 0. Matcher change is open (owner's call).
 | G1 Safety and correctness fixes (1–6) | done | Worker `uv run pytest`: 241 passed, 1 skipped. Web `npm test -w apps/web`: 79 passed. Web typecheck and worker ruff clean. Decisions D32–D37. |
 | G2 Findable bugs (1–5) | done | Worker `uv run pytest`: 281 passed, 1 skipped; ruff clean. New tests: `test_observe.py`, `test_prompt.py`, `test_replay_plan.py`, `test_review.py`, new cases in `test_agent_loop.py`, `test_verify.py`, `test_passive_run.py` (incl. six identical "Add to cart" buttons). Decisions D38–D41. |
 | G3 Honest benchmark (1–4) | done | Root `npm test`: web 84, demo 7, demo2 3, worker 288 passed + 1 skipped; `npm run lint` clean; new `test_benchmark_db.py` (AI-only, holdout columns, judge, rescore keeps commit) and cases in `test_benchmark.py`. Web `npm test -w apps/web`: 84 passed (page helpers). `npm run verify-bugs -w apps/demo2` (from `apps/demo2`: `npx playwright test --repeat-each 3`): 36 passed; shop `verify-bugs`: 26 passed. Migration `20261110120000_honest_benchmark` applied. Decisions D42–D44. |
-| G4 Live browser pane | not started | |
-| G5 Any model | not started | |
+| G4 Live browser pane | in progress | Unit: `lib/live-pane.test.ts` (box scaling, clipping, frame selection), worker step box/screenshot tests; web 92 passed at commit b3fe35b. The e2e check waits until the G6 benchmark frees the run queue (an e2e worker would pick up benchmark runs). D45. |
+| G5 Any model (1–5) | done | Worker `uv run pytest`: 321 passed, 1 skipped (`test_openai_compat.py` with recorded fixtures, `test_claude_cli.py`, `test_secret_box.py`, `test_run_models.py`, provider tests in `test_llm.py`). Web `npm test -w apps/web`: 120 passed (`secret-box`, `model-probe`, `model-configs`, `run-form`, leaderboard, and DB tests: key encrypted at rest, never in API views or console logs, workspace B can't list, change, delete or run with A's model, untested models refused). Typecheck clean. D46–D50. |
 | G6 Measure | not started | |
 | G7 Project hygiene | not started | |
 | G8 Wrap-up | not started | |

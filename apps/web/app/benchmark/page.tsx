@@ -13,6 +13,7 @@ import {
   holdoutPerBug,
   judgeLabel,
   latestPerProvider,
+  leaderboard,
   perBug,
   percent,
   percentOrDash,
@@ -42,6 +43,7 @@ export default async function BenchmarkPage() {
   }
 
   const latest = latestPerProvider(rows);
+  const board = leaderboard(rows);
   const newest = rows[0];
   const bugs = perBug(newest);
   const holdoutBugs = holdoutPerBug(newest);
@@ -55,6 +57,54 @@ export default async function BenchmarkPage() {
     // the page at screen width and lets wide tables scroll inside their own box instead.
     <main className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)] gap-10 px-4 py-10">
       <Intro />
+
+      <section className="grid gap-4" aria-labelledby="leaderboard-heading">
+        <div>
+          <h2 id="leaderboard-heading" className="text-lg font-semibold">
+            Model leaderboard
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Bring any model, and see how it performs here before you trust it. One row per model (its newest
+            result), ranked by AI-only recall.
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-xl border">
+          <Table data-testid="leaderboard">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10">#</TableHead>
+                <TableHead>Provider · model</TableHead>
+                <TableHead className="text-right">AI-only recall</TableHead>
+                <TableHead className="text-right">Recall</TableHead>
+                <TableHead className="text-right">Precision</TableHead>
+                <TableHead className="text-right">False alarms</TableHead>
+                <TableHead className="text-right">Holdout AI-only</TableHead>
+                <TableHead className="text-right">Cost / run</TableHead>
+                <TableHead className="text-right">Time / run</TableHead>
+                <TableHead>Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {board.map((row, i) => (
+                <TableRow key={row.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">{i + 1}</TableCell>
+                  <TableCell>
+                    {row.provider} <span className="text-muted-foreground">· {row.model}</span>
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{percent(row.recall)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{percent(row.precision)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.falseAlarms.toFixed(1)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{percentOrDash(holdout(row)?.aiRecall)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCost(row.avgCostUsd)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{Math.round(row.avgDurationS)} s</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatDate(row.createdAt)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
 
       <section className="grid gap-4" aria-labelledby="latest-heading">
         <h2 id="latest-heading" className="text-lg font-semibold">

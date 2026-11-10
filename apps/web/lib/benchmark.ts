@@ -70,6 +70,16 @@ function toPerBug(stored: StoredPerBug | undefined): PerBug[] {
     .sort((a, b) => a.id - b.id);
 }
 
+/**
+ * One row per provider and model (its newest result), best first: by AI-only recall (the
+ * part the model is responsible for), then overall recall. Rows that didn't record AI-only
+ * recall go last rather than being ranked as 0%.
+ */
+export function leaderboard(rows: BenchmarkRow[]): BenchmarkRow[] {
+  const rank = (row: BenchmarkRow) => row.aiRecall ?? -1;
+  return latestPerProvider(rows).sort((a, b) => rank(b) - rank(a) || b.recall - a.recall);
+}
+
 export function perBug(row: BenchmarkRow): PerBug[] {
   return toPerBug((row.details as { per_bug?: StoredPerBug } | null)?.per_bug);
 }

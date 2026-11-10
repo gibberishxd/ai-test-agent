@@ -4,6 +4,7 @@ import {
   decisions,
   holdout,
   judgeLabel,
+  leaderboard,
   latestPerProvider,
   perBug,
   percent,
@@ -114,5 +115,16 @@ describe("honest numbers", () => {
     expect(holdout(row({}))).toBeNull();
     const measured = row({ holdoutRunsBuggy: 2, holdoutRecall: 0.5, holdoutAiRecall: 0.25, holdoutPrecision: 1, holdoutFalseAlarms: 0 });
     expect(holdout(measured)).toEqual({ runsBuggy: 2, recall: 0.5, aiRecall: 0.25, precision: 1, falseAlarms: 0 });
+  });
+});
+
+describe("leaderboard", () => {
+  it("ranks each provider and model by AI-only recall, then overall recall; unknown last", () => {
+    const strong = row({ id: "strong", provider: "claude", model: "sonnet", aiRecall: 0.6, recall: 0.7 });
+    const weak = row({ id: "weak", provider: "ollama", model: "gemma", aiRecall: 0.13, recall: 0.42 });
+    const tie = row({ id: "tie", provider: "openai-compat", model: "x", aiRecall: 0.13, recall: 0.5 });
+    const old = row({ id: "old", provider: "ollama", model: "qwen", aiRecall: null, recall: 0.33 });
+    const superseded = row({ id: "older-strong", provider: "claude", model: "sonnet", aiRecall: 0.9, createdAt: new Date("2026-11-01") });
+    expect(leaderboard([weak, old, superseded, strong, tie]).map((r) => r.id)).toEqual(["strong", "tie", "weak", "old"]);
   });
 });

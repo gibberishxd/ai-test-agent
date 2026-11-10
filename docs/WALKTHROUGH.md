@@ -709,3 +709,67 @@ real sites would. The judge is still a model: a weak judge can mis-score both ap
 3. *Why keep the original commit on a rescore?* The scores describe the runs, and the runs were
    made with the old code. Labelling them with the new commit would claim the new code was
    measured when it wasn't.
+
+## Run 2: live browser pane (`components/live-pane.tsx`, `lib/live-pane.ts`, `agent/loop.py: _observe`)
+
+**What:** on the run page, the screenshot the agent looked at, the element it chose outlined,
+the action and its reason, a step counter and a filmstrip of earlier steps.
+
+**How:** the worker takes one viewport screenshot per step before the action and stores it
+with the target's bounding box (from `getBoundingClientRect`, in viewport pixels) and the
+viewport size in the step's `args`. `outlineStyle(box, viewport)` turns the box into CSS
+percentages, clipping a partly off-screen box and drawing nothing for one entirely off screen.
+The pane follows the newest step unless one is picked in the filmstrip.
+
+**Why:** percentages keep the outline aligned at any display size without measuring the image.
+Reusing the screenshot the model saw makes the pane honest: it shows exactly what the agent saw.
+
+**Weak spots:** it updates every 1.5 s, so fast steps can be skipped (the filmstrip has them
+all). Older runs have no boxes. A box is where the element was when the page was read; an
+animation could move it before the click.
+
+**Interview Q&A**
+1. *Why percentages for the outline?* The screenshot is displayed scaled. Dividing the box by
+   the viewport size gives positions that scale with the image, so no resize handling is needed.
+2. *Why take the screenshot before the action?* "What is it about to click" needs the element
+   on screen; after a click it may be gone or the page may have changed.
+3. *How would you make it truly live?* Stream screencast frames (Chrome DevTools Protocol
+   `Page.startScreencast`) over a WebSocket or SSE; the step data stays the same.
+
+## Run 2: any model (`llm/openai_compat.py`, `llm/claude_cli.py`, `model_configs.py`, `secret_box.py`, `apps/web/lib/model-*.ts`, `secret-box.ts`)
+
+**What:** an OpenAI-compatible client, per-workspace models with encrypted keys and a Test
+connection check, a model picker on the run form, a leaderboard, and a local-only claude-cli.
+
+**How:**
+- `OpenAICompatClient` builds `messages` (system, then user content with an optional
+  `image_url` data URL), `tools` as functions, `tool_choice: auto`; it reads `tool_calls` or a
+  JSON call in the text. The key is a `SecretStr` and is redacted from error messages.
+- Web: `createModelConfig` encrypts with `encryptSecret(key, workspaceId, MODEL_KEYS_SECRET)`;
+  views only carry `keyHint`. `probeModel` checks endpoint safety, then a tool call and an
+  image. `startRun` calls `usableModel` (own workspace + passed probe).
+- Worker: `client_for_run` loads the run's model, checks workspace and probe, decrypts with the
+  workspace id, checks the endpoint resolves to public addresses, builds the client. The runner
+  records the run's provider and model and fails the run with the reason if any check fails.
+- `ClaudeCliClient` runs `claude -p --output-format json`, lists the tools as JSON schemas in
+  the prompt, validates the answer, retries once.
+
+**Why:** "bring any model" is the product's main promise, so the safe parts (key storage,
+isolation, SSRF) are enforced on both sides and tested, and the leaderboard shows how a model
+does before anyone relies on it.
+
+**Weak spots:** the worker checks the endpoint's address but the HTTP client resolves it again
+(DNS rebinding is possible between the two). No key rotation. Prices are typed in by the user.
+Models differ in tool-calling quirks that one client can't all smooth over. claude-cli spends
+the owner's plan limit and is slow per step.
+
+**Interview Q&A**
+1. *How is workspace A prevented from using workspace B's key?* Every query filters by
+   workspace, `startRun` and the worker both check the model's workspace, and the ciphertext
+   is bound to the workspace id as AES-GCM associated data, so even a copied row won't decrypt.
+2. *Why probe tool calling and vision before a run?* The agent can't act without tool calls
+   or see layout without vision. A two-request check gives a clear error up front instead of
+   a run that fails or wanders.
+3. *Why one OpenAI-compatible client instead of SDKs per provider?* Most providers expose the
+   same chat-completions shape; one small client covers them, and its request can be read and
+   explained in full.

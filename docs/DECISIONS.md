@@ -451,3 +451,64 @@ numbers are the real test (Needs me).
   and its own commit in `rescore_commit`. The page shows "abc1234 (rescored at def5678)".
 - **Why:** a rescore re-matches old runs; it says nothing about the agent at the new commit.
   Before, a rescored row looked like a fresh benchmark of newer code.
+
+## D45. The step screenshot is taken before the action, with the target's box (run 2, G4)
+- **Decision:** each agent step saves the viewport screenshot the model looked at (taken in
+  `_observe`, before the action) plus the chosen element's bounding box and the viewport size.
+  The run page's "Live browser" pane draws the box over the screenshot in percentages, follows
+  the newest step while the run is live, and has a clickable filmstrip.
+- **Alternatives:** keep the after-action thumbnail (it can't show "what the agent is about to
+  click": after a click the element may be gone); stream video from the browser (a media
+  pipeline for a demo feature); a full-page screenshot per step (slower, and the box would
+  need scroll offsets).
+- **Why:** seeing the page and the outlined target is the fastest way to understand what the
+  agent did and why. Reusing the existing screenshot and 1.5 s polling keeps it cheap. The
+  result of an action shows in the next step's screenshot.
+
+## D46. One OpenAI-compatible client for "any model" (run 2, G5.1)
+- **Decision:** `OpenAICompatClient` speaks `POST {base_url}/chat/completions` with function
+  tools and images as data URLs, and sends only parameters every major server accepts (no
+  temperature, max_tokens or parallel_tool_calls). A tool call written as JSON text is still
+  read. Prices come from configuration.
+- **Alternatives:** one client per provider (more code, same request shape); LiteLLM or a
+  similar router (a large dependency that hides the request the project should be able to
+  explain).
+- **Why:** OpenAI, Gemini, OpenRouter, Groq, LM Studio, vLLM and Ollama's /v1 all share this
+  API, so one small, tested client reaches most models.
+
+## D47. Workspace model keys: AES-256-GCM, workspace id as associated data (run 2, G5.3)
+- **Decision:** keys are encrypted by the web app with `MODEL_KEYS_SECRET` and decrypted only
+  by the worker, right before building the client. The workspace id is GCM's associated data,
+  so a ciphertext copied into another workspace's row fails to decrypt. Only "•••• last4" is
+  ever returned. A shared test vector proves Node and Python agree on the format.
+- **Alternatives:** plain text (a database leak leaks every customer key); a hosted KMS
+  (better key rotation, but a paid service and outside this repo's rules); hashing (a key
+  must be usable, so it has to be decryptable).
+- **Why:** it is the standard way to keep a secret usable but protected at rest, and binding
+  it to the workspace turns "workspace A can't use B's key" into a property of the crypto,
+  not only of the queries.
+- **Weak spot:** one server key for everything, no rotation yet.
+
+## D48. Test connection before any run, checked again by the worker (run 2, G5.2)
+- **Decision:** a probe sends one tool-call request and one image request ("what colour is
+  this red square?"). The model passes only if it answers, calls the tool and says "red". The
+  result is stored; `startRun` refuses a model that hasn't passed, and the worker checks the
+  stored result again before spending the key. The probe connects to the address it
+  validated (same SSRF rule as domain verification; private addresses only in dev mode).
+- **Why:** the agent cannot work without tool calls or vision. Finding that out on step 1 of a
+  run wastes the user's time and money; a 2-call check up front gives a clear reason instead.
+
+## D49. claude-cli: the owner's Claude login for local testing only (run 2, G5.4)
+- **Decision:** `LLM_PROVIDER=claude-cli` runs `claude -p` (Sonnet for decisions, Haiku for
+  cheap calls), asks for one strict JSON tool call, validates it against the tool schema,
+  retries once with the reason, then ends the step with an error. Cost is recorded as $0. It
+  refuses to start without `DEV_MODE=true` or when `NODE_ENV`/`ENV` is production, and the
+  workspace UI never offers it.
+- **Why:** it lets the owner see a strong model drive the agent without buying API credit.
+  It shares the owner's Pro limit with their own Claude Code use, so it is used sparingly.
+
+## D50. A model leaderboard on the benchmark page (run 2, G5.5)
+- **Decision:** one row per provider and model (its newest result), ranked by AI-only recall,
+  then overall recall; rows without AI-only recall go last instead of counting as 0%.
+- **Why:** it is the product's promise made concrete: bring any model, and see how it scores
+  here before you trust it.
