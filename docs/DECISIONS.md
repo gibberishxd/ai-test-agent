@@ -650,3 +650,13 @@ numbers are the real test (Needs me).
   not wrong).
 - **Alternative:** pin each action to a commit SHA (stronger supply-chain protection, but the
   owner would need to update SHAs by hand; noted for later).
+
+## D58. Two fixes found while reading run-3 traces (run 3, H6)
+- **Element id as a JSON list:** gemma4:12b sometimes sends `element_id: [10]`; it was refused
+  ("there is no element [[10]]"), wasting 3 of 40 steps on the shop and 3 of 25 on the holdout.
+  `element_number` now accepts a one-item list. Generic: a model's way of writing an id.
+- **Benchmark commit label:** `bench` read `git rev-parse HEAD` when scoring, after the runs.
+  Commits made during a 2-hour benchmark relabelled it with code the runs never used (run 2's
+  1200 s row; run 3's H6 benchmark, which ran on f1bf08a but will show a later commit). Now
+  the commit is read before the runs start. Earlier rows are not changed; PROGRESS says which
+  code each one really ran.

@@ -165,7 +165,12 @@ def run_benchmark(
     mode: str,
     holdout_runs: int = 0,
 ) -> None:
-    """Queue the benchmark runs, process them with `llm`, then score them with `judge`."""
+    """Queue the benchmark runs, process them with `llm`, then score them with `judge`.
+
+    The commit is read before the runs start: the runs use the code loaded now, and new
+    commits made while a long benchmark runs must not relabel it.
+    """
+    commit = git_commit()
     with sessions() as session:
         workspace = benchmark_workspace(session)
         run_ids = {
@@ -182,7 +187,7 @@ def run_benchmark(
     every_run = [run_id for ids in run_ids.values() for run_id in ids]
     log.info("benchmark: %d runs queued (%s)", len(every_run), mode)
     wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute))
-    score_runs(sessions, judge, run_ids, git_commit())
+    score_runs(sessions, judge, run_ids, commit)
 
 
 def rescore_latest(sessions: sessionmaker[Session], judge: LLMClient) -> None:

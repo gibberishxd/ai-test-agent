@@ -533,9 +533,11 @@ def describe(action: str, args: dict, element: Element | None) -> str:
 
 
 def element_number(value) -> int | None:
-    """The element id the model meant: models write 7, 7.0, "7" or "[7]" for the same thing."""
+    """The element id the model meant: models write 7, 7.0, "7", "[7]" or [7] for the same thing."""
     if isinstance(value, bool):
         return None
+    if isinstance(value, list) and len(value) == 1:
+        return element_number(value[0])
     if isinstance(value, int):
         return value
     if isinstance(value, float) and value.is_integer():

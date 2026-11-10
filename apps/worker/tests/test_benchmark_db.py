@@ -143,3 +143,24 @@ def test_scoring_matches_discarded_reports_too_and_records_their_stage(sessions,
     assert len(judge.calls) == 2
     assert result.correct_but_discarded == 1
     assert (result.false_alarms, result.false_alarms_before) == (0.0, 1.0)
+
+
+def test_a_benchmark_is_labelled_with_the_commit_its_runs_were_made_on(
+    sessions, monkeypatch, tmp_path
+):
+    # Run 2 and run 3 committed new code while a 2-hour benchmark ran; the result was labelled
+    # with HEAD at scoring time, i.e. code the runs never used.
+    from worker.config import Settings
+    from worker.main import run_benchmark
+
+    head = {"commit": "made0on"}
+    monkeypatch.setattr("worker.main.git_commit", lambda: head["commit"])
+
+    def execute(*_):  # someone commits new code while the runs are being made
+        head["commit"] = "later00"
+
+    settings = Settings(_env_file=None, demo_url="http://x/", clean_demo_url="http://y/")
+    run_benchmark(settings, FakeClient(), FakeClient(), sessions, execute, 1, "passive", 0)
+    with sessions() as session:
+        latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
+        assert latest.git_commit == "made0on"

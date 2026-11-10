@@ -407,7 +407,8 @@ def test_the_box_is_where_the_element_is_on_screen_after_scrolling(agent):
     assert result.steps[1].box["y"] < 0
 
 
-@pytest.mark.parametrize("written", ["[2]", "2", " 2 ", 2.0])
+# [2] and ["2"]: a JSON list with one id (seen from gemma4:12b on the holdout app, run 3).
+@pytest.mark.parametrize("written", ["[2]", "2", " 2 ", 2.0, [2], ["2"]])
 def test_an_element_id_written_as_text_still_finds_the_element(agent, written):
     run, _, page = agent([call("click", element_id=written), call("finish", summary="")])
     result = run.run()
