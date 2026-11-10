@@ -29,6 +29,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck --workspaces
+      - run: npm run lint --workspaces
       - run: npm run test --workspaces
 
   python:
@@ -58,3 +59,44 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+
+  # The planted bugs of both demo apps (present on the buggy build, absent on the clean one),
+  # then the web app's end-to-end tests: real web app, demo shop and worker, with the worker on
+  # the scripted FakeClient, so it is free and deterministic.
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+          POSTGRES_DB: agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://agent:agent@localhost:5432/agent
+      DEV_MODE: "true"
+      LLM_PROVIDER: fake
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - run: npx -w apps/demo playwright install --with-deps chromium
+      - run: uv sync
+        working-directory: apps/worker
+      - run: uv run playwright install chromium
+        working-directory: apps/worker
+      - run: npm run db:deploy -w apps/web
+      # A throwaway key for this CI run only, so the model settings test can store a key.
+      - run: echo "MODEL_KEYS_SECRET=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+      - name: Planted bugs (demo shop + holdout app)
+        run: npm run verify-bugs
+      - name: End-to-end (dashboard, live run, live browser pane, report)
+        run: npm run test:e2e

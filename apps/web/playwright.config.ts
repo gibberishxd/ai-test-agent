@@ -9,6 +9,8 @@ export default defineConfig({
   testDir: "e2e",
   testMatch: "*.e2e.ts",
   timeout: 180_000,
+  // On CI the dev server starts cold: the very first sign-in can race its first compile.
+  retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
   use: { baseURL: "http://localhost:3000", headless: true },
   webServer: [
