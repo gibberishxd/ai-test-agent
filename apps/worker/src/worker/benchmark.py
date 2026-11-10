@@ -6,8 +6,9 @@ recall (share of planted bugs found), precision (share of reports that were real
 false alarms (reports on the clean shop, where every report is wrong), average cost and
 duration, plus provider, model and git commit.
 
-Matching a report to a planted bug: first by page, then the cheap model judges whether the
-report describes that bug. Every decision is saved so a human can spot-check it.
+Matching a report to a planted bug: the cheap model judges whether the report describes one of
+the bugs planted on its page; if none fits, it is asked again with every planted bug. Every
+decision is saved so a human can spot-check it.
 """
 
 import json
@@ -78,17 +79,18 @@ def path_of(url: str) -> str:
 def candidates_for(page_url: str, planted: list[PlantedBug]) -> list[PlantedBug]:
     """Planted bugs on the report's page; all of them if none is on that page.
 
-    A report can name a different page than bugs.json (a wrong total noticed on checkout
-    rather than the cart), so the page narrows the choice but doesn't decide it.
+    The page narrows the first question to the judge. It doesn't decide the match:
+    `match_report` asks again with every planted bug when none of these fits.
     """
     on_page = [b for b in planted if b.page == path_of(page_url)]
     return on_page or planted
 
 
-def match_report(
-    llm: LLMClient, run_id: str, report: Bug, planted: list[PlantedBug]
-) -> MatchDecision:
-    candidates = candidates_for(report.page_url, planted)
+def ask_judge(llm: LLMClient, report: Bug, candidates: list[PlantedBug]) -> tuple[int | None, str]:
+    """Ask the cheap model which of `candidates` the report describes: (bug id or None, reason).
+
+    An id that isn't one of the candidates counts as no match.
+    """
     listing = "\n".join(f"{b.id}. [{b.page}] {b.title}: {b.description}" for b in candidates)
     prompt = (
         f"REPORT: {report.title}\nPage: {report.page_url}\n"
@@ -97,14 +99,30 @@ def match_report(
     )
     answer = parse_json_object(llm.complete(prompt, system=MATCH_SYSTEM, cheap=True).text) or {}
     matched = as_bug_id(answer.get("match"))
-    valid_ids = {b.id for b in candidates}
+    valid = matched in {b.id for b in candidates}
+    return (matched if valid else None), str(answer.get("reason") or "no clear answer")
+
+
+def match_report(
+    llm: LLMClient, run_id: str, report: Bug, planted: list[PlantedBug]
+) -> MatchDecision:
+    """Match a report to a planted bug: the bugs on its page first, then every planted bug.
+
+    The second round catches a bug seen on another page than bugs.json lists (a $NaN price
+    from the product list showing up in the cart). It only runs when the first found nothing.
+    """
+    candidates = candidates_for(report.page_url, planted)
+    matched, reason = ask_judge(llm, report, candidates)
+    if matched is None and len(candidates) < len(planted):
+        candidates = planted
+        matched, reason = ask_judge(llm, report, candidates)
     return MatchDecision(
         run_id=run_id,
         report=report.title,
         page=path_of(report.page_url),
-        candidates=sorted(valid_ids),
-        matched=matched if matched in valid_ids else None,
-        reason=str(answer.get("reason") or "no clear answer"),
+        candidates=sorted(b.id for b in candidates),
+        matched=matched,
+        reason=reason,
     )
 
 

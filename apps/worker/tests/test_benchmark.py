@@ -18,6 +18,8 @@ PLANTED = [
     PlantedBug(5, "/cart", "Cart total ignores quantity", "2 mugs show $12 total"),
     PlantedBug(7, "/cart", "Discount applies twice", "double click applies SAVE10 twice"),
 ]
+# Bug 9 lives on "/", but its $NaN price also shows up in the cart.
+WITH_NAN = [*PLANTED, PlantedBug(9, "/", "Wool Socks price is $NaN", "decimal comma in price")]
 
 
 def report(title, page, actual=""):
@@ -62,6 +64,33 @@ def test_match_outside_the_candidates_is_rejected():
 def test_unclear_answer_is_no_match():
     llm = FakeClient(texts=["I think it's bug five"])
     assert match_report(llm, "r", report("x", "/cart"), PLANTED).matched is None
+
+
+def test_no_match_on_the_page_widens_to_every_planted_bug():
+    llm = FakeClient(
+        texts=[
+            '{"match": null, "reason": "not about quantity or discounts"}',
+            '{"match": 9, "reason": "the same NaN price, seen in the cart"}',
+        ]
+    )
+    result = match_report(llm, "r", report("Cart total shows $NaN", "/cart"), WITH_NAN)
+    assert result.matched == 9
+    assert result.candidates == [1, 2, 5, 7, 9]
+    assert len(llm.calls) == 2
+    assert "Wool Socks" in llm.calls[1]["prompt"]
+
+
+def test_match_on_the_page_needs_only_one_call():
+    llm = FakeClient(texts=['{"match": 5, "reason": "same wrong total"}'])
+    match_report(llm, "r", report("Total wrong for 2 mugs", "/cart"), PLANTED)
+    assert len(llm.calls) == 1
+
+
+def test_no_second_call_when_every_bug_was_already_a_candidate():
+    llm = FakeClient(texts=['{"match": null, "reason": "none of these"}'])
+    result = match_report(llm, "r", report("Odd spacing", "/checkout"), PLANTED)
+    assert result.matched is None
+    assert len(llm.calls) == 1
 
 
 def test_scores():
