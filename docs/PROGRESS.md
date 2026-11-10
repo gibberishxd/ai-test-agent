@@ -101,6 +101,11 @@ The run stopped early because the Claude usage limit was reached. Root `npm test
    - **The full claude-cli benchmark** was not run on purpose: 7 runs × ~40 Sonnet calls would
      use a large share of your Pro limit. To run it: `cd apps/worker && LLM_PROVIDER=claude-cli
      uv run worker bench` (needs `DEV_MODE=true`, and the four demo servers running).
+   - **"Sign in as demo user" sometimes lands back on `/signin?callbackUrl=…`** instead of the
+     dashboard (once locally on a cold dev server, twice in CI on the second e2e test). The e2e
+     tests now retry the sign-in click (`signInAsDemoUser`), so other features stay tested, but
+     the cause is open: check the Auth.js credentials flow (CSRF cookie timing, or a dev-server
+     reload during sign-in) in the dev server's log when it happens.
    - **CI uses actions that target Node 20** (`actions/checkout@v4`, `setup-node@v4`,
      `setup-uv@v6`): GitHub forces them onto Node 24 with a deprecation warning. Bump to their
      Node 24 majors when they're out.

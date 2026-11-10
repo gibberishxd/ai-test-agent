@@ -1,4 +1,17 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * Sign in with the dev-only demo account. The click sometimes lands back on /signin instead of
+ * the dashboard (seen locally on a cold server and on CI); the cause is still open (PROGRESS,
+ * Needs me). Retrying the click keeps that from failing tests about other features.
+ */
+async function signInAsDemoUser(page: Page) {
+  await expect(async () => {
+    await page.goto("/signin");
+    await page.getByRole("button", { name: "Sign in as demo user" }).click();
+    await page.waitForURL("**/dashboard", { timeout: 15_000 });
+  }).toPass({ timeout: 90_000 });
+}
 
 /**
  * The demo, as a test: open the dashboard, start a run on the demo shop, wait for the worker
@@ -6,9 +19,7 @@ import { expect, test } from "@playwright/test";
  */
 test("start a run from the dashboard and see bugs on the report", async ({ page }) => {
   // Signed in (dev demo user): visitors are limited to 5 runs per hour, and this test runs often.
-  await page.goto("/signin");
-  await page.getByRole("button", { name: "Sign in as demo user" }).click();
-  await page.waitForURL("**/dashboard");
+  await signInAsDemoUser(page);
   await page.getByRole("button", { name: /Use the demo shop/ }).click();
   await expect(page.getByLabel("URL to test")).toHaveValue("http://localhost:5173");
   await page.getByText("Passive scan").click();
@@ -31,9 +42,7 @@ test("start a run from the dashboard and see bugs on the report", async ({ page 
 });
 
 test("the live browser pane shows the agent's screen and outlines what it clicks", async ({ page }) => {
-  await page.goto("/signin");
-  await page.getByRole("button", { name: "Sign in as demo user" }).click();
-  await page.waitForURL("**/dashboard");
+  await signInAsDemoUser(page);
   await page.getByRole("button", { name: /Use the demo shop/ }).click();
   await page.getByText("Interactive test").click();
   await page.getByRole("button", { name: "Start test" }).click();
@@ -71,9 +80,7 @@ test("interactive mode is refused on an unverified domain", async ({ page }) => 
 });
 
 test("a workspace model is stored with its key hidden and can't run until tested", async ({ page }) => {
-  await page.goto("/signin");
-  await page.getByRole("button", { name: "Sign in as demo user" }).click();
-  await page.waitForURL("**/dashboard");
+  await signInAsDemoUser(page);
   await page.goto("/settings");
 
   const name = `E2E model ${Date.now()}`;
