@@ -18,7 +18,7 @@ from worker.agent.policy import Budget, card_number_reason, deny_reason
 from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.tools import TOOL_NAMES, TOOLS
 from worker.browser import listen, wait_until_quiet
-from worker.llm import LLMClient, Usage
+from worker.llm import LLMClient, ToolCall, Usage
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
@@ -134,6 +134,29 @@ class AgentRun:
         return self.result
 
     def _step(self) -> StepRecord:
+        """One turn: look at the page, let the model choose, check and run it, record it."""
+        state, events, image = self._observe()
+        observation = build_observation(
+            state, self._task(), self._budget_line(), events, self.memory
+        )
+        decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
+        index = len(self.result.steps) + 1
+        outcome = self._act(decision.tool_call, state, index)
+        step = StepRecord(
+            index=index,
+            url=state.url,
+            events=events,
+            usage=decision.usage,
+            screenshot=self._thumbnail(index),
+            **outcome,
+        )
+        self.result.steps.append(step)
+        self.memory.steps.append(f"#{step.index} {step.human} → {step.result}")
+        self.on_step(step)
+        return step
+
+    def _observe(self) -> tuple[PageState, list[str], bytes | None]:
+        """The page as the model will see it: state, new events, and a screenshot if due."""
         wait_until_quiet(self.page, SETTLE_MS)
         late_exit = self._return_to_site()  # a delayed redirect since the last step
         state = read_page(self.page)
@@ -147,74 +170,42 @@ class AgentRun:
             image = self.page.screenshot()
         self._seen_urls.add(state.url)
         self._want_screenshot = False
+        return state, events, image
 
-        observation = build_observation(
-            state, self._task(), self._budget_line(), events, self.memory
-        )
-        decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
-        index = len(self.result.steps) + 1
-        call = decision.tool_call
-
+    def _act(self, call: ToolCall | None, state: PageState, index: int) -> dict:
+        """Check the model's choice and run it. Returns the StepRecord fields that describe it."""
         if call is None or call.name not in TOOL_NAMES:
-            step = StepRecord(
-                index,
-                "none",
-                {},
-                None,
-                state.url,
-                "No action",
-                "error: no valid tool call; call exactly one tool",
-                events,
-                decision.usage,
-            )
-        else:
-            args = dict(call.args)
-            reasoning = redact(str(args.get("reasoning") or ""))[:300] or None
-            element = self._element(state, args)
-            human = describe(call.name, args, element)
-            blocked = self._check(call.name, args, element)
-            if blocked:
-                step = StepRecord(
-                    index,
-                    call.name,
-                    args,
-                    reasoning,
-                    state.url,
-                    human,
-                    f"BLOCKED: {blocked}",
-                    events,
-                    decision.usage,
-                    blocked=True,
-                    block_reason=blocked,
-                )
-            else:
-                result, changed = self._execute(call.name, args, element, state, index)
-                left = self._return_to_site()
-                step = StepRecord(
-                    index,
-                    call.name,
-                    args,
-                    reasoning,
-                    state.url,
-                    human,
-                    f"BLOCKED: {left}; you are back on {self.page.url}" if left else result,
-                    events,
-                    decision.usage,
-                    # Marked blocked so replay doesn't repeat a step that leaves the site.
-                    blocked=bool(left),
-                    block_reason=left,
-                    changed=changed and not left,
-                )
-
-        if call is not None and call.name in TOOL_NAMES:
-            target = self._element(state, dict(call.args))
-            if target is not None:
-                step.element = {"role": target.role, "name": target.name}
-        step.screenshot = self._thumbnail(index)
-        self.result.steps.append(step)
-        self.memory.steps.append(f"#{step.index} {step.human} → {step.result}")
-        self.on_step(step)
-        return step
+            return {
+                "action": "none",
+                "args": {},
+                "reasoning": None,
+                "human": "No action",
+                "result": "error: no valid tool call; call exactly one tool",
+            }
+        args = dict(call.args)
+        element = self._element(state, args)
+        outcome = {
+            "action": call.name,
+            "args": args,
+            "reasoning": redact(str(args.get("reasoning") or ""))[:300] or None,
+            "human": describe(call.name, args, element),
+            "element": {"role": element.role, "name": element.name} if element else None,
+        }
+        blocked = self._check(call.name, args, element)
+        if blocked:
+            return {
+                **outcome,
+                "result": f"BLOCKED: {blocked}",
+                "blocked": True,
+                "block_reason": blocked,
+            }
+        result, changed = self._execute(call.name, args, element, state, index)
+        left = self._return_to_site()
+        if left:
+            # Marked blocked so replay doesn't repeat a step that leaves the site.
+            result = f"BLOCKED: {left}; you are back on {self.page.url}"
+            return {**outcome, "result": result, "blocked": True, "block_reason": left}
+        return {**outcome, "result": result, "changed": changed}
 
     # --- safety checks (before acting) -------------------------------------------------------
 

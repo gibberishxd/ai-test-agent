@@ -52,30 +52,14 @@ def run_passive(
 ) -> None:
     step_numbers = itertools.count(run.step_count)
 
-    def on_page(page: PageResult) -> None:
-        session.add(
-            Step(
-                run_id=run.id,
-                index=next(step_numbers),
-                action="visit",
-                args={"url": page.url, "status": page.status},
-                url=page.url,
-                screenshot=page.screenshot,
-                events=page_events(page),
-                blocked=bool(page.blocked_requests),
-                block_reason=", ".join(page.blocked_requests[:3]) or None,
-            )
-        )
-        run.pages_visited += 1
-        run.step_count += 1
-        session.commit()
-
-    def should_stop() -> bool:
-        session.refresh(run, ["stop_requested"])
-        return run.stop_requested
-
     report = passive_scan(
-        run.target_url, settings, storage, str(run.id), on_page, should_stop, browser
+        run.target_url,
+        settings,
+        storage,
+        str(run.id),
+        on_page=lambda page: _save_visit(session, run, page, next(step_numbers)),
+        should_stop=lambda: _stop_requested(session, run),
+        browser=browser,
     )
     bugs = list(report.bugs)
 
