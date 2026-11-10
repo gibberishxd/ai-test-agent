@@ -39,8 +39,8 @@ def test_replay_first_tries_from_the_last_navigation_before_the_bug():
         11: step("click", element={"name": "Place order"}),
         # Relative: resolved against the page it was typed on.
         12: step("navigate", page="http://shop.test/checkout", url="/profile"),
-        13: step("click", element={}),
-        14: step("scroll", direction="down"),
+        13: step("click", page="http://shop.test/profile", element={}),
+        14: step("scroll", page="http://shop.test/profile", direction="down"),
     }
     plans = [plan_actions(p) for p in replay_plans(agent_bug(15), steps, TARGET)]
     assert plans == [
@@ -64,3 +64,22 @@ def test_blocked_steps_are_never_repeated_and_never_a_starting_point():
 def test_a_screenshot_finding_is_checked_on_its_own_page():
     bug = SimpleNamespace(evidence={}, step_indexes=[], page_url="http://shop.test/p/6")
     assert replay_plans(bug, {}, TARGET) == [("http://shop.test/p/6", [])]
+
+
+def test_replay_also_tries_from_the_last_time_the_agent_was_on_the_start_page():
+    # A long run: a checkout flow, then back to the home page, log in, edit the profile. A step
+    # of the checkout flow may not replay; the bug only needs what came after the return home.
+    steps = {
+        10: step("click", page="http://shop.test/", element={"name": "Mug"}),
+        11: step(
+            "type", page="http://shop.test/cart", text="CODE", element={"name": "Discount code"}
+        ),
+        12: step("click", page="http://shop.test/cart", element={"name": "Home"}),
+        13: step("click", page="http://shop.test/", element={"name": "Log in"}),
+        14: step("type", page="http://shop.test/profile", text="Ada", element={"name": "Name"}),
+    }
+    plans = [plan_actions(p) for p in replay_plans(agent_bug(15), steps, TARGET)]
+    assert plans == [
+        (TARGET, ["click", "type"]),  # from step 13, taken on the start page
+        (TARGET, ["click", "type", "click", "click", "type"]),
+    ]

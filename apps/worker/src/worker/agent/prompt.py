@@ -49,8 +49,9 @@ Tools: click, double_click, type, select, navigate, go_back, reload, scroll, set
 take_screenshot, note, report_bug, finish.
 
 Reporting:
-- Call report_bug as soon as you have seen a bug, with specific expected and actual values and \
-the step numbers that reproduce it. One bug per call. Don't report the same bug twice.
+- When you see a bug, report it right away with report_bug, with specific expected and actual \
+values and the step numbers that reproduce it. One bug per call. Don't report the same bug twice. \
+A note is for values you want to compare later; it is never a substitute for report_bug.
 - Only report what you observed. No guesses, no design preferences, no "could be improved".
 - Console errors and failed requests are listed under NEW EVENTS; they are already reported \
 automatically, so report them only if they caused a visible problem you can describe.

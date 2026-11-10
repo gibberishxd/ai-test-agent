@@ -41,3 +41,9 @@ def test_prompt_and_tools_know_nothing_about_the_demo_apps():
     specifics = {"save10", "wool socks", "desk lamp", "ceramic mug", "localhost", "5173", "5175"}
     specifics |= {bug["title"].lower() for bug in planted}
     assert [s for s in specifics if s in text] == []
+
+
+def test_prompt_says_notes_are_not_a_place_for_bugs():
+    # A local model wrote "the price shows NaN" into a note and never reported it.
+    assert "report it right away" in SYSTEM_PROMPT
+    assert "never a substitute for report_bug" in SYSTEM_PROMPT

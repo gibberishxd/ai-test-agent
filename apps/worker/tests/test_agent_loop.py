@@ -405,3 +405,11 @@ def test_the_box_is_where_the_element_is_on_screen_after_scrolling(agent):
     result = run.run()
     # The button is near the top, so after scrolling 700 px down it is above the screen.
     assert result.steps[1].box["y"] < 0
+
+
+@pytest.mark.parametrize("written", ["[2]", "2", " 2 ", 2.0])
+def test_an_element_id_written_as_text_still_finds_the_element(agent, written):
+    run, _, page = agent([call("click", element_id=written), call("finish", summary="")])
+    result = run.run()
+    assert page.locator("#status").inner_text() == "Saved:"  # Save was clicked
+    assert result.steps[0].element["name"] == "Save"

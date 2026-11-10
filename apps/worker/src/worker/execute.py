@@ -24,6 +24,7 @@ from worker.runner import ExecuteFn
 from worker.safety.network import BlockedError
 from worker.scan import guarded_context, is_demo_target, passive_scan
 from worker.storage import Storage
+from worker.urls import normalize
 from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
 
 MAX_EVENTS_PER_STEP = 20
@@ -393,27 +394,49 @@ def replay_plans(bug, steps: dict, target_url: str) -> list[tuple[str, list[Repl
     """Where to start replay and which steps to repeat, shortest first.
 
     An agent report replays every agent action up to the report (the model's own step list is
-    often incomplete). If one of those was a navigate, the first plan starts at the last such
-    page instead: what happened before a full page load matters less, and repeating it can
-    have side effects (placing a second order). If that plan doesn't reproduce the bug, the
-    full one runs. A screenshot finding (no recorded steps) is checked on its own page.
+    often incomplete). Shorter plans come first: from the last navigate (a full page load), and
+    from the agent's last return to the start page (a new flow usually starts there). Earlier
+    steps matter less, can have side effects (a second order) and can fail to replay, which
+    must not dismiss a bug found later. If no short plan reproduces it, the full one runs. A
+    screenshot finding (no recorded steps) is checked on its own page.
     """
     indexes = replay_indexes(bug)
     if not indexes:
         return [(bug.page_url, [])]
     kept = [(i, steps[i]) for i in indexes if i in steps and not steps[i].blocked]
     full = [_replay_step_of(step) for _, step in kept]
-    plans = []
+    # Shorter replays first, latest start first: what happened before a page load, or before
+    # the agent's last return to the start page, matters less, and one of those earlier steps
+    # failing to replay (or repeating a side effect) must not decide the verdict.
+    short: list[tuple[int, tuple[str, list[ReplayStep]]]] = []
     navigations = [n for n, (_, step) in enumerate(kept) if step.action == "navigate"]
     if navigations:
-        last = navigations[-1]
-        page = kept[last][1]
-        start = urljoin(page.url or target_url, str((page.args or {}).get("url", "")))
-        viewport = [s for _, s in kept[:last] if s.action == "set_viewport"][-1:]
-        short = [_replay_step_of(s) for s in viewport] + full[last + 1 :]
-        plans.append((start, short))
+        n = navigations[-1]
+        page = kept[n][1]
+        start_url = urljoin(page.url or target_url, str((page.args or {}).get("url", "")))
+        short.append((n + 1, (start_url, _viewport_before(kept, n) + full[n + 1 :])))
+    on_home = [_on_start_page(step, target_url) for _, step in kept]
+    arrivals = [n for n in range(1, len(kept)) if on_home[n] and not on_home[n - 1]]
+    if arrivals:
+        n = arrivals[-1]
+        short.append((n, (target_url, _viewport_before(kept, n) + full[n:])))
+    plans = [plan for _, plan in sorted(short, key=lambda item: -item[0])]
     plans.append((target_url, full))
-    return plans
+    unique: list[tuple[str, list[ReplayStep]]] = []
+    for plan in plans:  # the same replay twice would only cost a second model call
+        if plan not in unique:
+            unique.append(plan)
+    return unique
+
+
+def _viewport_before(kept: list, n: int) -> list[ReplayStep]:
+    """The last viewport change before step n: it outlives a page load, so it is set again."""
+    return [_replay_step_of(s) for _, s in kept[:n] if s.action == "set_viewport"][-1:]
+
+
+def _on_start_page(step, target_url: str) -> bool:
+    """Was this step taken on the run's start page (the same URL, ignoring #fragments)?"""
+    return normalize(step.url or "") == normalize(target_url)
 
 
 def _replay_step_of(step) -> ReplayStep:

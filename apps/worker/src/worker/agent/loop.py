@@ -233,7 +233,7 @@ class AgentRun:
     # --- safety checks (before acting) -------------------------------------------------------
 
     def _element(self, state: PageState, args: dict) -> Element | None:
-        element_id = args.get("element_id")
+        element_id = element_number(args.get("element_id"))
         return next((e for e in state.elements if e.id == element_id), None)
 
     def _check(self, action: str, args: dict, element: Element | None) -> str | None:
@@ -530,6 +530,20 @@ def describe(action: str, args: dict, element: Element | None) -> str:
     if action == "finish":
         return "Finish"
     return action
+
+
+def element_number(value) -> int | None:
+    """The element id the model meant: models write 7, 7.0, "7" or "[7]" for the same thing."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        digits = value.strip().strip("[]").strip()
+        return int(digits) if digits.isdigit() else None
+    return None
 
 
 def _first_line(error: Exception) -> str:
