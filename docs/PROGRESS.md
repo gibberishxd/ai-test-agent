@@ -37,6 +37,24 @@ The 2 unmatched reports were "Cart price and total displayed as NaN" on `/cart`,
 seen on another page; the matcher filters candidates by page, so bug 9 (listed on `/`) wasn't
 considered. Real false alarms: 0. Matcher change is open (owner's call).
 
+## G6 measurements (run 2)
+
+Benchmark at commit 8453aea (agent code of run 2 up to G3), gemma4:12b agent, **judge pinned to
+ollama/gemma4:12b**, 480 s per run. Shop: 3 buggy + 1 clean; holdout (apps/demo2): 2 buggy + 1 clean.
+
+| Set | AI-only recall | Recall | Precision | False alarms | Avg run |
+|---|---|---|---|---|---|
+| Shop | 0% | 33% | 100% | 0.0 | 490 s |
+| Holdout | 0% | 33% | 100% | 0.0 | (same runs' average) |
+
+Compared with the earlier Gemma rows (AI-only 13%, bug 9 in 3/3 runs): bug 9 went to 0/3. The
+steps show why (D52): the agent noticed the "$NaN" price but wrote it in a `note` instead of
+reporting it; it found bug 8 ("Save changes does nothing") for the first time, but replay
+dismissed it because a step of an earlier flow couldn't be repeated; and one step was wasted
+on `element_id: "[10]"`. Fixed generically in commit 0124950 (D52). The holdout scored the same
+as the shop (only its 2 deterministic bugs), so there is no sign of shop-specific tuning, and
+no sign yet that the AI part helps a 12B model.
+
 ## Run 2 (branch `agent-v2`, plan in `docs/RUN_PLAN_2.md`)
 
 | Goal | Status | Check |
@@ -45,10 +63,10 @@ considered. Real false alarms: 0. Matcher change is open (owner's call).
 | G1 Safety and correctness fixes (1–6) | done | Worker `uv run pytest`: 241 passed, 1 skipped. Web `npm test -w apps/web`: 79 passed. Web typecheck and worker ruff clean. Decisions D32–D37. |
 | G2 Findable bugs (1–5) | done | Worker `uv run pytest`: 281 passed, 1 skipped; ruff clean. New tests: `test_observe.py`, `test_prompt.py`, `test_replay_plan.py`, `test_review.py`, new cases in `test_agent_loop.py`, `test_verify.py`, `test_passive_run.py` (incl. six identical "Add to cart" buttons). Decisions D38–D41. |
 | G3 Honest benchmark (1–4) | done | Root `npm test`: web 84, demo 7, demo2 3, worker 288 passed + 1 skipped; `npm run lint` clean; new `test_benchmark_db.py` (AI-only, holdout columns, judge, rescore keeps commit) and cases in `test_benchmark.py`. Web `npm test -w apps/web`: 84 passed (page helpers). `npm run verify-bugs -w apps/demo2` (from `apps/demo2`: `npx playwright test --repeat-each 3`): 36 passed; shop `verify-bugs`: 26 passed. Migration `20261110120000_honest_benchmark` applied. Decisions D42–D44. |
-| G4 Live browser pane | in progress | Unit: `lib/live-pane.test.ts` (box scaling, clipping, frame selection), worker step box/screenshot tests; web 92 passed at commit b3fe35b. The e2e check waits until the G6 benchmark frees the run queue (an e2e worker would pick up benchmark runs). D45. |
+| G4 Live browser pane | done | Unit: `lib/live-pane.test.ts` (box scaling, clipping, frame selection) + worker tests for the before-action screenshot and box. `npm run test:e2e`: 5 passed (28.5 s) incl. "the live browser pane shows the agent's screen and outlines what it clicks" (screenshot visible during the run, outline drawn for the click step). CI `e2e` job: success (run 42856919017). D45. |
 | G5 Any model (1–5) | done | Worker `uv run pytest`: 321 passed, 1 skipped (`test_openai_compat.py` with recorded fixtures, `test_claude_cli.py`, `test_secret_box.py`, `test_run_models.py`, provider tests in `test_llm.py`). Web `npm test -w apps/web`: 120 passed (`secret-box`, `model-probe`, `model-configs`, `run-form`, leaderboard, and DB tests: key encrypted at rest, never in API views or console logs, workspace B can't list, change, delete or run with A's model, untested models refused). Typecheck clean. D46–D50. |
 | G6 Measure | in progress | Gemma benchmark (shop 3+1, holdout 2+1, judge pinned to gemma4:12b) was running when the usage limit hit: 4 of 7 runs done at ~12:35 UTC. Its result is saved to `benchmark_results` when it finishes. The one claude-cli run is scripted (`one_claude_cli_run.py` in the session scratchpad) but not run. |
-| G7 Project hygiene | partly done | ESLint (Next.js config for web, recommended React/TS for both demo apps) wired into `npm run lint`: 105 + 22 + 14 files, 0 findings; root lint exit 0. CI e2e job (verify-bugs for both apps + e2e) is written but **not committed**: e2e hasn't passed locally yet (it must wait for the benchmark to free the run queue). |
+| G7 Project hygiene | done | ESLint: 105 web + 22 shop + 14 holdout files, 0 findings; root `npm run lint` exit 0. CI run 42856919017: typescript (now with ESLint) success, python success, new e2e job (verify-bugs for both apps + 5 e2e tests, FakeClient) success. D51. |
 | G8 Wrap-up | not started | |
 
 The run stopped early because the Claude usage limit was reached. Root `npm test`,

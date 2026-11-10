@@ -523,3 +523,17 @@ numbers are the real test (Needs me).
   (it had already caught real breakage locally; CI makes it stick).
 - **Why:** recommended configs are what reviewers expect, and planted bugs that silently
   disappear would make every benchmark number meaningless; CI now notices.
+
+## D52. Three generic fixes found by reading the G6 Gemma runs (run 2, G6)
+- **What the runs showed:** with the run-2 agent, Gemma 4 12B scored 0% AI-only recall (shop
+  and holdout), down from 13%. Reading the steps: it *did* find "Save changes does nothing"
+  (bug 8) for the first time, but replay dismissed it because an unrelated step from an
+  earlier flow (typing a discount code in the cart) couldn't be repeated; it saw the "$NaN"
+  price and wrote it in a note instead of reporting it; and it once passed `element_id` as
+  the string "[10]", which wasted a step.
+- **Decision:** replay also tries from the agent's last return to the start page (a new flow
+  usually begins there), latest start first; the prompt says a note never replaces
+  report_bug; `element_number` accepts 7, 7.0, "7" and "[7]".
+- **Why:** all three are about how agents behave on any site, not about the demo shop. The
+  first one matters most: a correct report thrown away by the verifier is worse than a missed
+  one, because nobody sees it.
