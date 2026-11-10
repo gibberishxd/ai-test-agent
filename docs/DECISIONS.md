@@ -595,3 +595,25 @@ numbers are the real test (Needs me).
   duplicate already is), so the extra judge calls are only for discarded reports.
 - **False alarms for claude-cli:** they were "not measured" in run 2 because the single
   Sonnet run had no clean run. The H7 benchmark run includes a clean run, so they are measured.
+
+## D55. The demo sign-in flake was a CSRF cookie race; no SessionProvider (run 3, H3)
+- **Cause (measured):** `e2e/signin-loop.mjs` signed in 50 and 60 times in fresh browsers: 2
+  and 4 failures, each one `POST /api/auth/callback/demo → 200` with a redirect to
+  `/api/auth/signin` (Auth.js's "CSRF token didn't match" path), then `/signin?callbackUrl=…`.
+  Auth.js v4 mints a new CSRF cookie for *every* auth request that arrives without one. On
+  the sign-in page `<SessionProvider>` fired `/api/auth/session` on load (twice in dev:
+  StrictMode) and on focus; when one of those answered after the button's `/api/auth/csrf`,
+  it overwrote the cookie, and the token the button posted no longer matched.
+- **Decision:** remove `SessionProvider` (and `components/auth-provider.tsx`). Nothing calls
+  `useSession`; pages read the session on the server; `signIn`/`signOut` don't need the
+  provider. The sign-in flow is then strictly sequential (providers → csrf → callback), so
+  only one token is ever minted. The e2e retry helper and the CI `retries: 1` are removed.
+- **Alternatives:** retry the sign-in (hides the race, which real users hit too); set the
+  CSRF cookie in a proxy before the page loads (copies Auth.js internals or self-fetches);
+  disable StrictMode (halves the chance, doesn't remove it).
+- **Check:** `e2e/signin.e2e.ts` asserts the sign-in page makes no auth requests before the
+  click (failed before the fix with two `/api/auth/session` calls) and signs in 10 times in a
+  row. Loop after the fix: 0 of 50 one at a time, 0 of 50 four at once, 0 of 50 right after a
+  dev-server restart.
+- **Weak spot:** a future client component that adds `useSession` would bring the provider
+  and the race back; the e2e test above would catch it.

@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { SiteHeader } from "@/components/site-header";
-import { AuthProvider } from "@/components/auth-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,15 +22,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // suppressHydrationWarning: next-themes sets the "dark" class before React loads.
     <html lang="en" className={cn("font-sans", sans.variable, mono.variable)} suppressHydrationWarning>
       <body className="min-h-dvh bg-background text-foreground antialiased">
-        <AuthProvider>
-          <ThemeProvider>
-            <TooltipProvider>
-              <SiteHeader />
-              {children}
-              <Toaster />
-            </TooltipProvider>
-          </ThemeProvider>
-        </AuthProvider>
+        {/* No next-auth SessionProvider: nothing reads the session on the client (pages read it
+            on the server), and its /api/auth/session calls on load raced the sign-in button's
+            CSRF token (D55). signIn/signOut work without it. */}
+        <ThemeProvider>
+          <TooltipProvider>
+            <SiteHeader />
+            {children}
+            <Toaster />
+          </TooltipProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

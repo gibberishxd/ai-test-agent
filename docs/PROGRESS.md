@@ -101,6 +101,8 @@ The run stopped early because the Claude usage limit was reached. Root `npm test
 |---|---|---|
 | H0 Plan | done | `docs/RUN_PLAN_3.md` committed; root `npm test` (web 120, demo 7, demo2 3, worker 330 + 1 skipped) and `npm run lint` exit 0 on `agent-v3` before any change. |
 | H1 Replay fix | done | New failing-first tests: `test_replay_isolation.py` (two+ replays in one run: no leftover cart, no leftover viewport, failure reason stored; read-only re-verify), late-drawn routes and failure kinds in `test_verify.py`, errored steps in `test_replay_plan.py`. Offline re-check of run be495c9f below. D53. |
+| H2 Verification funnel | done | Failing-first tests: funnel, before/after recall, correct-but-discarded, bugs lost, false alarms before/after, stage of a stored bug, printed output (`test_benchmark.py`), saved details and matching of discarded reports (`test_benchmark_db.py`), web `verification()` (`lib/benchmark.test.ts`). Shown in `bench` output, the leaderboard (reported → verified, correct but discarded) and each latest-score card. D54. |
+| H3 Sign-in flake | done | `node e2e/signin-loop.mjs 50`: before 2 of 50 (and 4 of 60) landed on `/signin`; after 0 of 50, 0 of 50 with 4 in parallel, 0 of 50 after a dev-server restart. `e2e/signin.e2e.ts` failed first (two `/api/auth/session` calls before the click). Retry helper and CI `retries` removed. D55. |
 
 ### H1: run be495c9f re-checked offline (`uv run worker reverify be495c9f [--judge]`)
 

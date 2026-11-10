@@ -1,16 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-/**
- * Sign in with the dev-only demo account. The click sometimes lands back on /signin instead of
- * the dashboard (seen locally on a cold server and on CI); the cause is still open (PROGRESS,
- * Needs me). Retrying the click keeps that from failing tests about other features.
- */
+/** Sign in with the dev-only demo account (no retry: the old flake is fixed, see signin.e2e.ts). */
 async function signInAsDemoUser(page: Page) {
-  await expect(async () => {
-    await page.goto("/signin");
-    await page.getByRole("button", { name: "Sign in as demo user" }).click();
-    await page.waitForURL("**/dashboard", { timeout: 15_000 });
-  }).toPass({ timeout: 90_000 });
+  await page.goto("/signin");
+  await page.getByRole("button", { name: "Sign in as demo user" }).click();
+  await page.waitForURL("**/dashboard");
 }
 
 /**
