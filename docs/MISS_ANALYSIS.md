@@ -215,3 +215,31 @@ model, shown "you expected $360, the page says $120", talks itself out of it ("t
 include all nights yet"). The next lever is not more prompting of the same model: either a
 stronger judge for the mismatch only (one cheap call on the 10–20% of steps that are flagged) or a
 stronger agent model. The Sonnet run in J7 shows the upper bound.
+
+## Run 4, J7: everything in run 4, the shop signed in (Gemma 4 12B)
+
+Result row `bd88e166` (commit b114b43), same settings (1200 s, 40 steps, judge gemma4:12b). The
+shop now has 13 planted bugs (bug 13 only when signed in) and its benchmark runs start signed in
+with a saved setup (D75), so logout is denied and bug 11 can't be triggered: recall is given with
+and without it. All 7 runs finished; no timeouts.
+
+| | Run 2 (G6 rerun) | Run 3 (R3b) | Run 4 J1 | **Run 4 J7** |
+|---|---|---|---|---|
+| Shop AI-only | 4% | 8% | 8% | **0%** (7% before verification) |
+| Shop recall | 36% | 39% | 39% | **31%** (33% without bug 11) |
+| Holdout AI-only / recall | 0% / 33% | 0% / 33% | 0% / 33% | **0% / 33%** |
+| False alarms (shop / holdout) | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 | **0.0 / 0.0** |
+| Correct but discarded | not measured | 0 | 1 | **2** |
+
+**Why 0%:** Gemma reported bug 8 ("Save changes does nothing") in 2 of 3 runs and the replay judge
+(also Gemma) dismissed both: "the screenshot shows a static state". A bug whose symptom is that
+nothing happens can't be seen on one screenshot after the replay; in J1 the same judge accepted it
+2 of 3 times, so this is judge variance on a known weak spot (bug 8 is the "Reported, then
+dropped" kind again). Bug 13 (order history): the signed-in crawl visited `/orders`, but the agent
+never opened an order's page. Logout was refused 3 times across the shop runs, as designed.
+
+**What it says:** run 4 changed what the product can do (CI, logins, releases, teams,
+production), not how many judgement bugs a 12B model finds. Two concrete next steps, both generic:
+replay verification should compare before and after the replayed action for "nothing happened"
+reports (the agent's own Effect from J1 already records "nothing on the page changed"), and a
+stronger model (Sonnet's 38% in run 3 is the reference; not re-run today without the owner's yes).

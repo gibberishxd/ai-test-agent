@@ -166,13 +166,39 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | J4 Bugs across releases | done | `test_fingerprint.py`, `test_triage.py`, `triage.db.test.ts`; run page shows New / Still present / Fixed and triage (D72). |
 | J5 Teams and isolation | done | `roles.test.ts` (the whole table), `route-roles.db.test.ts` (every protected route × every role), `members.db.test.ts`, `rls.db.test.ts` (no WHERE → own rows only; cross-workspace writes fail; unset workspace sees nothing), partial unique index test; RLS cost +0.004–0.03 ms per query (D73, D74). |
 | J6 Production readiness | done | Images (web 319 MB, worker 3.2 GB with Chromium); `docker-compose.prod.yml` up locally: migrations once, web ready, 2 workers. A Gemma run started via `/api/v1` with an API key: done in 494 s, 11 pages, 20 agent steps, 6 findings confirmed (incl. planted bug 8 by the agent); 42 screenshots in the object store, served through a presigned link (302 → 200 image/png; 404 without access). Health, ready, metrics answer; JSON logs carry `run_id`. Actions pinned by SHA. `docs/DEPLOY.md` with a threat model (D76, D77). |
+| J7 Measure | done (Gemma only) | Gemma 12B full benchmark `bd88e166`: shop AI-only 0% (7% before verification: bug 8 reported twice, dismissed by the gemma judge), holdout 0% / 33%, 0 false alarms; signed-in runs reached `/orders` and logout was refused 3 times. The Sonnet run was not made: the owner didn't approve it today (rule: only with a yes). |
+| J8 Wrap-up | done | README (pipeline section, run-4 rows), WALKTHROUGH (one section per goal with Q&A), PROGRESS (this table, Needs me with exact steps), ROADMAP (what moved), DECISIONS D63–D78, DEVLOG; `npm test` and `npm run lint` exit 0; e2e 8/8 locally; pushed, nothing merged; servers and the production stack stopped, Ollama left running. |
 
 ### Run 4 measurements (Gemma 4 12B, judge gemma4:12b, 1200 s)
 | Run | Agent code | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | False alarms | Correct but discarded | Avg run |
 |---|---|---|---|---|---|---|---|---|
 | Run 4, J1 (`bea561fa`) | a0af21e, expected vs. actual | 8% (bug 8 in 2/3) | 39% | 0% | 33% | 0.0 / 0.0 | 1 | 1156 s |
+| Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
+0. **Run 4 (branch `agent-v4`, nothing merged):**
+   - **Merge PR #2 (`agent-v3` → main)**, then tell me: I rebase `agent-v4` onto main
+     (`--force-with-lease`, the one allowed exception) and open its PR.
+   - **Your questions from this morning** (DECISIONS D73 and D75 record what I chose, marked
+     "decided without owner, revisit"): (1) the Sonnet run: not run today without your yes; to
+     run it: `cd apps/worker && LLM_PROVIDER=claude-cli uv run worker bench` (same settings as
+     f6151b32; about 30 minutes, uses your Pro limit); (2) the login-only bug: order history
+     shows the next order; (3) shop benchmark signed in, logout denied (bug 11 unreachable);
+     (4) false-positive counts per workspace only, no global numbers yet; (5) role permissions.
+   - **Every web query through the RLS client.** The run page, run lists, API reads and settings
+     lists use `tenantDb`; other queries (writes, some settings and auth paths) still use the
+     plain client with their WHERE. Do: replace `db.` with `tenantDb(workspaceId).` in
+     `lib/*.ts` data functions one file at a time; `rls.db.test.ts` shows the pattern.
+   - **Production database role:** create a non-superuser role that owns the tables and is
+     granted `app_tenant` (docs/DEPLOY.md, "On a managed platform"); otherwise RLS can be bypassed.
+   - **CI e2e and python jobs** failed at 14:30 because GitHub's runners couldn't resolve the
+     Ubuntu archive (apt, not our code; typescript passed). Re-run: `gh run rerun <id> --failed`.
+     If it keeps failing, run those jobs in Playwright's container image (no apt step).
+   - **Email for invitations and magic links** (a provider, small cost): invitation links are
+     copied by hand today.
+   - **Pick a production object store** (S3, R2 or self-run SeaweedFS/MinIO); only `S3_*` change.
+   - **Unchanged from run 3:** bug 7's hidden code, the cart emptied by a reload, quantity 0 → 1
+     (your product decisions; untouched).
 0. **Run 3 (branch `agent-v3`, nothing merged):**
    - **Review and merge.** `agent-v3` is based on `agent-v2`; neither is merged into `main`.
    - **Bug 7 needs the code `SAVE10`, which the shop never shows.** Sonnet guessed it once in
@@ -185,19 +211,15 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
      error clears once the field is edited. Left as intended behaviour, still open for you: a
      reload empties the cart (it lives only in memory), quantity 0 is silently raised to 1.
      False-alarm numbers from before this fix aren't directly comparable with later ones.
-   - **claude-cli adapter:** one Sonnet run finished early saying its tools "were not
+   - **Done in run 4 (J1, D66):** native tool-call attempts get one corrective message. Was: **claude-cli adapter:** one Sonnet run finished early saying its tools "were not
      available" (it tried a native tool call instead of the JSON answer). Dev-only provider.
    - **Gemma now reaches bug states but doesn't recognise them** (7 of 12 AI-only states
      reached, 1 reported). The next improvement is in the AI core (yours): for example an
      "expected vs. happened" line after each state-changing action. `docs/MISS_ANALYSIS.md`.
-   - **Ollama sometimes takes over 300 s for one call** (3 of 7 runs in R3b, on a 16 GB Mac with
+   - **Done in run 4 (J1, D65):** a timed-out call is retried once with a trimmed observation; 0 timeouts in the J1 benchmark. Was: **Ollama sometimes takes over 300 s for one call** (3 of 7 runs in R3b, on a 16 GB Mac with
      gemma4:12b). Since D61 such a run ends cleanly with its steps kept, but it still costs that
      run. Options: a smaller context, a longer `TIMEOUT_S` in `llm/ollama.py`, or a machine with
      more memory.
-   - **CI actions are pinned by major/minor tag**, not by commit SHA. Pinning by SHA is safer
-     against a hijacked tag; a Dependabot config would keep them current.
-   - **Only one default model per workspace** is enforced by the app, not the database. A
-     partial unique index (`WHERE is_default`) would make it a database rule (`docs/DATABASE.md`).
    - **Run 2's items are done:** replay losing correct reports (H1, D53), the sign-in flake (H3,
      D55), CI's Node 20 actions (H5, D57), the full claude-cli benchmark (H7, below).
 1. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`

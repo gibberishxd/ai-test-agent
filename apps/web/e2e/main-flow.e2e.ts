@@ -78,10 +78,10 @@ test("a workspace model is stored with its key hidden and can't run until tested
   await page.goto("/settings");
 
   const name = `E2E model ${Date.now()}`;
-  await page.getByLabel("Name").fill(name);
-  await page.getByLabel("Base URL").fill("https://api.example.test/v1");
+  await page.getByLabel("Name", { exact: true }).fill(name);
+  await page.getByLabel("Base URL", { exact: true }).fill("https://api.example.test/v1");
   await page.getByLabel("Model", { exact: true }).fill("e2e-model");
-  await page.getByLabel("API key").fill("sk-e2e-secret-7391");
+  await page.getByLabel("API key", { exact: true }).fill("sk-e2e-secret-7391");
   await page.getByRole("button", { name: "Add model" }).click();
 
   const item = page.getByTestId("model-list").locator("li").filter({ hasText: name });

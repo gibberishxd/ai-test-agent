@@ -916,3 +916,9 @@ numbers are the real test (Needs me).
   worker creates the bucket on first use (tested with moto), so no one-off bucket job is needed.
   The owner's plan named MinIO; what it needs is "S3-compatible", and only `S3_*` variables change
   for S3, R2, Garage or a self-run MinIO.
+
+## D78. No Sonnet run in run 4 (J7)
+- **Decision:** the owner's rule was "only if I said yes today"; question 1 (asked at the start) got
+  no answer, so the one allowed claude-cli benchmark was not run. A missing answer was not taken
+  as a yes for anything that spends the owner's Pro limit. The command to run it is in PROGRESS,
+  "Needs me".

@@ -1119,3 +1119,21 @@ cache them at scale).
    code serves traffic, and not N times in parallel from N web replicas.
 3. *How do you scale?* Add worker replicas: they coordinate through Postgres (`SKIP LOCKED`, leases);
    the web is stateless behind a load balancer; the bottleneck becomes the model provider.
+
+## Run 4: what the measurements say (MISS_ANALYSIS, "Run 4")
+
+Gemma 4 12B, judge pinned to Gemma, three shop runs and two holdout runs per benchmark:
+run 3 shop AI-only 8%, run 4 J1 8%, run 4 J7 0% (7% before verification); holdout 0% every time;
+0 false alarms on the clean builds every time. The expected-vs-actual check works mechanically
+(23 contradictions flagged in one benchmark) but a 12B model dismisses most of them, and a
+"nothing happened" bug is hard for a screenshot judge to confirm.
+
+**Interview Q&A**
+1. *Your recall went down in the last benchmark: is the product worse?* No: the scored model and
+   judge are the same small local model; one bug was found twice and dismissed by the judge. The
+   per-bug table and the "correct but discarded" count show exactly where it was lost.
+2. *Why keep a change that didn't raise recall?* The rule set in advance: keep it if the holdout
+   doesn't drop and false alarms don't rise. It also produces evidence (expected vs. happened) a
+   stronger judge can use next.
+3. *What would you change next?* Verify "nothing happened" reports by comparing before and after
+   the replayed action, and measure a stronger model (Sonnet reached 38% in run 3).
