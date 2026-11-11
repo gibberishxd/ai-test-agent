@@ -144,6 +144,14 @@ def interactive_allowed(settings: Settings, target_url: str, verified: bool = Fa
     return verified or is_demo_target(settings, target_url)
 
 
+def run_limits(settings: Settings, run: Run) -> tuple[int, int]:
+    """Steps and seconds for this run: the worker's limits, or lower ones the run asked for
+    (set through the API by a CI pipeline, run 4). A run can never raise them."""
+    steps = min(settings.max_steps, run.max_steps or settings.max_steps)
+    seconds = min(settings.max_run_seconds, run.max_seconds or settings.max_run_seconds)
+    return steps, seconds
+
+
 def run_interactive(
     session: Session,
     run: Run,
@@ -181,9 +189,10 @@ def run_interactive(
         return
 
     # 2. The agent loop, with what's left of the budgets.
+    max_steps, max_seconds = run_limits(settings, run)
     budget = Budget(
-        max_steps=settings.max_steps,
-        max_seconds=max(settings.max_run_seconds - (time.monotonic() - started), 0),
+        max_steps=max_steps,
+        max_seconds=max(max_seconds - (time.monotonic() - started), 0),
         max_cost_usd=max(settings.max_run_cost_usd - run.cost_usd, 0),
         max_repeats=settings.max_repeated_actions,
     )

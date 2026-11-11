@@ -785,3 +785,39 @@ numbers are the real test (Needs me).
   provider would see them, and the agent could type them anywhere); a separate check-jobs table
   (one nullable timestamp on the setup does the same for a quick, idempotent job).
 - **Untested glue:** the worker loop calls `process_login_check` before each run (one line).
+
+## D69. Public API: hashed keys, a database rate limit, the dashboard's own rules (run 4, J3)
+- **Decision:** `/api/v1` with workspace API keys (`ata_` + 32 random bytes, SHA-256 hash with a
+  unique index, shown once, revocable, `last_used_at`). Starting a run calls the same `startRun`
+  as the dashboard, so quota, domain verification and model checks can't drift apart. Budgets
+  (`max_steps`, `max_minutes`) can only lower the worker's limits. Rate limit: 60 requests per
+  key per minute, a fixed window counted with one upsert in `api_rate_windows`. Reports as JSON
+  or JUnit XML (one failing test case per reported bug). `openapi.json` is the contract; tests
+  check every route and method against it and validate responses with ajv.
+- **Alternatives:** bcrypt for keys (slow on every request, no benefit for random 256-bit keys);
+  JWTs (can't be revoked without a deny list); an in-memory rate limiter (wrong with two web
+  servers); a sliding-window or token-bucket limiter (smoother, more state; a fixed window is
+  enough at 60/min); generating routes from the spec (more tooling for three routes).
+
+## D70. Webhooks: HMAC over timestamp and body, retries in the database, the egress guard (J3)
+- **Decision:** `X-ATA-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, "t.body")>` (the scheme
+  Stripe made common); receivers refuse timestamps older than 5 minutes (replays). Deliveries are
+  rows (`webhook_deliveries`) claimed with SKIP LOCKED; backoff 30 s, 2 min, 8 min, 32 min, ~2 h,
+  then failed. URLs are refused at save time for obvious internal hosts, and at send time by the
+  worker's `NetworkGuard` (after DNS); the POST goes through `GuardProxy`, which connects to the
+  checked address (no DNS rebinding). A blocked URL fails without retries. No redirects followed.
+- **Alternatives:** signing the body only (a captured request could be replayed forever); a
+  message broker for retries (one more system; the database already is the queue); sending from
+  the web app (it would need the egress guard too, and runs finish in the worker).
+- **Tested against a local receiver only;** the `allowed_local` exemption exists for tests and is
+  never set in production.
+
+## D71. Two incidents during run 4, and the rules that follow
+- An e2e run during a benchmark let a fake-model worker take over the benchmark (fixed in code,
+  D67). Rule: no e2e tests while a benchmark runs.
+- `pkill -f "worker$"` to stop a test worker also killed a Docker Desktop process: Postgres went
+  down and the second J1 benchmark crashed. Docker Desktop was force-restarted, the data volume was
+  intact (84 runs, 11 results), and the 7 aborted runs were marked failed with the reason. Rule:
+  stop processes by PID only, never by a name pattern.
+- The third J1 benchmark is labelled a0af21e but also loaded the uncommitted J3 code (API,
+  webhooks, run budgets): none of it changes the agent (no budgets or webhooks on benchmark runs).

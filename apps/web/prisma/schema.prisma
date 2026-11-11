@@ -72,6 +72,8 @@ model Workspace {
   domains      Domain[]
   modelConfigs ModelConfig[]
   loginSetups  LoginSetup[]
+  apiKeys      ApiKey[]
+  webhooks     WebhookEndpoint[]
 
   @@map("workspaces")
 }
@@ -126,18 +128,25 @@ model Run {
   /// The worker's lease: renewed every few seconds while it works (database clock). A running
   /// run whose heartbeat is older than the lease belongs to a dead worker and is failed.
   heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(3)
+  /// Run 4, J3: budgets a CI caller can lower (never above the worker's limits).
+  maxSteps      Int?      @map("max_steps")
+  maxSeconds    Int?      @map("max_seconds")
+  /// The API key that started the run (null: started from the dashboard).
+  apiKeyId      String?   @map("api_key_id") @db.Uuid
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  steps     Step[]
-  bugs      Bug[]
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy         User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  steps             Step[]
+  bugs              Bug[]
+  /// The workspace model this run uses; null = the worker's own (server default) model.
+  modelConfigId     String?           @map("model_config_id") @db.Uuid
+  modelConfig       ModelConfig?      @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
+  apiKey            ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  webhookDeliveries WebhookDelivery[]
 
   @@index([status, createdAt])
   @@index([workspaceId, createdAt])
   @@map("runs")
-  /// The workspace model this run uses; null = the worker's own (server default) model.
-  modelConfigId String?      @map("model_config_id") @db.Uuid
-  modelConfig   ModelConfig? @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
 }
 
 /// One thing the worker did during a run: visit a page, click, type, report a bug...
@@ -195,31 +204,31 @@ model Bug {
 }
 
 model BenchmarkResult {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider     String
-  model        String
-  gitCommit    String   @map("git_commit")
-  runsBuggy    Int      @map("runs_buggy")
-  recall       Float
-  precision    Float
-  falseAlarms  Float    @map("false_alarms")
-  avgCostUsd   Float    @map("avg_cost_usd")
-  avgDurationS Float    @map("avg_duration_s")
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider           String
+  model              String
+  gitCommit          String   @map("git_commit")
+  runsBuggy          Int      @map("runs_buggy")
+  recall             Float
+  precision          Float
+  falseAlarms        Float    @map("false_alarms")
+  avgCostUsd         Float    @map("avg_cost_usd")
+  avgDurationS       Float    @map("avg_duration_s")
   /// Recall over the planted bugs that need judgement (not findable by deterministic checks).
-  aiRecall           Float?  @map("ai_recall")
+  aiRecall           Float?   @map("ai_recall")
   /// The same scores on the holdout app (apps/demo2), which prompts are never tuned against.
-  holdoutRunsBuggy   Int?    @map("holdout_runs_buggy")
-  holdoutRecall      Float?  @map("holdout_recall")
-  holdoutAiRecall    Float?  @map("holdout_ai_recall")
-  holdoutPrecision   Float?  @map("holdout_precision")
-  holdoutFalseAlarms Float?  @map("holdout_false_alarms")
+  holdoutRunsBuggy   Int?     @map("holdout_runs_buggy")
+  holdoutRecall      Float?   @map("holdout_recall")
+  holdoutAiRecall    Float?   @map("holdout_ai_recall")
+  holdoutPrecision   Float?   @map("holdout_precision")
+  holdoutFalseAlarms Float?   @map("holdout_false_alarms")
   /// "provider/model" that matched reports to planted bugs.
   judge              String?
   /// Set when the row came from `bench --rescore`: the commit the rescore ran on.
-  rescoreCommit      String? @map("rescore_commit")
+  rescoreCommit      String?  @map("rescore_commit")
   /// Per-bug found/missed and every match decision, for spot checks.
-  details      Json     @default("{}")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  details            Json     @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([provider, createdAt])
   /// Newest results first: benchmark page, leaderboard, home page (docs/DATABASE.md).
@@ -353,4 +362,81 @@ model LoginSetup {
 
   @@unique([workspaceId, origin])
   @@map("login_setups")
+}
+
+/// A workspace's key for the public API (/api/v1). Only a SHA-256 hash of the key is stored: a
+/// key is 32 random bytes, so a fast hash is enough (no brute force can reach it) and lookups are
+/// one indexed equality. The key itself is shown once, when it's created.
+model ApiKey {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  name        String
+  /// The first characters, so people can tell keys apart ("ata_k8Fz…"). Not secret.
+  prefix      String
+  keyHash     String    @unique @map("key_hash")
+  createdById String?   @map("created_by_id") @db.Uuid
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(3)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs        Run[]
+  rateWindows ApiRateWindow[]
+
+  @@index([workspaceId, createdAt])
+  @@map("api_keys")
+}
+
+/// Requests per API key per minute: a fixed-window rate limit kept in the database, so it holds
+/// across several web servers. Incremented with one INSERT ... ON CONFLICT DO UPDATE.
+model ApiRateWindow {
+  apiKeyId    String   @map("api_key_id") @db.Uuid
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  count       Int      @default(0)
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@id([apiKeyId, windowStart])
+  @@map("api_rate_windows")
+}
+
+/// Where a workspace wants run results POSTed (run 4, J3). The signing secret is encrypted with
+/// the model-key scheme (the worker must read it to sign), shown once when created.
+model WebhookEndpoint {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  url              String
+  secretCiphertext String   @map("secret_ciphertext")
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+  @@map("webhook_endpoints")
+}
+
+/// One event for one endpoint: sent, or waiting for its next retry. The delivery log.
+model WebhookDelivery {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  endpointId     String    @map("endpoint_id") @db.Uuid
+  runId          String?   @map("run_id") @db.Uuid
+  event          String
+  payload        Json
+  /// "pending" (waiting for a first or next attempt), "delivered" or "failed" (gave up)
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  lastStatusCode Int?      @map("last_status_code")
+  lastError      String?   @map("last_error")
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  run      Run?            @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([endpointId, createdAt])
+  @@map("webhook_deliveries")
 }

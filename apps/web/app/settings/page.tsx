@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DomainList } from "@/components/domain-list";
+import { IntegrationSettings } from "@/components/integration-settings";
 import { LoginSettings } from "@/components/login-settings";
 import { ModelSettings } from "@/components/model-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { currentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatCost, formatDate, hostOf } from "@/lib/format";
+import { listApiKeys } from "@/lib/api-keys";
 import { listLoginSetups } from "@/lib/login-setups";
+import { listWebhooks } from "@/lib/webhooks";
 import { listModelConfigs } from "@/lib/model-configs";
 import { auditLog, listDomains, usageThisMonth } from "@/lib/settings-data";
 
@@ -30,13 +33,15 @@ export default async function SettingsPage() {
   const user = await currentUser();
   if (!user) redirect("/signin");
 
-  const [workspace, domains, usage, log, models, loginSetups] = await Promise.all([
+  const [workspace, domains, usage, log, models, loginSetups, apiKeys, webhooks] = await Promise.all([
     db.workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
     listDomains(user.workspaceId),
     usageThisMonth(user.workspaceId),
     auditLog(user.workspaceId),
     listModelConfigs(user.workspaceId),
     listLoginSetups(user.workspaceId),
+    listApiKeys(user.workspaceId),
+    listWebhooks(user.workspaceId),
   ]);
   const used = Math.min(usage.runs / usage.quota, 1);
 
@@ -134,6 +139,20 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <LoginSettings setups={loginSetups} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>CI integration</CardTitle>
+          <CardDescription>
+            Start runs from your pipeline with an API key, get the report as JSON or JUnit XML, and receive a signed
+            webhook when a run finishes. Examples for GitHub Actions are in <code>examples/ci</code>; the API contract
+            is at <a className="underline" href="/api/v1/openapi.json">/api/v1/openapi.json</a>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <IntegrationSettings keys={apiKeys} webhooks={webhooks} />
         </CardContent>
       </Card>
 

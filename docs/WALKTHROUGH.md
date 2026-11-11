@@ -988,3 +988,62 @@ expected for a line and also shown elsewhere passes.
 3. *How do you know it helps and isn't benchmark tuning?* Nothing in it knows any site; it is
    kept only if the holdout (never tuned against) doesn't drop and clean-build false alarms
    don't rise (MISS_ANALYSIS, run 4).
+
+## Run 4: testing apps behind a login (`login.py`, `login_checks.py`, `scan.py: guarded_browser`, `agent/loop.py`, `lib/login-setups.ts`)
+
+**What:** a workspace saves, per site, how to sign in with a test account: a login form (URL,
+username, encrypted password, optional selectors) or a recorded sign-in (Playwright storage state,
+encrypted). Before a run, the worker signs in; every browser context it opens (crawl, agent,
+each replay) is signed in. The agent never gets the credentials.
+
+**How the secrets stay secret:** the password and storage state are AES-256-GCM encrypted (the
+same scheme as model keys); views only say "saved". In the loop, the password and username are
+scrubbed from every observation, step, bug report and replay prompt (`LoginConfig.scrub`), and
+password fields are masked in every screenshot (`mask=[input[type=password]]`). Test sign-in
+stores only ok/failed and a scrubbed reason.
+
+**How the session stays alive:** logout, change/reset password and delete/close account are
+denied on every target (even the demo shops, where the normal deny list is off). The crawler
+skips logout links. If an action lands on the login page without the agent going there itself,
+the session ended: the worker signs in again (max 3) and goes back.
+
+**Why only on verified domains:** signing in submits credentials to a site. A worker that does
+that wherever a workspace says could be used to stuff credentials into someone else's login.
+
+**Weak spots:** "signed out" means "on the login URL"; an app that shows a login modal on the same
+URL isn't detected. SSO/2FA needs a recorded storage state, which expires.
+
+**Interview Q&A**
+1. *Why not give the agent the credentials and let it log in?* The model (and its provider) would
+   see them, it could type them anywhere, and a weak model fails flaky login forms. A deterministic
+   sign-in is cheaper, safer and testable.
+2. *How do you prove the password never leaks?* `test_signed_in_run.py` runs a whole signed-in run
+   and searches every stored row and every model call for the password and username.
+3. *Why scrub the username too?* It's personal data and often an email; the agent doesn't need it
+   to test, and reports get shared.
+
+## Run 4: running it from CI (`lib/api-keys.ts`, `lib/api-v1.ts`, `app/api/v1`, `openapi.json`, `webhooks.py`, `examples/ci`)
+
+**What:** API keys per workspace; `POST /api/v1/runs`, `GET /api/v1/runs/{id}`, `GET
+/api/v1/runs/{id}/report[?format=junit]`; signed webhooks when a run finishes; a CI script and a
+GitHub Actions workflow that fail the build on a chosen severity.
+
+**How:** keys are stored as SHA-256 hashes (random 256-bit keys don't need a slow hash) and looked
+up by a unique index; a per-key, per-minute counter in Postgres (one atomic upsert) rate-limits
+across servers. `startRun` is shared with the dashboard, so the API can't bypass quota or domain
+verification. JUnit maps each reported bug to a failing test case. Webhooks: deliveries are rows
+claimed with SKIP LOCKED, signed with HMAC-SHA256 over "timestamp.body", retried with backoff,
+sent through the same egress guard as the browser.
+
+**Weak spots:** a fixed window lets a burst of 2× the limit across a minute boundary; the CI
+script polls (10 s) instead of waiting on the webhook; one event type only.
+
+**Interview Q&A**
+1. *Why sign the timestamp?* Without it, a captured request verifies forever (replay). With it, the
+   receiver rejects anything older than 5 minutes.
+2. *How does the rate limit stay correct with parallel requests?* `INSERT ... ON CONFLICT DO
+   UPDATE ... RETURNING count` takes a row lock; concurrent requests queue on it and each sees its
+   own count (tested with 8 parallel requests against a limit of 5).
+3. *What stops a webhook from hitting your internal network?* The URL is checked after DNS by the
+   same guard as the browser, and the POST goes through the guard proxy, which connects only to the
+   address it checked, so DNS can't change its answer in between.

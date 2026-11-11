@@ -47,6 +47,7 @@ from worker.runner import LEASE_S, ExecuteFn, process_next
 from worker.safety.secrets import RedactingFilter
 from worker.scan import passive_scan
 from worker.storage import LocalStorage
+from worker.webhooks import deliver_due
 
 POLL_INTERVAL_S = 1.0
 STALE_GRACE_S = 300
@@ -154,6 +155,7 @@ def main(argv: list[str] | None = None) -> None:
             last_recovery = time.monotonic()
         # A "Test sign-in" is quick and someone is waiting for it: before the next run.
         checked = process_login_check(sessions, settings)
+        deliver_due(sessions, settings)  # webhooks whose time has come
         busy = process_next(sessions, llm, execute, client_for, skip_benchmark=True)
         if not busy and not checked:
             time.sleep(POLL_INTERVAL_S)

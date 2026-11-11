@@ -19,6 +19,9 @@ export function isUuid(value: string): boolean {
 
 type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
+/** Set by the public API: the key that started the run, and budgets that lower the worker's. */
+export type RunExtras = { apiKeyId?: string | null; maxSteps?: number | null; maxSeconds?: number | null };
+
 export async function createRun(
   workspaceId: string,
   userId: string | null,
@@ -26,6 +29,7 @@ export async function createRun(
   meta: Record<string, string> = {},
   client: Tx | typeof db = db,
   modelConfigId: string | null = null,
+  extras: RunExtras = {},
 ) {
   const run = await client.run.create({
     data: {
@@ -35,6 +39,9 @@ export async function createRun(
       mode: input.mode,
       focus: input.focus,
       modelConfigId,
+      apiKeyId: extras.apiKeyId ?? null,
+      maxSteps: extras.maxSteps ?? null,
+      maxSeconds: extras.maxSeconds ?? null,
     },
   });
   await client.auditLog.create({
@@ -68,6 +75,7 @@ export async function startRun(
   context: RequestContext,
   body: { targetUrl?: unknown; mode?: unknown; focus?: unknown; modelConfigId?: unknown },
   ip: string,
+  extras: RunExtras = {},
 ): Promise<StartResult> {
   const parsed = parseRunInput(body, await verifiedOrigins(context.workspaceId));
   if (!parsed.ok) return { ok: false, status: 400, errors: parsed.errors };
@@ -112,7 +120,8 @@ export async function startRun(
     const overQuota = quotaError(used, locked[0].monthly_run_quota);
     if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
 
-    const run = await createRun(context.workspaceId, context.userId, input, { ip }, tx, modelConfigId);
+    const meta: Record<string, string> = extras.apiKeyId ? { ip, apiKeyId: extras.apiKeyId } : { ip };
+    const run = await createRun(context.workspaceId, context.userId, input, meta, tx, modelConfigId, extras);
     return { ok: true, id: run.id };
   });
 }

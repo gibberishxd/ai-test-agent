@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from worker.db.models import Run, RunStatus
 from worker.llm import LLMClient
 from worker.queue import Heartbeat, claim_next_run, transition
+from worker.webhooks import enqueue_run_finished
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,8 @@ def process_next(
             log.exception("run %s failed", run.id)
             if _still_ours(session, run):
                 transition(run, RunStatus.FAILED, error=f"{type(error).__name__}: {error}")
+                session.commit()
+                enqueue_run_finished(session, run)
             session.commit()
             return True
 
@@ -75,6 +78,7 @@ def process_next(
         final = RunStatus.STOPPED if run.stop_requested else RunStatus.DONE
         transition(run, final)
         session.commit()
+        enqueue_run_finished(session, run)  # the workspace's webhooks, sent by deliver_due
         log.info("run %s %s", run.id, final)
         return True
 

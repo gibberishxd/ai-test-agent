@@ -24,6 +24,13 @@ erDiagram
     workspaces ||--o{ domains : "verifies"
     workspaces ||--o{ model_configs : "brings"
     workspaces ||--o{ audit_log : "records"
+    workspaces ||--o{ login_setups : "signs in with"
+    workspaces ||--o{ api_keys : "issues"
+    workspaces ||--o{ webhook_endpoints : "notifies"
+    api_keys ||--o{ api_rate_windows : "counted in"
+    api_keys |o--o{ runs : "started"
+    webhook_endpoints ||--o{ webhook_deliveries : "log"
+    runs |o--o{ webhook_deliveries : "about"
     users ||--o{ accounts : "signs in with"
     users |o--o{ runs : "started"
     users |o--o{ audit_log : "did"
@@ -132,6 +139,45 @@ as associated data, so a ciphertext copied into another workspace's row fails to
 - Not enforced by the database: "at most one default per workspace" (the API clears the old
   default in the same transaction). A partial unique index
   (`UNIQUE (workspace_id) WHERE is_default`) would make it a database rule; noted, not done.
+
+### login_setups — how the worker signs in to an app (run 4)
+One row per workspace and target origin (`UNIQUE (workspace_id, origin)`): a login form (`kind =
+'form'`: `login_url`, `username`, `password_ciphertext`, optional selectors) or a recorded sign-in
+(`kind = 'storage_state'`: `storage_state_ciphertext`). The password and the storage state are
+AES-256-GCM encrypted like model keys (workspace id as associated data, so a ciphertext copied into
+another workspace's row doesn't decrypt). The username is plain: settings show it so people know
+which test account it is; it is still scrubbed from everything the model or a report sees.
+`check_requested_at` is a tiny job queue for "Test sign-in": the web sets it, a worker claims the
+row `FOR UPDATE SKIP LOCKED`, signs in, writes `last_check` (`{ok, detail, checkedAt}`, never a
+secret) and clears it. No index on it: a workspace has a handful of setups.
+
+### api_keys — keys for the public API (run 4)
+Only `key_hash` (SHA-256, `UNIQUE`) is stored, never the key. A password needs a slow hash
+because people choose guessable ones; a key is 32 random bytes, so nothing can brute-force it
+and a fast hash plus a unique index makes every request one equality lookup. `prefix` (first 12
+characters) lets people tell keys apart; `revoked_at` ends a key at once while keeping the row for
+the audit trail; `last_used_at` is written at most once a minute. Index `(workspace_id,
+created_at)` for the settings list. `runs.api_key_id` (`ON DELETE SET NULL`) records which key
+started a run.
+
+### api_rate_windows — requests per key per minute (run 4)
+Primary key `(api_key_id, window_start)`. Each request runs one statement:
+`INSERT ... VALUES (key, minute, 1) ON CONFLICT (api_key_id, window_start) DO UPDATE SET count =
+count + 1 RETURNING count`. The row lock taken by the upsert serialises parallel requests, so 8
+simultaneous requests against a limit of 5 let exactly 5 through (tested), and it works across
+several web servers, unlike a counter in memory. Old windows are removed by the retention job.
+
+### webhook_endpoints, webhook_deliveries — signed run notifications (run 4)
+An endpoint is a URL and an encrypted signing secret (the worker must read it to sign, so it can't
+be hashed). A delivery is one event for one endpoint: `status` (`pending` → `delivered` or
+`failed`), `attempts`, `next_attempt_at`, `last_status_code`, `last_error`. The worker claims due
+deliveries with `WHERE status = 'pending' AND next_attempt_at <= now() ... FOR UPDATE SKIP LOCKED`,
+served by the index `(status, next_attempt_at)`; `(endpoint_id, created_at)` serves "the last 10
+deliveries" in settings. `run_id` is `ON DELETE SET NULL`: the log outlives a deleted run.
+
+### runs: budgets from the API (run 4)
+`max_steps` and `max_seconds` (nullable): a CI caller may lower the worker's limits for one run,
+never raise them (`run_limits()` takes the smaller value).
 
 ## Keys and constraints, in one place
 - **Primary keys:** `id uuid` everywhere (except `verification_tokens`, keyed by its unique
@@ -268,6 +314,8 @@ Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
 | `20261110130000_model_configs` | workspace models, `runs.model_config_id` |
 | `20261111010000_run_lease` | `runs.heartbeat_at` (run 3, the lease) |
 | `20261111020000_benchmark_results_newest` | `benchmark_results(created_at)` index (run 3) |
+| `20261111100000_login_setups` | sign-in setups for apps behind a login (run 4, J2) |
+| `20261111120000_public_api_webhooks` | API keys, rate windows, run budgets, webhook endpoints and deliveries (run 4, J3) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker

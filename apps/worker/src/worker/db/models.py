@@ -123,6 +123,11 @@ class Run(Base):
     started_at: Mapped[datetime | None] = mapped_column(_timestamp())
     finished_at: Mapped[datetime | None] = mapped_column(_timestamp())
     heartbeat_at: Mapped[datetime | None] = mapped_column(_timestamp())  # the worker's lease
+    # Run 4, J3: budgets a CI caller can lower (never raise above the worker's limits), and the
+    # API key that started the run.
+    max_steps: Mapped[int | None]
+    max_seconds: Mapped[int | None]
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("api_keys.id"))
 
     steps: Mapped[list["Step"]] = relationship(back_populates="run", order_by="Step.index")
     bugs: Mapped[list["Bug"]] = relationship(back_populates="run")
@@ -306,3 +311,63 @@ class LoginSetup(Base):
     last_check: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _created_at()
+
+
+class ApiKey(Base):
+    """A workspace's key for the public API (web: lib/api-keys.ts). Only a SHA-256 hash is
+    stored; the key is shown once when it's created."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    name: Mapped[str]
+    prefix: Mapped[str]  # the first characters, to tell keys apart ("ata_k8Fz…")
+    key_hash: Mapped[str]
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    revoked_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    created_at: Mapped[datetime] = _created_at()
+
+
+class ApiRateWindow(Base):
+    """Requests per API key per minute (a fixed-window rate limit that works across servers)."""
+
+    __tablename__ = "api_rate_windows"
+
+    api_key_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("api_keys.id"), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(_timestamp(), primary_key=True)
+    count: Mapped[int] = mapped_column(server_default=text("0"))
+
+
+class WebhookEndpoint(Base):
+    """Where a workspace wants run results POSTed. The signing secret is AES-GCM encrypted
+    (the worker needs it to sign), shown once when created."""
+
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    url: Mapped[str]
+    secret_ciphertext: Mapped[str]
+    enabled: Mapped[bool] = mapped_column(server_default=text("true"))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class WebhookDelivery(Base):
+    """One event sent (or being retried) to one endpoint: the delivery log."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[uuid.UUID] = _id()
+    endpoint_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("webhook_endpoints.id"))
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id"))
+    event: Mapped[str]
+    payload: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(_timestamp(), server_default=func.now())
+    last_status_code: Mapped[int | None]
+    last_error: Mapped[str | None]
+    delivered_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    created_at: Mapped[datetime] = _created_at()

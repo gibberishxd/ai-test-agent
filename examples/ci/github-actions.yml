@@ -1,0 +1,39 @@
+# Copy into your repository as .github/workflows/ai-test-agent.yml.
+# Runs AI Test Agent against your staging site after each deploy (or on demand) and fails the
+# job when a bug of severity "high" or worse is found. The JUnit report shows in the job summary.
+#
+# Needs two repository settings:
+#   secrets.ATA_API_KEY   a workspace API key (AI Test Agent → Settings → CI integration)
+#   vars.ATA_API_URL      the AI Test Agent address, e.g. https://ata.example.com
+#   vars.STAGING_URL      the site to test (interactive runs need a verified domain)
+#
+# This file is an example: this repository's own CI never runs it.
+name: AI Test Agent
+
+on:
+  workflow_dispatch:
+  deployment_status:
+
+jobs:
+  test-staging:
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Run AI Test Agent
+        env:
+          ATA_API_URL: ${{ vars.ATA_API_URL }}
+          ATA_API_KEY: ${{ secrets.ATA_API_KEY }}
+        run: >
+          node examples/ci/ata-run.mjs "${{ vars.STAGING_URL }}"
+          --mode interactive --fail-on high --max-minutes 10 --junit ata-report.xml
+      - name: Show the findings as test results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: ata-report.xml
+          check_name: AI Test Agent

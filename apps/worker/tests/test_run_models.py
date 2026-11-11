@@ -152,3 +152,16 @@ def test_the_run_records_the_workspace_model(sessions, workspace):
     with sessions() as session:
         stored = session.get(Run, run.id)
         assert (stored.provider, stored.model) == ("openai-compat", "google/gemini-3-flash")
+
+
+def test_a_run_can_lower_the_workers_budgets_but_never_raise_them():
+    # Run 4, J3: a CI caller sets max_steps / max_minutes through the API.
+    from types import SimpleNamespace
+
+    from worker.config import Settings
+    from worker.execute import run_limits
+
+    settings = Settings(_env_file=None, max_steps=40, max_run_seconds=480)
+    assert run_limits(settings, SimpleNamespace(max_steps=None, max_seconds=None)) == (40, 480)
+    assert run_limits(settings, SimpleNamespace(max_steps=10, max_seconds=120)) == (10, 120)
+    assert run_limits(settings, SimpleNamespace(max_steps=100, max_seconds=3600)) == (40, 480)
