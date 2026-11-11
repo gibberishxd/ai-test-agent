@@ -313,10 +313,10 @@ def wait_for(sessions: sessionmaker[Session], run_ids: list[str], process) -> li
 
 
 def report_bugs(session: Session, run_id: str) -> list[Bug]:
-    """What the run reports to the user: every bug that wasn't dismissed."""
+    """What the run reports to the user: every bug that wasn't dismissed or suppressed."""
     return (
         session.query(Bug)
-        .filter(Bug.run_id == run_id, Bug.status != "dismissed")
+        .filter(Bug.run_id == run_id, Bug.status != "dismissed", Bug.suppressed.is_(False))
         .order_by(Bug.created_at)
         .all()
     )

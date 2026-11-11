@@ -821,3 +821,22 @@ numbers are the real test (Needs me).
   stop processes by PID only, never by a name pattern.
 - The third J1 benchmark is labelled a0af21e but also loaded the uncommitted J3 code (API,
   webhooks, run budgets): none of it changes the agent (no budgets or webhooks on benchmark runs).
+
+## D72. Fingerprints and triage that follows them (run 4, J4)
+- **Fingerprint** = SHA-256(route with ids normalised | category | key), first 16 hex. The key is
+  the most stable thing that names the problem: the failing request (method, path, status), the
+  console message without numbers or hashes, the axe rule, the broken link, the element an agent
+  report acted on, else the title's words (sorted, no numbers or stopwords). Same message on two
+  pages → two bugs; a reworded report on the same element → one bug. Set by a `before_insert`
+  hook; older rows backfilled.
+- **Comparison** with the target's previous finished run, computed when the page is read (new,
+  still present, fixed). A run in progress shows nothing as fixed.
+- **Triage** per workspace, origin and fingerprint (current state in `finding_triage`, history in
+  the audit log). False positives are suppressed in later runs by the worker (`bugs.suppressed`),
+  left out of the report, the API, JUnit and webhooks, and counted per model
+  (`modelPrecision`, per workspace). Whether counts also go into an anonymous global number is
+  the owner's open question 4.
+- **Alternatives:** an embedding similarity between titles (costs a model call per finding and is
+  hard to explain); storing comparisons (they change when triage changes; computing them from two
+  runs is cheap); a `bug_status` enum value for suppressed (it would mix with verification's
+  dismissals and the benchmark funnel).

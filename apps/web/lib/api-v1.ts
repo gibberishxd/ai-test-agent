@@ -58,6 +58,7 @@ type ApiBug = {
   expected: string | null;
   actual: string | null;
   reproSteps: unknown; // a JSON column: a list of strings
+  suppressed?: boolean; // triaged as a false positive earlier (run 4, J4)
 };
 type ApiRun = {
   id: string;
@@ -79,7 +80,7 @@ const steps = (value: unknown): string[] => (Array.isArray(value) ? value.map(St
 
 /** What a run reports to its user: every bug that verification didn't dismiss. */
 function reported(run: ApiRun): ApiBug[] {
-  return run.bugs.filter((bug) => bug.status !== "dismissed");
+  return run.bugs.filter((bug) => bug.status !== "dismissed" && !bug.suppressed);
 }
 
 export function apiStatus(run: ApiRun, baseUrl: string) {

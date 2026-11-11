@@ -26,6 +26,8 @@ type Props = {
   readOnly?: boolean;
   /** Signed-in members of the run's workspace can create and revoke share links. */
   canShare?: boolean;
+  /** Members can mark findings confirmed, false positive or won't fix. */
+  canTriage?: boolean;
   shareToken?: string | null;
   /** On a shared report: the token that lets this viewer load the run's screenshots. */
   filesToken?: string | null;
@@ -35,6 +37,7 @@ export function RunView({
   initial,
   readOnly = false,
   canShare = false,
+  canTriage = false,
   shareToken = null,
   filesToken = null,
 }: Props) {
@@ -61,7 +64,8 @@ export function RunView({
   };
 
   const runUrl = typeof window === "undefined" ? `/runs/${run.id}` : window.location.href;
-  const shown = run.bugs.filter((bug) => bug.status !== "dismissed").sort(bySeverity);
+  const shown = run.bugs.filter((bug) => bug.status !== "dismissed" && !bug.suppressed).sort(bySeverity);
+  const history = run.history ?? null;
   const dismissed = run.bugs.filter((bug) => bug.status === "dismissed");
   const counts = Object.fromEntries(SEVERITIES.map((s) => [s, shown.filter((b) => b.severity === s).length]));
 
@@ -139,9 +143,45 @@ export function RunView({
         ) : (
           <div className="grid gap-4">
             {shown.map((bug) => (
-              <BugCard key={bug.id} bug={bug} runUrl={runUrl} targetUrl={run.targetUrl} filesToken={filesToken} />
+              <BugCard
+                key={bug.id}
+                bug={bug}
+                runUrl={runUrl}
+                targetUrl={run.targetUrl}
+                filesToken={filesToken}
+                change={history?.previousRunId ? history.change[bug.id] : undefined}
+                triage={bug.fingerprint ? history?.triage[bug.fingerprint] : undefined}
+                canTriage={canTriage && !readOnly && Boolean(bug.fingerprint)}
+              />
             ))}
           </div>
+        )}
+        {history && history.fixed.length > 0 && (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-fit" data-testid="fixed-since">
+                <ChevronDown /> Fixed since the previous run ({history.fixed.length})
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ul className="mt-2 grid gap-2 text-sm">
+                {history.fixed.map((bug, i) => (
+                  <li key={i} className="rounded-lg border p-3">
+                    <p className="font-medium">{bug.title}</p>
+                    <p className="text-muted-foreground">
+                      {bug.severity} · {bug.pageUrl}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+        {history && history.suppressed > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {history.suppressed} finding{history.suppressed === 1 ? " was" : "s were"} hidden: your team marked{" "}
+            {history.suppressed === 1 ? "it" : "them"} as a false positive in an earlier run.
+          </p>
         )}
         {dismissed.length > 0 && (
           <Collapsible>

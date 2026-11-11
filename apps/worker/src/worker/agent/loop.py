@@ -613,8 +613,13 @@ class AgentRun:
             expected=redact(str(args.get("expected") or "")) or None,
             actual=redact(str(args.get("actual") or "")) or None,
             repro_steps=repro,
-            # The step where the bug was reported: replay repeats every action up to here.
-            evidence={"observed": redact(str(args.get("evidence") or "")), "reported_at": index},
+            # The step where the bug was reported: replay repeats every action up to here. The
+            # element of its last step keys the fingerprint (a reworded report stays one bug).
+            evidence={
+                "observed": redact(str(args.get("evidence") or "")),
+                "reported_at": index,
+                **self._last_element(step_ids, steps),
+            },
             reasoning=redact(str(args.get("reasoning") or "")) or None,
             step_indexes=step_ids,
             source="agent",
@@ -624,6 +629,14 @@ class AgentRun:
         self.memory.bugs.append(title)
         self.on_bug(bug)
         return "bug recorded"
+
+    @staticmethod
+    def _last_element(step_ids: list[int], steps: dict) -> dict:
+        for i in reversed(step_ids):
+            element = steps[i].element if i in steps else None
+            if element and element.get("name"):
+                return {"element": {"role": element.get("role"), "name": element["name"]}}
+        return {}
 
     # --- helpers -----------------------------------------------------------------------------
 

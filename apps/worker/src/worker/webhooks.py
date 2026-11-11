@@ -67,7 +67,7 @@ def run_payload(session: Session, run: Run) -> dict:
     reported = [
         b
         for b in session.scalars(select(Bug).where(Bug.run_id == run.id))
-        if b.status != "dismissed"
+        if b.status != "dismissed" and not b.suppressed
     ]
     duration = (
         round((run.finished_at - run.started_at).total_seconds())

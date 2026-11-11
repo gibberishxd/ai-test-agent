@@ -31,6 +31,7 @@ erDiagram
     api_keys |o--o{ runs : "started"
     webhook_endpoints ||--o{ webhook_deliveries : "log"
     runs |o--o{ webhook_deliveries : "about"
+    workspaces ||--o{ finding_triage : "decides"
     users ||--o{ accounts : "signs in with"
     users |o--o{ runs : "started"
     users |o--o{ audit_log : "did"
@@ -175,6 +176,21 @@ deliveries with `WHERE status = 'pending' AND next_attempt_at <= now() ... FOR U
 served by the index `(status, next_attempt_at)`; `(endpoint_id, created_at)` serves "the last 10
 deliveries" in settings. `run_id` is `ON DELETE SET NULL`: the log outlives a deleted run.
 
+### bugs: fingerprint and suppressed; finding_triage (run 4, J4)
+`bugs.fingerprint` (16 hex characters) recognises the same bug in later runs of a target:
+SHA-256 over the page route with ids normalised, the category and a key (failing request,
+message without numbers, axe rule, link, or the element an agent report was about). Set for
+every insert by a SQLAlchemy `before_insert` hook, so no code path can forget it; older rows were
+filled by `uv run worker backfill-fingerprints`. `bugs.suppressed`: hidden because the workspace
+triaged that fingerprint as a false positive; set by the worker when a run finishes.
+
+`finding_triage` holds the current decision per `(workspace_id, origin, fingerprint)` (`UNIQUE`,
+which also serves the lookup "decisions for these fingerprints on this site"). `state` is limited
+by a CHECK constraint to `confirmed`, `false_positive`, `wont_fix` (Prisma can't express CHECKs;
+the migration adds it). History (who changed what, when) is in `audit_log` (`triage.changed`).
+Comparing with the previous run reads that run's bugs by `run_id` (indexed); no index on
+`bugs.fingerprint` is needed because fingerprints are only compared within two runs.
+
 ### runs: budgets from the API (run 4)
 `max_steps` and `max_seconds` (nullable): a CI caller may lower the worker's limits for one run,
 never raise them (`run_limits()` takes the smaller value).
@@ -316,6 +332,7 @@ Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
 | `20261111020000_benchmark_results_newest` | `benchmark_results(created_at)` index (run 3) |
 | `20261111100000_login_setups` | sign-in setups for apps behind a login (run 4, J2) |
 | `20261111120000_public_api_webhooks` | API keys, rate windows, run budgets, webhook endpoints and deliveries (run 4, J3) |
+| `20261111140000_fingerprints_triage` | `bugs.fingerprint`, `bugs.suppressed`, `finding_triage` with a CHECK on `state` (run 4, J4) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker

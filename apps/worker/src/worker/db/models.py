@@ -180,6 +180,10 @@ class Bug(Base):
     )
     dismiss_reason: Mapped[str | None]
     duplicate_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Run 4, J4: the same bug in later runs of a target has the same fingerprint (fingerprint.py);
+    # `suppressed`: hidden because the workspace triaged this fingerprint as a false positive.
+    fingerprint: Mapped[str | None]
+    suppressed: Mapped[bool] = mapped_column(server_default=text("false"))
     created_at: Mapped[datetime] = _created_at()
 
     run: Mapped[Run] = relationship(back_populates="bugs")
@@ -371,3 +375,21 @@ class WebhookDelivery(Base):
     last_error: Mapped[str | None]
     delivered_at: Mapped[datetime | None] = mapped_column(_timestamp())
     created_at: Mapped[datetime] = _created_at()
+
+
+class FindingTriage(Base):
+    """A workspace's decision about one finding (by fingerprint, per target origin), which
+    follows the finding into later runs (web: lib/triage.ts)."""
+
+    __tablename__ = "finding_triage"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    origin: Mapped[str]
+    fingerprint: Mapped[str]
+    state: Mapped[str]  # confirmed, false_positive, wont_fix
+    comment: Mapped[str | None]
+    title: Mapped[str]  # the finding's title when it was triaged, for the list
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()

@@ -74,6 +74,7 @@ model Workspace {
   loginSetups  LoginSetup[]
   apiKeys      ApiKey[]
   webhooks     WebhookEndpoint[]
+  triage       FindingTriage[]
 
   @@map("workspaces")
 }
@@ -195,6 +196,11 @@ model Bug {
   status        BugStatus @default(candidate)
   dismissReason String?   @map("dismiss_reason")
   duplicateOfId String?   @map("duplicate_of_id") @db.Uuid
+  /// Run 4, J4: the same bug in later runs of a target has the same fingerprint (route with ids
+  /// normalised + category + the element or message; apps/worker/src/worker/fingerprint.py).
+  fingerprint   String?
+  /// Hidden from the report because the workspace triaged this fingerprint as a false positive.
+  suppressed    Boolean   @default(false)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -439,4 +445,27 @@ model WebhookDelivery {
   @@index([status, nextAttemptAt])
   @@index([endpointId, createdAt])
   @@map("webhook_deliveries")
+}
+
+/// A workspace's decision about a finding, by fingerprint and target origin (run 4, J4). It
+/// follows the finding into later runs: a false positive is suppressed there (and counted).
+/// Who changed it and when is in the audit log.
+model FindingTriage {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  origin      String
+  fingerprint String
+  /// "confirmed", "false_positive" or "wont_fix"
+  state       String
+  comment     String?
+  /// The finding's title when it was triaged, for lists.
+  title       String
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, origin, fingerprint])
+  @@map("finding_triage")
 }

@@ -47,6 +47,7 @@ from worker.runner import LEASE_S, ExecuteFn, process_next
 from worker.safety.secrets import RedactingFilter
 from worker.scan import passive_scan
 from worker.storage import LocalStorage
+from worker.triage import backfill_fingerprints
 from worker.webhooks import deliver_due
 
 POLL_INTERVAL_S = 1.0
@@ -88,6 +89,9 @@ def main(argv: list[str] | None = None) -> None:
     again = sub.add_parser("reverify", help="replay an old run's agent reports (read-only)")
     again.add_argument("run_id", help="the run's id (a unique prefix is enough)")
     again.add_argument("--judge", action="store_true", help="also ask JUDGE_* whether it shows")
+    sub.add_parser(
+        "backfill-fingerprints", help="give findings stored before run 4 their fingerprint (J4)"
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -104,6 +108,11 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "reverify":
         reverify(settings, args.run_id, args.judge)
+        return
+
+    if args.command == "backfill-fingerprints":
+        with make_session_factory(make_engine(settings))() as session:
+            log.info("fingerprinted %d older finding(s)", backfill_fingerprints(session))
         return
 
     llm = make_client(settings)

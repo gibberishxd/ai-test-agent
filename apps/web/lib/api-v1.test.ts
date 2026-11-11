@@ -65,3 +65,11 @@ describe("junitReport", () => {
     expect(xml).toContain('<testcase name="No bugs found"');
   });
 });
+
+describe("suppressed findings", () => {
+  it("are left out of the API report and JUnit, like dismissed ones", () => {
+    const suppressed = { ...run, bugs: [{ ...run.bugs[0], suppressed: true }] };
+    expect(apiReport(suppressed).bugs).toEqual([]);
+    expect(junitReport(suppressed)).toContain('failures="0"');
+  });
+});

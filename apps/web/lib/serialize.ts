@@ -3,6 +3,7 @@
  * Dates become ISO strings; only fields the UI needs are included.
  */
 import type { RunDetail } from "@/lib/runs";
+import type { RunHistory } from "@/lib/triage";
 
 export type StepView = {
   index: number;
@@ -33,6 +34,10 @@ export type BugView = {
   source: string;
   status: string;
   dismissReason: string | null;
+  /** Run 4, J4: the same bug in later runs has the same fingerprint. */
+  fingerprint: string | null;
+  /** Hidden: the workspace triaged this fingerprint as a false positive. */
+  suppressed: boolean;
 };
 
 export type RunView = {
@@ -56,6 +61,8 @@ export type RunView = {
   finishedAt: string | null;
   steps: StepView[];
   bugs: BugView[];
+  /** Compared with the target's previous run, and the workspace's triage (members only). */
+  history?: RunHistory | null;
 };
 
 const iso = (date: Date | null) => (date ? date.toISOString() : null);
@@ -108,6 +115,8 @@ export function serializeRun(run: RunDetail): RunView {
       source: bug.source,
       status: bug.status,
       dismissReason: bug.dismissReason,
+      fingerprint: bug.fingerprint,
+      suppressed: bug.suppressed,
     })),
   };
 }

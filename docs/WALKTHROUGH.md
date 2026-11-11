@@ -1047,3 +1047,28 @@ script polls (10 s) instead of waiting on the webhook; one event type only.
 3. *What stops a webhook from hitting your internal network?* The URL is checked after DNS by the
    same guard as the browser, and the POST goes through the guard proxy, which connects only to the
    address it checked, so DNS can't change its answer in between.
+
+## Run 4: bugs across releases (`fingerprint.py`, `triage.py`, `lib/triage.ts`, `components/bug-card.tsx`)
+
+**What:** every finding has a fingerprint; the run page marks each finding New or Still present
+compared with the target's previous run and lists what was Fixed. Members triage a finding
+(confirmed, false positive, won't fix, comment); the decision follows the fingerprint into later
+runs, where false positives are hidden and counted per model.
+
+**How:** fingerprint = hash(route with ids → `:id` | category | key). Keys are chosen to survive
+run-to-run noise: numbers and bundle hashes are removed from messages, agent reports are keyed by
+the element they acted on, so a reworded title stays the same bug. The worker sets it on insert
+(SQLAlchemy hook) and suppresses triaged false positives at the end of a run; the web computes
+new/still/fixed from two runs' fingerprints.
+
+**Weak spots:** a page whose ids are slugs (`/products/desk-lamp`) is one route per product, so the
+same bug on two products is two findings; an agent report without an element falls back to title
+words, which a very different wording breaks.
+
+**Interview Q&A**
+1. *Why not use the title?* Agent titles change wording every run, deterministic titles contain ids
+   and numbers. The element or message, normalised, is the stable part.
+2. *Why is the same message on two pages two bugs?* A developer fixes a page, not a message; and a
+   false positive on one page shouldn't hide a real error on another.
+3. *What does triage teach you?* A false-positive rate per model on real customer sites, not only on
+   our benchmark, which is the number a buyer cares about.

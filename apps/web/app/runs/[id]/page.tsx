@@ -5,6 +5,7 @@ import { RunView } from "@/components/run-view";
 import { hostOf } from "@/lib/format";
 import { getRun } from "@/lib/runs";
 import { serializeRun } from "@/lib/serialize";
+import { runHistory } from "@/lib/triage";
 import { currentContext, currentWorkspaceId } from "@/lib/workspace";
 
 export async function generateMetadata(props: PageProps<"/runs/[id]">): Promise<Metadata> {
@@ -21,7 +22,12 @@ export default async function RunPage(props: PageProps<"/runs/[id]">) {
   if (!run) notFound();
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
-      <RunView initial={serializeRun(run)} canShare={context.signedIn} shareToken={run.shareToken} />
+      <RunView
+        initial={{ ...serializeRun(run), history: await runHistory(context.workspaceId, run) }}
+        canShare={context.signedIn}
+        canTriage={context.signedIn}
+        shareToken={run.shareToken}
+      />
     </main>
   );
 }
