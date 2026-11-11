@@ -21,7 +21,7 @@ Runs read (all on the buggy apps; step logs in the database, run ids below):
 | R2 | gemma4:12b | run 2 after D52 (commit 21e5669) | shop 804c2a85, e2ccf43f, d750ccfc; holdout d712b435, fba800a4 | 480 s |
 | S | Sonnet via claude-cli | run 2 (commit 0124950) | shop be495c9f | 480 s |
 | R3a | gemma4:12b | run 3 after the replay fix (f1bf08a; the result row says 984755e, see D58) | shop 6f8600fc, 88dafc6f, 906111fd; holdout e9a9fe78, 7c8f8521 | 1200 s |
-| R3b | gemma4:12b | run 3 with D58–D60 | see "After the changes" below | 1200 s |
+| R3b | gemma4:12b | run 3 with D58–D60 (984755e) | shop 9590b85f (failed at step 31), a0e4c761, d52e106d; holdout 73b945f8, ab273f55 (failed at step 17) | 1200 s |
 
 How "did it trigger the bug" was judged: by reading what the agent typed and clicked, and on
 which page (for example, the dates it typed into a booking form and the nights the page then
@@ -91,4 +91,59 @@ So the verifier is no longer what limits the score. The agent's exploration is.
 
 ## After the changes (R3b)
 
-(Filled in when the second Gemma benchmark finishes.)
+Result row `f06138df` (commit 984755e: D58–D60, before D61). Three of the seven runs ended
+early on an Ollama `ReadTimeout` (one model call took over 300 s): shop 9590b85f, holdout
+ab273f55 and the clean holdout run 746e58ee. Their deterministic findings still count, and the
+benchmark still counts them as buggy runs, so the AI-only numbers below are slightly
+pessimistic. D61 (committed after this benchmark started) now ends such a run cleanly instead.
+
+**Technique use** (each run, agent steps only):
+
+| Runs | double_click | reload | mobile viewport | notes | reports |
+|---|---|---|---|---|---|
+| R3a, 5 buggy runs | 0 | 0 | 0 | 0–1 | 0–1 |
+| R3b, 5 buggy + clean runs that got past step ~20 (5 of 7) | **1 in each** | **1 in each** | **1 in each** | 0–1 | 0–1 |
+
+D59 works as intended at the level it acts on: every run that lived long enough used each
+technique, where 11 earlier Gemma runs never did. But it uses each one exactly once and then
+moves on: it treats the list as a checklist to clear, not as ideas to apply where they fit
+(the mobile viewport was set on /profile or the home page, never on the long product's page).
+
+**Per bug: did the agent trigger it, and did it report it?** (shop: 3 runs, holdout: 2)
+
+| Bug | R3a triggered | R3b triggered | R3b reported |
+|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0/3 | **2/3** | 0 |
+| Shop 6. Invalid email at checkout | 0/3 | 0/3 | 0 |
+| Shop 7. Discount twice on double click | 0/3 | 1/3 (with a made-up code, so the bug can't show) | 0 |
+| Shop 8. Save changes does nothing | 2/3 | 3/3 | **0** (was 2/3) |
+| Shop 9. Wool Socks $NaN | always on screen | always on screen | **2/3** (was 0/3) |
+| Shop 10. Long name on mobile | 0/3 | 0/3 | 0 |
+| Shop 11. Session survives logout + reload | 0/3 | **3/3** | 0 |
+| Shop 12. Wrong-password error placement | 0/3 | 0/3 | 0 |
+| Holdout 3. One night charged | 0/2 | **2/2** | 0 |
+| Holdout 4. Check-out before check-in | 0/2 | **2/2** | 0 |
+| Holdout 5. Double-click Book now | 0/2 | **1/2** | 0 |
+| Holdout 6. Room name on mobile | 0/2 | 0/2 | 0 |
+
+**What changed:**
+
+- D60 (notes aren't reports) did what it was for: bug 9 went from "noted, not reported" in
+  most runs to reported in 2 of 3.
+- D59 moved most misses from "never triggered" to **"triggered, didn't recognise it"**: 7 of
+  the 12 AI-only bugs were on screen at least once, versus 1 before. Gemma clicks Save after
+  changing the name, reloads after logging out and lands logged in, books a stay with check-out
+  before check-in, and then simply carries on.
+- The headline numbers barely moved: shop AI-only 8% (bug 9 in 2/3, where R3a had bug 8 in
+  2/3), shop recall 39%, holdout AI-only 0%, recall 33%, precision 100%, 0 false alarms,
+  17 + 8 reports with none discarded. Bug 8 being missed this time is run-to-run variance in
+  what Gemma chooses to report, not a regression in replay (no report was discarded).
+- Holdout did not drop (0% → 0%, recall 33% → 33%), so D59 and D60 stay, per the run plan.
+
+**So the next limit is recognition, not exploration.** The agent now reaches the bug states;
+a 12B model does not compare what it sees with what it expected. Generic ideas, not tried
+here (each is AI-core work for the owner): ask the model after each state-changing action for
+"what did you expect, what happened" in one line before the next action (an expectation check
+that a report can be built from); or let the screenshot reviewer that the passive scan
+already has look at the screens right after a technique step. Sonnet already does the
+comparison without help (it reported 7 things in one run), so the H7 run is the reference.
