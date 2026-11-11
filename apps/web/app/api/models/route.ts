@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { createModelConfig, listModelConfigs } from "@/lib/model-configs";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
-import { currentContext } from "@/lib/workspace";
+import { authorize, currentContext } from "@/lib/workspace";
 
 /** The workspace's models. Keys never leave the server: only "•••• last4". */
 export async function GET() {
@@ -11,8 +11,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in to add models." }, { status: 401 });
+  const auth = await authorize("models.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   let key: Buffer;
   try {

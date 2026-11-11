@@ -6,6 +6,7 @@
  * "Test connection" result, because the new key has to pass it again.
  */
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import type { ProbeResult } from "@/lib/model-probe";
 import { encryptSecret, lastFour } from "@/lib/secret-box";
 
@@ -113,7 +114,7 @@ export function toView(row: Row): ModelConfigView {
 }
 
 export async function listModelConfigs(workspaceId: string): Promise<ModelConfigView[]> {
-  const rows = await db.modelConfig.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
+  const rows = await tenantDb(workspaceId).modelConfig.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
   return rows.map(toView);
 }
 

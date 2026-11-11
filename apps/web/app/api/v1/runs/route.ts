@@ -11,7 +11,8 @@ export async function POST(request: Request) {
     const parsed = parseApiRunInput(raw);
     if (!parsed.ok) return Response.json({ errors: parsed.errors }, { status: 400 });
     const { body, maxSteps, maxSeconds } = parsed.value;
-    const context = { workspaceId: caller.workspaceId, userId: null, signedIn: true };
+    // An API key acts with member rights: it starts and reads runs, it manages nothing.
+    const context = { workspaceId: caller.workspaceId, userId: null, signedIn: true, role: "member" as const };
     const started = await startRun(context, body, clientIp(request.headers), { apiKeyId: caller.keyId, maxSteps, maxSeconds });
     if (!started.ok) return Response.json({ errors: apiErrorNames(started.errors) }, { status: started.status });
     const run = await db.run.findUniqueOrThrow({ where: { id: started.id }, include: { bugs: true } });

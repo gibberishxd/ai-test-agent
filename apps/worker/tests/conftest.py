@@ -82,7 +82,7 @@ def apply_migrations(engine) -> None:
     """Run Prisma's migration SQL files in order: the real schema, without needing Node."""
     with engine.begin() as conn:
         for sql_file in sorted(MIGRATIONS_DIR.glob("*/migration.sql")):
-            conn.exec_driver_sql(sql_file.read_text())
+            conn.exec_driver_sql(sql_file.read_text().replace("%", "%%"))  # % is a placeholder
 
 
 @pytest.fixture(scope="session")

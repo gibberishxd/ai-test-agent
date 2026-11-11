@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
 import { createWebhook, listWebhooks } from "@/lib/webhooks";
-import { currentContext } from "@/lib/workspace";
+import { authorize, currentContext } from "@/lib/workspace";
 
 export async function GET() {
   const context = await currentContext();
@@ -11,8 +11,9 @@ export async function GET() {
 
 /** Add an endpoint. The response is the only time its signing secret is shown. */
 export async function POST(request: Request) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in to add webhooks." }, { status: 401 });
+  const auth = await authorize("webhooks.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const body = (await request.json().catch(() => ({}))) as { url?: unknown };
   let key: Buffer;
   try {

@@ -7,7 +7,10 @@ import { LoginSettings } from "@/components/login-settings";
 import { ModelSettings } from "@/components/model-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { currentUser } from "@/lib/auth";
+import { MembersSettings } from "@/components/members-settings";
+import { listInvitations, listMembers } from "@/lib/members";
+import { can } from "@/lib/roles";
+import { currentContext } from "@/lib/workspace";
 import { db } from "@/lib/db";
 import { formatCost, formatDate, hostOf } from "@/lib/format";
 import { listApiKeys } from "@/lib/api-keys";
@@ -30,10 +33,15 @@ const ACTIONS: Record<string, string> = {
 };
 
 export default async function SettingsPage() {
-  const user = await currentUser();
+  const context = await currentContext();
+  const userEmail = context.userId ? (await db.user.findUnique({ where: { id: context.userId } }))?.email : null;
+  const user = context.signedIn && context.userId ? { id: context.userId, workspaceId: context.workspaceId, email: userEmail ?? "" } : null;
+  const role = context.role ?? "viewer";
+  const admin = can(role, "members.manage");
+  const readOnly = <p className="text-sm text-muted-foreground">Only owners and admins can change this.</p>;
   if (!user) redirect("/signin");
 
-  const [workspace, domains, usage, log, models, loginSetups, apiKeys, webhooks] = await Promise.all([
+  const [workspace, domains, usage, log, models, loginSetups, apiKeys, webhooks, members, invitations] = await Promise.all([
     db.workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
     listDomains(user.workspaceId),
     usageThisMonth(user.workspaceId),
@@ -42,6 +50,8 @@ export default async function SettingsPage() {
     listLoginSetups(user.workspaceId),
     listApiKeys(user.workspaceId),
     listWebhooks(user.workspaceId),
+    listMembers(user.workspaceId),
+    admin ? listInvitations(user.workspaceId) : Promise.resolve([]),
   ]);
   const used = Math.min(usage.runs / usage.quota, 1);
 
@@ -51,6 +61,26 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">{workspace.name}</h1>
         <p className="text-muted-foreground">Signed in as {user.email}</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Members</CardTitle>
+          <CardDescription>
+            You are {role === "owner" ? "the owner" : `a${role === "admin" ? "n" : ""} ${role}`} of this workspace.
+            {admin && (
+              <>
+                {" "}
+                <Link href="/settings/audit" className="underline">
+                  Full audit log
+                </Link>
+              </>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MembersSettings members={members} invitations={invitations} me={user.id} myRole={role} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -104,7 +134,7 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ModelSettings models={models} />
+          {admin ? <ModelSettings models={models} /> : readOnly}
         </CardContent>
       </Card>
 
@@ -117,6 +147,7 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {admin ? (
           <DomainList
             token={workspace.verificationToken}
             domains={domains.map((d) => ({
@@ -126,6 +157,9 @@ export default async function SettingsPage() {
               method: d.method,
             }))}
           />
+          ) : (
+            readOnly
+          )}
         </CardContent>
       </Card>
 
@@ -138,7 +172,7 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LoginSettings setups={loginSetups} />
+          {admin ? <LoginSettings setups={loginSetups} /> : readOnly}
         </CardContent>
       </Card>
 
@@ -152,7 +186,7 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <IntegrationSettings keys={apiKeys} webhooks={webhooks} />
+          {admin ? <IntegrationSettings keys={apiKeys} webhooks={webhooks} /> : readOnly}
         </CardContent>
       </Card>
 

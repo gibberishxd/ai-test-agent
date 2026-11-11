@@ -186,3 +186,32 @@ provider; noted, not fixed (verifying a fix would need another Sonnet run).
 
 Sonnet finds what Gemma reaches but doesn't recognise (bugs 5, 8 and holdout 3, 4 are all
 states Gemma reached in R3b). That supports the R3b conclusion: the gap is recognition.
+
+## Run 4, J1: expected vs. actual (Gemma 4 12B)
+
+Result row `bea561fa` (commit a0af21e plus uncommitted J3 code that doesn't touch the agent, D71),
+same settings as R3a/R3b (1200 s, 40 steps, judge gemma4:12b), holdout run first
+(`bench --holdout-first`). All 7 runs finished; no Ollama timeout this time. Two earlier attempts
+were void (D67: a fake-model worker took the runs; D71: the database went down); their runs are
+marked failed and their result `6a0d7e24` is marked invalid.
+
+| | R3b (D59–D60) | J1 (expected vs. actual) |
+|---|---|---|
+| Holdout AI-only / recall | 0% / 33% | **0% / 33%** (no drop) |
+| Shop AI-only / recall | 8% / 39% | 8% / 39% (12% / 42% before verification) |
+| False alarms, clean shop / clean holdout | 0.0 / 0.0 | **0.0 / 0.0** (no rise) |
+| Correct but discarded | 0 | 1 (bug 8, the judge said no) |
+| Avg input tokens per agent step | ~3,490 | ~4,100 (+17%: the larger tool schema) |
+
+How the check was used (7 runs): 142 actions carried an expectation; 23 were flagged as a
+mismatch; Gemma **dismissed 19** with a reason, reported 4 (shop runs), and was never refused an
+action (it always resolved the mismatch first). On the clean shop it dismissed all 6 mismatches,
+which is the right outcome there; on the holdout it dismissed all 5, which included real bug states.
+
+**Verdict:** kept under the run plan's rule (holdout didn't drop, false alarms didn't rise), but it
+did not raise recall. The protocol works mechanically: the model writes expectations, the worker
+finds contradictions, the model is forced to look at them. The limit moved one step further: a 12B
+model, shown "you expected $360, the page says $120", talks itself out of it ("the total may not
+include all nights yet"). The next lever is not more prompting of the same model: either a
+stronger judge for the mismatch only (one cheap call on the 10–20% of steps that are flagged) or a
+stronger agent model. The Sonnet run in J7 shows the upper bound.

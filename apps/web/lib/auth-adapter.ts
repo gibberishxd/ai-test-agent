@@ -53,6 +53,7 @@ export async function createUserWithWorkspace(
         image: data.image ?? null,
         emailVerified: data.emailVerified ?? null,
         workspaceId: workspace.id,
+        role: "owner", // whoever creates a workspace owns it
       },
     });
   });

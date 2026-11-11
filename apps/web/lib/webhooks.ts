@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { isIP } from "node:net";
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { encryptSecret } from "@/lib/secret-box";
 
 export type DeliveryView = {
@@ -80,7 +81,7 @@ function toView(row: Row): WebhookView {
 }
 
 export async function listWebhooks(workspaceId: string): Promise<WebhookView[]> {
-  const rows = await db.webhookEndpoint.findMany({
+  const rows = await tenantDb(workspaceId).webhookEndpoint.findMany({
     where: { workspaceId },
     orderBy: { createdAt: "asc" },
     include: { deliveries: { orderBy: { createdAt: "desc" }, take: RECENT_DELIVERIES } },

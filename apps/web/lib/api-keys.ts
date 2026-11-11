@@ -12,6 +12,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 
 export const KEY_PREFIX = "ata_";
 const PREFIX_LENGTH = 12;
@@ -66,7 +67,7 @@ export async function createApiKey(workspaceId: string, userId: string | null, n
 }
 
 export async function listApiKeys(workspaceId: string): Promise<ApiKeyView[]> {
-  const rows = await db.apiKey.findMany({ where: { workspaceId }, orderBy: { createdAt: "desc" } });
+  const rows = await tenantDb(workspaceId).apiKey.findMany({ where: { workspaceId }, orderBy: { createdAt: "desc" } });
   return rows.map(toView);
 }
 

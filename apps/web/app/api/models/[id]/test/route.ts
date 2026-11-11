@@ -3,12 +3,13 @@ import { storeProbe, toView } from "@/lib/model-configs";
 import { probeModel, realProbeDeps } from "@/lib/model-probe";
 import { isUuid } from "@/lib/runs";
 import { SecretBoxError, decryptSecret, serverKey } from "@/lib/secret-box";
-import { currentContext } from "@/lib/workspace";
+import { authorize } from "@/lib/workspace";
 
 /** "Test connection": does the model answer, call a tool and read an image? The result is kept. */
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in first." }, { status: 401 });
+  const auth = await authorize("models.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const { id } = await params;
   const row = isUuid(id) ? await db.modelConfig.findFirst({ where: { id, workspaceId: context.workspaceId } }) : null;
   if (!row) return Response.json({ error: "Model not found." }, { status: 404 });

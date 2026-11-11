@@ -840,3 +840,28 @@ numbers are the real test (Needs me).
   hard to explain); storing comparisons (they change when triage changes; computing them from two
   runs is cheap); a `bug_status` enum value for suppressed (it would mix with verification's
   dismissals and the benchmark funnel).
+
+## D73. Roles in one table, checked per route, read from the database per request (run 4, J5)
+- **Decision:** owner / admin / member / viewer (the owner's question-5 default, decided without
+  owner, revisit). `lib/roles.ts` holds the whole table; `authorize(action)` answers 401/403 for
+  every management route; starting and stopping runs keep the visitor path (demo only). The role
+  and workspace come from the database on each request, so a role change or an accepted
+  invitation applies at once (one extra indexed lookup per request).
+- **Invitations:** links only (no email), token hashed, 7 days, one use (conditional UPDATE),
+  never "owner" (CHECK constraint); ownership moves by transfer. A removed member keeps an account
+  in a new workspace of their own. Every change goes to the audit log, shown on /settings/audit.
+- **One default model:** a partial unique index via Prisma's `partialIndexes` preview feature, so
+  Prisma knows the index and won't propose dropping it (the alternative, raw SQL, would drift).
+
+## D74. Row-level security with a tenant role and a per-transaction workspace (run 4, J5)
+- **Decision:** `app_tenant` (NOLOGIN, NOBYPASSRLS) with a policy per tenant table; children check
+  through their parent; `app_current_workspace()` fails closed. The web's `tenantDb()` extension
+  sets the workspace and the role per transaction (`LOCAL`, safe with pooling). The worker and
+  migrations use the owner role, unaffected.
+- **Alternatives:** a separate database or schema per tenant (strong isolation, heavy operations
+  and migrations ×N); RLS on the connection's own login role (needs a login per tenant or one
+  shared role with session variables that leak across pooled connections); FORCE RLS on the owner
+  (the worker would need tenant context everywhere, including the queue claim across tenants).
+- **Not yet:** every web query through `tenantDb` (the run page, lists and the API reads are; some
+  writes and settings queries still use the plain client with their WHERE). Listed under Needs me.
+- **Cost:** +0.004–0.03 ms per query from the policies, +~0.1–0.3 ms from the extra statements.

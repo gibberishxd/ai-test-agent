@@ -11,6 +11,7 @@
  * associated data) and nothing here ever returns them: views say only whether one is saved.
  */
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { encryptSecret } from "@/lib/secret-box";
 
 export const LOGIN_KINDS = ["form", "storage_state"] as const;
@@ -144,7 +145,7 @@ export function toView(row: Row): LoginSetupView {
 }
 
 export async function listLoginSetups(workspaceId: string): Promise<LoginSetupView[]> {
-  const rows = await db.loginSetup.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
+  const rows = await tenantDb(workspaceId).loginSetup.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
   return rows.map(toView);
 }
 

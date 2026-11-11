@@ -32,6 +32,7 @@ erDiagram
     webhook_endpoints ||--o{ webhook_deliveries : "log"
     runs |o--o{ webhook_deliveries : "about"
     workspaces ||--o{ finding_triage : "decides"
+    workspaces ||--o{ invitations : "invites"
     users ||--o{ accounts : "signs in with"
     users |o--o{ runs : "started"
     users |o--o{ audit_log : "did"
@@ -303,6 +304,60 @@ What the plans showed:
 
 Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
 
+## Roles and invitations (run 4, J5)
+`users.role` (enum `workspace_role`: owner, admin, member, viewer). Whoever signs up owns the
+workspace created for them; existing users became owners in the migration. `invitations` store a
+SHA-256 hash of the link's token, the role (a CHECK forbids `owner`: ownership is transferred,
+not handed out), `expires_at`, and `accepted_at` / `revoked_at`. Accepting is one transaction
+whose `UPDATE ... WHERE accepted_at IS NULL` makes a link work once even if two people open it
+together. What each role may do is one table in `apps/web/lib/roles.ts`; every route uses it and
+`route-roles.db.test.ts` calls every protected route as every role.
+
+"One default model per workspace" is a database rule: a partial unique index
+`UNIQUE (workspace_id) WHERE is_default` (Prisma's `partialIndexes` preview feature), so code that
+forgets to unset the old default gets an error instead of two defaults.
+
+## Row-level security (run 4, J5)
+The app filters every query by `workspace_id`. Row-level security (RLS) is a second wall inside
+Postgres: if a query forgets its WHERE, the database still returns only the current workspace.
+
+- **Policies:** each tenant table has `ENABLE ROW LEVEL SECURITY` and a policy `tenant_isolation`
+  for the role `app_tenant`: `USING (workspace_id = app_current_workspace())` (and `WITH CHECK`,
+  so rows can't be written into another workspace). Tables without a `workspace_id` (steps, bugs,
+  webhook_deliveries, api_rate_windows) check through their parent: `EXISTS (SELECT 1 FROM runs r
+  WHERE r.id = steps.run_id)`; the parent is itself filtered, so the child inherits it.
+- **The current workspace** is a per-transaction setting: `set_config('app.workspace_id', id,
+  true)`. `app_current_workspace()` turns an unset value into NULL, which matches no row: a
+  transaction that forgot to set it sees nothing (fails closed).
+- **Prisma:** `tenantDb(workspaceId)` (`apps/web/lib/tenant-db.ts`) is a client extension that
+  runs every query in a batch transaction: `set_config(...)`, `SET LOCAL ROLE app_tenant`, the
+  query. `LOCAL` means both end with the transaction, so a pooled connection never carries one
+  tenant's setting into the next request. The run page, run list, API reads and the settings
+  lists use it; the WHERE clauses stay (first line of defence).
+- **SQLAlchemy / the worker:** the worker connects as the owning role, which policies don't apply
+  to (policies are `TO app_tenant`; the owner isn't app_tenant). That is deliberate: the worker is
+  the trusted component that claims queued runs from every workspace and writes their results;
+  each of its queries is keyed by a run id it claimed. Migrations run as the same owner role.
+- **Production:** the migration creates `app_tenant` (NOLOGIN, NOBYPASSRLS) and grants it to the
+  migrating role, which therefore needs CREATEROLE once; the app's role must not be a superuser
+  in production, or every role switch is trivially bypassable by whoever controls the session.
+- **Tests:** `rls.db.test.ts`: a query without WHERE sees only its workspace (runs, bugs, steps,
+  workspaces); writing into another workspace fails; updating its rows changes nothing; an unset
+  workspace sees nothing; the owner role sees everything.
+
+**Cost** (EXPLAIN ANALYZE on 10k runs / 500k steps, `scripts/db_perf.py --rls`, median of 7):
+
+| Query | Owner | app_tenant (RLS) | Plan with RLS |
+|---|---|---|---|
+| run page: the run | 0.006 ms | 0.010 ms | Index Scan using runs_pkey |
+| run page: its steps (50) | 0.038 ms | 0.066 ms | Index Scan using steps_run_id_index_key |
+| run page: its bugs | 0.013 ms | 0.021 ms | Bitmap Heap Scan on bugs |
+| runs list (newest 50) | 0.018 ms | 0.029 ms | Index Scan Backward using runs_workspace_id_created_at_idx |
+
+The policies add tens of microseconds because the parent check is a primary-key lookup and the
+plans keep their indexes. The larger cost is two extra statements per query (`set_config`, `SET
+LOCAL ROLE`) in the same round trip batch: about 0.1–0.3 ms locally, per query.
+
 ## Prisma and SQLAlchemy: one schema, two apps
 
 - **Prisma owns the schema.** `apps/web/prisma/schema.prisma` is the source of truth; every
@@ -333,6 +388,9 @@ Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
 | `20261111100000_login_setups` | sign-in setups for apps behind a login (run 4, J2) |
 | `20261111120000_public_api_webhooks` | API keys, rate windows, run budgets, webhook endpoints and deliveries (run 4, J3) |
 | `20261111140000_fingerprints_triage` | `bugs.fingerprint`, `bugs.suppressed`, `finding_triage` with a CHECK on `state` (run 4, J4) |
+| `20261111160000_one_default_model` | partial unique index: one default model per workspace (run 4, J5) |
+| `20261111170000_roles_invitations` | `users.role`, `invitations` with a CHECK against owner links (run 4, J5) |
+| `20261111180000_row_level_security` | role `app_tenant`, `app_current_workspace()`, a policy on every tenant table (run 4, J5) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker
@@ -347,3 +405,14 @@ Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
    and after: here the benchmark page went from a Seq Scan + sort over every row (0.87 ms,
    growing) to an index scan that stops after 200 rows (0.09 ms). Every other hot query already
    used an index, so nothing else was added.
+
+4. **Why RLS if the app already filters by workspace?** Defence in depth: one forgotten WHERE in
+   hundreds of queries is a data leak between customers. With RLS the database refuses to return
+   another workspace's rows to the tenant role, whatever the query says.
+5. **How does RLS know the workspace with a connection pool?** `set_config(..., true)` and `SET
+   LOCAL ROLE` last only until the transaction ends, so each query's transaction sets them again
+   and nothing leaks to the next request on the same pooled connection.
+6. **Why does the worker bypass RLS?** It is the system component that serves every tenant's queue;
+   giving it a per-run tenant context is possible (set the run's workspace before each run), but
+   its queries are keyed by a run id it claimed, and the risk RLS addresses is the web app's many
+   request-driven queries.

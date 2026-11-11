@@ -2,12 +2,13 @@ import { db } from "@/lib/db";
 import { deleteModelConfig, replaceModelKey, setDefaultModel } from "@/lib/model-configs";
 import { isUuid } from "@/lib/runs";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
-import { currentContext } from "@/lib/workspace";
+import { authorize } from "@/lib/workspace";
 
 /** Replace the key ({ apiKey }) or make it the workspace default ({ isDefault: true }). */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in first." }, { status: 401 });
+  const auth = await authorize("models.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const { id } = await params;
   if (!isUuid(id)) return Response.json({ error: "Model not found." }, { status: 404 });
   const body = (await request.json().catch(() => ({}))) as { apiKey?: unknown; isDefault?: unknown };
@@ -38,8 +39,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in first." }, { status: 401 });
+  const auth = await authorize("models.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const { id } = await params;
   if (!isUuid(id) || !(await deleteModelConfig(context.workspaceId, id))) {
     return Response.json({ error: "Model not found." }, { status: 404 });

@@ -1072,3 +1072,27 @@ words, which a very different wording breaks.
    false positive on one page shouldn't hide a real error on another.
 3. *What does triage teach you?* A false-positive rate per model on real customer sites, not only on
    our benchmark, which is the number a buyer cares about.
+
+## Run 4: teams, roles and tenant isolation (`lib/roles.ts`, `lib/members.ts`, `lib/tenant-db.ts`, RLS migration)
+
+**What:** four roles with one permission table checked by every route; invitation links; an audit
+log page; Postgres row-level security behind the app's own workspace filters; one default model
+per workspace enforced by a partial unique index.
+
+**How RLS works here:** the web app wraps each query in a transaction that sets
+`app.workspace_id` and switches to the role `app_tenant`; policies on every tenant table compare
+`workspace_id` with that setting (children through their parent). An unset setting matches
+nothing. The worker uses the owner role and isn't filtered.
+
+**Weak spots:** not every web query goes through `tenantDb` yet; the app's DB user must not be a
+superuser in production for the second wall to mean anything; a removed member's runs stay in the
+workspace (as they should) but their name stays on them.
+
+**Interview Q&A**
+1. *What does `SET LOCAL ROLE` give you over just a WHERE clause?* The database enforces it: a
+   query that forgets the filter returns only the tenant's rows. Tested by querying with no WHERE.
+2. *Why is the role read from the database on every request?* Sessions are cookies that live for
+   days; a demoted admin must lose admin rights now, not when their cookie expires.
+3. *How did you test authorization?* One table-driven test calls every protected route as every
+   role and expects 403 exactly where the permission table says no; it caught a 403 that should
+   have been a 404.

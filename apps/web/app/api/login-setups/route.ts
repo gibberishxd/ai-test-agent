@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { listLoginSetups, saveLoginSetup } from "@/lib/login-setups";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
-import { currentContext } from "@/lib/workspace";
+import { authorize, currentContext } from "@/lib/workspace";
 
 /** The workspace's sign-in setups. Passwords and recorded sign-ins never leave the server. */
 export async function GET() {
@@ -12,8 +12,9 @@ export async function GET() {
 
 /** Create or replace the setup for a target (one per site). */
 export async function POST(request: Request) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in to save a sign-in setup." }, { status: 401 });
+  const auth = await authorize("login_setups.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   let key: Buffer;
   try {

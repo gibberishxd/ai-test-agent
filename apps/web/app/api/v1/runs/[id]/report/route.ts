@@ -1,5 +1,5 @@
 import { apiReport, baseUrlOf, junitReport, withApiKey } from "@/lib/api-v1";
-import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { isUuid } from "@/lib/runs";
 
 /** The run's findings as JSON, or as JUnit XML with ?format=junit (for CI test reports). */
@@ -7,7 +7,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   return withApiKey(request, async (caller) => {
     const { id } = await params;
     const run = isUuid(id)
-      ? await db.run.findFirst({ where: { id, workspaceId: caller.workspaceId }, include: { bugs: { orderBy: { createdAt: "asc" } } } })
+      ? await tenantDb(caller.workspaceId).run.findFirst({ where: { id, workspaceId: caller.workspaceId }, include: { bugs: { orderBy: { createdAt: "asc" } } } })
       : null;
     if (!run) return Response.json({ error: "Run not found." }, { status: 404 });
     const format = new URL(request.url).searchParams.get("format") ?? "json";

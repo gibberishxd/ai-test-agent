@@ -155,6 +155,21 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Run 4 (branch `agent-v4`, plan in `docs/RUN_PLAN_4.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| J0 Housekeeping | done | PR #2 (agent-v3 → main) open; R3a rows corrected to f1bf08a with a note (D63); RUN_PLAN_4.md, ROADMAP.md. |
+| J1 Recognise wrong states | done (kept) | `test_expectations.py`, `test_model_resilience.py`, CLI correction test; Gemma: holdout 0% → 0%, clean false alarms 0.0 → 0.0, shop 8% → 8%; 23 mismatches flagged, 19 dismissed (MISS_ANALYSIS, D64–D66). |
+| J2 Apps behind a login | worker + web done | `test_login.py`, `test_signed_in_run.py` (no credential anywhere in rows or model calls), web unit + DB tests, e2e `login-setup.e2e.ts` (D68). Demo-shop login area: see J7 row. |
+| J3 Run it from CI | done | key, rate limit, routes, OpenAPI and webhook tests; `ata-run.mjs` against the local app exited 1 with a JUnit file (D69, D70). |
+| J4 Bugs across releases | done | `test_fingerprint.py`, `test_triage.py`, `triage.db.test.ts`; run page shows New / Still present / Fixed and triage (D72). |
+
+### Run 4 measurements (Gemma 4 12B, judge gemma4:12b, 1200 s)
+| Run | Agent code | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | False alarms | Correct but discarded | Avg run |
+|---|---|---|---|---|---|---|---|---|
+| Run 4, J1 (`bea561fa`) | a0af21e, expected vs. actual | 8% (bug 8 in 2/3) | 39% | 0% | 33% | 0.0 / 0.0 | 1 | 1156 s |
+
 ## Needs me
 0. **Run 3 (branch `agent-v3`, nothing merged):**
    - **Review and merge.** `agent-v3` is based on `agent-v2`; neither is merged into `main`.

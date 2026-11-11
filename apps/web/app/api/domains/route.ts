@@ -1,9 +1,10 @@
 import { addDomain } from "@/lib/settings-data";
-import { currentContext } from "@/lib/workspace";
+import { authorize } from "@/lib/workspace";
 
 export async function POST(request: Request) {
-  const context = await currentContext();
-  if (!context.signedIn) return Response.json({ error: "Sign in to add domains." }, { status: 401 });
+  const auth = await authorize("domains.manage");
+  if (!auth.ok) return auth.response;
+  const context = auth.context;
   const body = await request.json().catch(() => ({}));
   const result = await addDomain(context.workspaceId, String(body.hostname ?? ""));
   if (!result.ok) return Response.json({ error: result.error }, { status: 400 });

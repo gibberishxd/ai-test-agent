@@ -45,6 +45,15 @@ class BugStatus(StrEnum):
     DISMISSED = "dismissed"
 
 
+class WorkspaceRole(StrEnum):
+    """Run 4, J5: what a member may do in their workspace (web: lib/roles.ts)."""
+
+    OWNER = "owner"
+    ADMIN = "admin"
+    MEMBER = "member"
+    VIEWER = "viewer"
+
+
 def _pg_enum(enum: type[StrEnum], name: str) -> ENUM:
     # create_type=False: the type already exists (Prisma's migration created it).
     return ENUM(*[member.value for member in enum], name=name, create_type=False)
@@ -90,6 +99,9 @@ class User(Base):
     image: Mapped[str | None]
     email_verified: Mapped[datetime | None] = mapped_column(_timestamp())
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    role: Mapped[str] = mapped_column(
+        _pg_enum(WorkspaceRole, "workspace_role"), server_default="member"
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -393,3 +405,21 @@ class FindingTriage(Base):
     updated_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _created_at()
+
+
+class Invitation(Base):
+    """A link that adds someone to a workspace with a role (web: lib/invitations.ts). Only a
+    SHA-256 hash of the link's token is stored; it expires and can be revoked."""
+
+    __tablename__ = "invitations"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    token_hash: Mapped[str] = mapped_column(unique=True)
+    role: Mapped[str] = mapped_column(_pg_enum(WorkspaceRole, "workspace_role"))
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    expires_at: Mapped[datetime] = mapped_column(_timestamp())
+    accepted_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    accepted_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    created_at: Mapped[datetime] = _created_at()

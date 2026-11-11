@@ -6,6 +6,8 @@
  * change another's runs.
  */
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
+import { can } from "@/lib/roles";
 import { usableModel } from "@/lib/model-configs";
 import { quotaError, startOfMonth, visitorRateLimitError, visitorTargetError } from "@/lib/limits";
 import { isDemoTarget, parseRunInput, type FieldErrors, type RunInput } from "@/lib/targets";
@@ -77,6 +79,10 @@ export async function startRun(
   ip: string,
   extras: RunExtras = {},
 ): Promise<StartResult> {
+  // Viewers read; they don't start runs. (Visitors have no role and may try the demo, below.)
+  if (context.signedIn && context.role && !can(context.role, "run.start")) {
+    return { ok: false, status: 403, errors: { targetUrl: "Viewers can't start runs. Ask an admin for the member role." } };
+  }
   const parsed = parseRunInput(body, await verifiedOrigins(context.workspaceId));
   if (!parsed.ok) return { ok: false, status: 400, errors: parsed.errors };
   const input = parsed.value;
@@ -137,7 +143,7 @@ export async function verifiedOrigins(workspaceId: string): Promise<string[]> {
 /** A run with its steps and bugs, or null if it doesn't exist in this workspace. */
 export async function getRun(workspaceId: string, id: string) {
   if (!isUuid(id)) return null;
-  return db.run.findFirst({
+  return tenantDb(workspaceId).run.findFirst({
     where: { id, workspaceId },
     include: {
       steps: { orderBy: { index: "asc" } },
@@ -147,7 +153,7 @@ export async function getRun(workspaceId: string, id: string) {
 }
 
 export async function listRuns(workspaceId: string, take = 50) {
-  return db.run.findMany({
+  return tenantDb(workspaceId).run.findMany({
     where: { workspaceId },
     orderBy: { createdAt: "desc" },
     take,
