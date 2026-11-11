@@ -10,6 +10,7 @@ import {
   percent,
   percentOrDash,
   trend,
+  validResults,
   verification,
   type BenchmarkRow,
 } from "./benchmark";
@@ -170,5 +171,13 @@ describe("verification", () => {
   it("is null for results saved before it was recorded", () => {
     expect(verification(row({ details: {} }))).toBeNull();
     expect(verification(row({ details: null }))).toBeNull();
+  });
+});
+
+describe("validResults", () => {
+  it("leaves out a result marked invalid (kept in the database, with the reason)", () => {
+    const good = row({ provider: "ollama", model: "gemma4:12b" });
+    const bad = row({ provider: "fake", model: "fake-agent", details: { invalid: "runs taken by another worker" } });
+    expect(validResults([good, bad])).toEqual([good]);
   });
 });

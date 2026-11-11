@@ -47,15 +47,24 @@ class Effect:
     removed: list[str] = field(default_factory=list)
     fields: list[str] = field(default_factory=list)  # "Quantity: 0 → 1"
     events: list[str] = field(default_factory=list)
+    viewport: str | None = None  # "desktop → mobile": the layout changed, if not the text
 
     @property
     def changed(self) -> bool:
-        return bool(self.url_after != self.url_before or self.added or self.removed or self.fields)
+        return bool(
+            self.url_after != self.url_before
+            or self.added
+            or self.removed
+            or self.fields
+            or self.viewport
+        )
 
     def describe(self) -> str:
         if not self.changed and not self.events:
             return "nothing on the page changed"
         parts = []
+        if self.viewport:
+            parts.append(f"viewport {self.viewport}")
         if self.url_after != self.url_before:
             parts.append(f"now on {self.url_after}")
         if self.added:

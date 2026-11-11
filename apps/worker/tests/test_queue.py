@@ -136,3 +136,57 @@ def test_only_verified_domains_count(sessions, workspace):
         assert is_verified_domain(session, workspace.id, "https://SHOP.test/cart")
         assert not is_verified_domain(session, workspace.id, "https://pending.test/")
         assert not is_verified_domain(session, workspace.id, "https://theirs.test/")  # not ours
+
+
+# --- run 4: a starting worker and a benchmark must not take or fail each other's runs --------
+# A FakeClient worker started by the e2e tests failed a 16-minute benchmark run that was alive
+# (it only looked at the start time) and then ran the rest of the benchmark with the fake model.
+
+
+def test_a_run_whose_worker_still_heartbeats_is_never_failed_as_stale(sessions, workspace):
+    from datetime import UTC, datetime, timedelta
+
+    from worker.queue import recover_stale_runs
+
+    with sessions() as session:
+        alive = Run(
+            workspace_id=workspace.id,
+            target_url="http://x/",
+            status=RunStatus.RUNNING,
+            started_at=datetime.now(UTC) - timedelta(minutes=30),
+            heartbeat_at=datetime.now(UTC),
+        )
+        session.add(alive)
+        session.commit()
+        assert recover_stale_runs(session, older_than_s=600) == 0
+        session.refresh(alive)
+        assert alive.status == RunStatus.RUNNING
+
+
+def test_a_benchmark_claims_only_its_own_runs(sessions, workspace):
+    with sessions() as session:
+        theirs = Run(workspace_id=workspace.id, target_url="http://customer/")
+        ours = Run(workspace_id=workspace.id, target_url="http://bench/")
+        session.add_all([theirs, ours])
+        session.commit()
+        ours_id, theirs_id = ours.id, theirs.id
+        claimed = claim_next_run(session, "bench", only=[ours_id])
+        assert claimed.id == ours_id
+        assert claim_next_run(session, "bench", only=[ours_id]) is None
+        assert session.get(Run, theirs_id).status == RunStatus.QUEUED
+
+
+def test_regular_workers_leave_benchmark_runs_to_the_benchmark(sessions, workspace):
+    from worker.benchmark import benchmark_workspace
+
+    with sessions() as session:
+        bench = benchmark_workspace(session)
+        session.add(Run(workspace_id=bench.id, target_url="http://bench/"))
+        session.commit()
+        assert claim_next_run(session, "worker-2", skip_benchmark=True) is None
+        session.add(Run(workspace_id=workspace.id, target_url="http://customer/"))
+        session.commit()
+        assert (
+            claim_next_run(session, "worker-2", skip_benchmark=True).target_url
+            == "http://customer/"
+        )

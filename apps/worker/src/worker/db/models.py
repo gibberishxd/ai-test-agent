@@ -279,3 +279,30 @@ class ModelConfig(Base):
     probe: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _created_at()
+
+
+class LoginSetup(Base):
+    """How the worker signs in to a target before the agent starts (web: lib/login-setups.ts).
+
+    A TEST account only. The password and a recorded storage state are AES-GCM encrypted like
+    model keys (workspace id as associated data) and never reach the model, logs or reports.
+    """
+
+    __tablename__ = "login_setups"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    origin: Mapped[str]  # scheme://host[:port] of the target
+    kind: Mapped[str]  # "form" or "storage_state"
+    login_url: Mapped[str | None]
+    username: Mapped[str | None]
+    password_ciphertext: Mapped[str | None]
+    username_selector: Mapped[str | None]
+    password_selector: Mapped[str | None]
+    submit_selector: Mapped[str | None]
+    success_selector: Mapped[str | None]
+    storage_state_ciphertext: Mapped[str | None]
+    check_requested_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    last_check: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()

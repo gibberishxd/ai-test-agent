@@ -3,6 +3,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { TryDemoButton } from "@/components/try-demo-button";
 import { Button } from "@/components/ui/button";
+import { validResults } from "@/lib/benchmark";
 import { db } from "@/lib/db";
 import { formatCost } from "@/lib/format";
 import { demoUrl } from "@/lib/targets";
@@ -46,7 +47,9 @@ const FAQ = [
 
 async function latestBenchmark() {
   try {
-    return await db.benchmarkResult.findFirst({ orderBy: { createdAt: "desc" } });
+    // The newest result that counts (an invalid one is kept but not shown).
+    const newest = await db.benchmarkResult.findMany({ orderBy: { createdAt: "desc" }, take: 10 });
+    return validResults(newest)[0] ?? null;
   } catch {
     return null;
   }

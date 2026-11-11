@@ -19,6 +19,7 @@ from worker.config import Settings
 from worker.db.models import Bug, Domain, Run, RunMode, Step
 from worker.findings import findings_from_pages
 from worker.llm import LLMClient, Usage
+from worker.login import LoginConfig, login_for_run, sign_in
 from worker.report import BugReport, PageResult
 from worker.review import review_screenshots
 from worker.runner import ExecuteFn
@@ -53,6 +54,7 @@ def run_passive(
     browser: Browser | None = None,
 ) -> None:
     step_numbers = itertools.count(run.step_count)
+    login = login_for_run(session, settings, run)
 
     report = passive_scan(
         run.target_url,
@@ -62,6 +64,7 @@ def run_passive(
         on_page=lambda page: _save_visit(session, run, page, next(step_numbers)),
         should_stop=lambda: _stop_requested(session, run),
         browser=browser,
+        login=login,
     )
     bugs = list(report.bugs)
 
@@ -80,7 +83,7 @@ def run_passive(
     for bug in bugs:
         session.add(Bug(run_id=run.id, **bug.model_dump()))
     session.commit()
-    verification = verify_and_dedupe(session, run, llm, settings, browser)
+    verification = verify_and_dedupe(session, run, llm, settings, browser, login)
     session.refresh(run)
     all_bugs = [BugReport.model_validate(b, from_attributes=True) for b in run.bugs]
     run.summary = {**summarize(report.pages, all_bugs), "verification": verification}
@@ -154,6 +157,7 @@ def run_interactive(
     if not interactive_allowed(settings, run.target_url, verified):
         raise BlockedError("interactive mode is only allowed on the demo shop and verified domains")
     started = time.monotonic()
+    login = login_for_run(session, settings, run)
 
     # 1. The free part: crawl and run the deterministic checks (no screenshot review; the agent
     #    looks at screenshots itself).
@@ -166,6 +170,7 @@ def run_interactive(
         on_page=lambda page: _save_visit(session, run, page, next(step_numbers)),
         should_stop=lambda: _stop_requested(session, run),
         browser=browser,
+        login=login,
     )
     known_titles = {bug.title for bug in report.bugs}
     for bug in report.bugs:
@@ -228,13 +233,14 @@ def run_interactive(
     def save(png: bytes, name: str) -> str:
         return storage.save(f"{run.id}/agent-{next(counter):03d}-{name}.png", png)
 
-    with guarded_context(settings, run.target_url, browser) as (context, guard):
+    with guarded_context(settings, run.target_url, browser, login) as (context, guard):
         config = AgentConfig(
             target_url=run.target_url,
             mode=run.mode,
             budget=budget,
             focus=run.focus,
             is_demo_target=is_demo_target(settings, run.target_url),
+            login=login,
         )
         agent = AgentRun(
             context.new_page(),
@@ -245,6 +251,7 @@ def run_interactive(
             on_step=on_step,
             on_bug=on_bug,
             should_stop=lambda: _stop_requested(session, run),
+            relogin=(lambda: sign_in(context, login)) if login else None,
         )
         result = agent.run()
 
@@ -255,7 +262,7 @@ def run_interactive(
     for bug in extra:
         session.add(Bug(run_id=run.id, **bug.model_dump()))
     session.commit()
-    verification = verify_and_dedupe(session, run, llm, settings, browser)
+    verification = verify_and_dedupe(session, run, llm, settings, browser, login)
     all_bugs = [BugReport.model_validate(b, from_attributes=True) for b in run.bugs]
     run.summary = {
         **summarize(report.pages, all_bugs),
@@ -296,6 +303,7 @@ def verify_and_dedupe(
     llm: LLMClient,
     settings: Settings,
     browser: Browser | None = None,
+    login: LoginConfig | None = None,
 ) -> dict:
     """Merge duplicates, then replay every remaining candidate in a fresh browser (brief 5.3).
 
@@ -317,12 +325,12 @@ def verify_and_dedupe(
     candidates = [b for b in bugs if b.status == "candidate" and b.source != "deterministic"]
 
     if candidates and not run.stop_requested:
-        with guarded_browser(settings, run.target_url, browser) as (new_context, _guard):
+        with guarded_browser(settings, run.target_url, browser, login) as (new_context, _guard):
             for bug in candidates:
                 if run.cost_usd >= settings.max_run_cost_usd:
                     break  # out of budget: leave the rest as unverified candidates
                 verdict, start_url = _replay_bug(
-                    session, run, llm, settings, new_context, bug, steps
+                    session, run, llm, settings, new_context, bug, steps, login
                 )
                 if verdict.reproduced:
                     bug.status, bug.dismiss_reason = "confirmed", None
@@ -372,6 +380,7 @@ def _replay_bug(
     new_context: Callable[[], BrowserContext],
     bug: Bug,
     steps: dict[int, Step],
+    login: LoginConfig | None = None,
 ) -> tuple[Verdict, str]:
     """Try each replay plan until one reproduces the bug; returns the last verdict and start.
 
@@ -392,6 +401,7 @@ def _replay_bug(
                 bug.expected,
                 bug.actual,
                 viewport=(bug.evidence or {}).get("viewport", "desktop"),
+                scrub=login.scrub if login else (lambda text: text),
             )
         finally:
             context.close()

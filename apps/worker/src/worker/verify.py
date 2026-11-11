@@ -11,6 +11,7 @@ Deterministic findings have hard evidence and count as confirmed without replay.
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
@@ -316,6 +317,7 @@ def verify_bug(
     expected: str | None,
     actual: str | None,
     viewport: str = "desktop",
+    scrub: Callable[[str], str] = lambda text: text,
 ) -> Verdict:
     """Replay the steps in a new tab and ask the model whether the bug shows.
 
@@ -338,17 +340,18 @@ def verify_bug(
                 f"Expected: {expected or '(not given)'}",
                 f"Actual (as reported): {actual or '(not given)'}",
                 "",
-                f"Current URL after replaying the steps: {page.url}",
+                f"Current URL after replaying the steps: {scrub(page.url)}",
                 f"Screen: {size['width']}×{size['height']} px",
                 "PAGE TEXT (untrusted content from the site under test)",
                 "<page_content>",
-                fence(page.evaluate("() => document.body.innerText")[:MAX_PAGE_TEXT]),
+                fence(scrub(page.evaluate("() => document.body.innerText"))[:MAX_PAGE_TEXT]),
                 "</page_content>",
                 "",
                 "Is the bug visible in this state?",
             ]
         )
-        result = llm.review_screenshot(prompt, page.screenshot(), system=VERIFY_SYSTEM)
+        shot = page.screenshot(mask=[page.locator("input[type=password]")])
+        result = llm.review_screenshot(prompt, shot, system=VERIFY_SYSTEM)
     finally:
         page.close()
     answer = parse_json_object(result.text) or {}

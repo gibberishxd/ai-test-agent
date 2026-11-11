@@ -21,6 +21,7 @@ def crawl(
     max_depth: int = 5,
     on_page: Callable[[PageResult], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    skip_link: Callable[[str], bool] | None = None,
 ) -> list[PageResult]:
     """Visit `start_url` and every same-origin page reachable from it, each one once.
 
@@ -29,6 +30,7 @@ def crawl(
     - max_pages / max_depth: hard limits, so even an endless site ends.
     - on_page: called after each visit (the worker saves progress there).
     - should_stop: checked after each visit (the Stop button).
+    - skip_link: links it refuses are never visited (a signed-in crawl skips "log out").
     """
     start = normalize(start_url)
     queue: deque[tuple[str, str | None, int]] = deque([(start, None, 0)])  # (url, found_on, depth)
@@ -48,7 +50,7 @@ def crawl(
             continue
 
         for link in links:
-            if not is_same_site(link, start):
+            if not is_same_site(link, start) or (skip_link and skip_link(link)):
                 continue
             link = normalize(link)
             if link not in seen:

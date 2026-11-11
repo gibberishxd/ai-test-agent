@@ -40,10 +40,15 @@ def process_next(
     llm: LLMClient,
     execute: ExecuteFn = noop_execute,
     client_for: ClientFor | None = None,
+    only: list | None = None,
+    skip_benchmark: bool = False,
 ) -> bool:
-    """Claim and process one run. Returns False when the queue was empty."""
+    """Claim and process one run. Returns False when the queue was empty.
+
+    `only` / `skip_benchmark`: see claim_next_run (a benchmark and regular workers keep to
+    their own runs)."""
     with sessions() as session:
-        run = claim_next_run(session, worker_id())
+        run = claim_next_run(session, worker_id(), only=only, skip_benchmark=skip_benchmark)
         if run is None:
             return False
         log.info("claimed run %s (%s, %s)", run.id, run.mode, run.target_url)

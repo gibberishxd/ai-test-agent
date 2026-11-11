@@ -5,6 +5,7 @@ it, enforces the budgets, and records everything. Callbacks (`on_step`, `on_bug`
 `should_stop`) connect the loop to the database without the loop knowing about it.
 """
 
+import json
 import re
 import secrets
 from collections.abc import Callable
@@ -28,6 +29,7 @@ from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.tools import TOOL_NAMES, TOOLS
 from worker.browser import VIEWPORTS, listen, viewport_label, wait_until_quiet
 from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage
+from worker.login import LoginConfig, SignInResult, on_login_page
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
@@ -52,6 +54,8 @@ class AgentConfig:
     budget: Budget
     focus: str | None = None
     is_demo_target: bool = False
+    # Set when the worker signed in with the workspace's test account (run 4, J2).
+    login: LoginConfig | None = None
 
 
 @dataclass
@@ -88,6 +92,7 @@ class AgentResult:
     # the steps of mismatches it ignored until they expired.
     dismissed: list[dict] = field(default_factory=list)
     ignored: list[int] = field(default_factory=list)
+    relogins: int = 0  # times the session ended and the worker signed in again
 
 
 class ModelCallFailed(Exception):
@@ -105,8 +110,10 @@ class AgentRun:
         on_step: Callable[[StepRecord], None] | None = None,
         on_bug: Callable[[BugReport], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        relogin: Callable[[], SignInResult] | None = None,
     ):
         self.page = page
+        self.relogin = relogin
         self.llm = llm
         self.guard = guard
         self.config = config
@@ -169,15 +176,17 @@ class AgentRun:
         state, events, image, screenshot = self._observe()
 
         def observation(trimmed: bool = False) -> str:
-            return build_observation(
-                state,
-                self._task(),
-                self._budget_line(),
-                events,
-                self.memory,
-                viewport_label(self._viewport),
-                checks=self._open_mismatches(),
-                trimmed=trimmed,
+            return self._scrub(
+                build_observation(
+                    state,
+                    self._task(),
+                    self._budget_line(),
+                    events,
+                    self.memory,
+                    viewport_label(self._viewport),
+                    checks=self._open_mismatches(),
+                    trimmed=trimmed,
+                )
             )
 
         try:
@@ -189,6 +198,9 @@ class AgentRun:
             raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
         index = len(self.result.steps) + 1
         outcome = self._act(decision.tool_call, state, index)
+        outcome = self._restore_session(decision.tool_call, state, outcome)
+        outcome = self._scrub_outcome(outcome)
+        events = [self._scrub(e) for e in events]
         step = StepRecord(
             index=index,
             url=state.url,
@@ -222,7 +234,7 @@ class AgentRun:
         if late_exit:
             events.append(f"the page went to another site and was brought back ({late_exit})")
         try:
-            screenshot = self.page.screenshot()
+            screenshot = self._screenshot()
         except PlaywrightError:
             screenshot = None
         image = None
@@ -295,7 +307,11 @@ class AgentRun:
         if action in CLICK_ACTIONS and info:
             if info.href and self._off_site(info.href):
                 return OFF_SITE.format(host=urlsplit(info.href).hostname)
-            return deny_reason(info, is_demo_target=self.config.is_demo_target)
+            return deny_reason(
+                info,
+                is_demo_target=self.config.is_demo_target,
+                signed_in=self.config.login is not None,
+            )
         if action == "type":
             return card_number_reason(str(args.get("text", "")), self.config.is_demo_target)
         if action == "navigate":
@@ -413,6 +429,58 @@ class AgentRun:
             "problem you saw, report it now with report_bug)"
         )
 
+    # --- signed-in runs (J2) ---------------------------------------------------------------------
+
+    def _screenshot(self) -> bytes:
+        """Every screenshot hides password fields, whatever they contain."""
+        return self.page.screenshot(mask=[self.page.locator("input[type=password]")])
+
+    def _scrub(self, text: str) -> str:
+        login = self.config.login
+        return login.scrub(text) if login and text else text
+
+    def _scrub_outcome(self, outcome: dict) -> dict:
+        if not self.config.login:
+            return outcome
+        clean = dict(outcome)
+        for key in ("human", "result", "reasoning", "block_reason"):
+            if isinstance(clean.get(key), str):
+                clean[key] = self._scrub(clean[key])
+        clean["args"] = json.loads(self._scrub(json.dumps(clean.get("args") or {})))
+        return clean
+
+    def _restore_session(self, call: ToolCall | None, state: PageState, outcome: dict) -> dict:
+        """If the action ended on the login page without the agent going there, the session
+        ended (a timeout, a server restart): sign in again and go back where the agent was."""
+        login = self.config.login
+        if not (login and self.relogin) or self.result.relogins >= MAX_RELOGINS:
+            return outcome
+        if on_login_page(state.url, login) or not on_login_page(self.page.url, login):
+            return outcome
+        if call and self._targets_login_page(call, state, login):
+            return outcome
+        self.result.relogins += 1
+        signed_in = self.relogin()
+        if signed_in.ok:
+            try:
+                self.page.goto(state.url, timeout=NAVIGATION_TIMEOUT_MS)
+                wait_until_quiet(self.page, SETTLE_MS)
+            except PlaywrightError:
+                pass
+            note = "the session had ended; the worker signed in again and went back"
+        else:
+            note = f"the session had ended and signing in again failed ({signed_in.detail})"
+        return {**outcome, "result": f"{outcome.get('result', '')} | {note}"}
+
+    def _targets_login_page(self, call: ToolCall, state: PageState, login: LoginConfig) -> bool:
+        """Did the agent itself go to the login page (a link or a URL)? Then it isn't a drop."""
+        if call.name == "navigate":
+            target = urljoin(self.page.url, str(call.args.get("url", "")))
+            return on_login_page(target, login)
+        element = self._element(state, call.args)
+        href = element.info().href if element else None
+        return bool(href) and on_login_page(urljoin(state.url, href), login)
+
     # --- expected vs. actual (J1) ---------------------------------------------------------------
 
     def _snapshot(self) -> dict:
@@ -423,6 +491,7 @@ class AgentRun:
             "fields": self._field_values(),
             "console": len(self._console),
             "failed": len(self._failed),
+            "viewport": self._viewport,
         }
 
     def _compare(self, args: dict, before: dict, result: str, index: int) -> str:
@@ -440,6 +509,11 @@ class AgentRun:
                 for name, value in fields.items()
                 if before["fields"].get(name) != value
             ],
+            viewport=(
+                f"{before['viewport']} → {self._viewport}"
+                if before["viewport"] != self._viewport
+                else None
+            ),
             events=[f"{e.kind} error: {e.text[:100]}" for e in self._console[before["console"] :]]
             + [
                 f"network: {r.method} {r.url} → {r.status or r.failure}"
@@ -522,6 +596,7 @@ class AgentRun:
             locator.select_option(value=option, timeout=ACTION_TIMEOUT_MS)
 
     def _report_bug(self, args: dict, state: PageState, index: int) -> str:
+        args = {k: self._scrub(v) if isinstance(v, str) else v for k, v in args.items()}
         title = redact(str(args.get("title") or "Untitled bug"))[:200]
         if title in self.memory.bugs:
             return "error: this bug was already reported"
@@ -682,6 +757,9 @@ def describe(action: str, args: dict, element: Element | None) -> str:
     if action == "dismiss":
         return f"Dismiss the mismatch from #{args.get('step_id', '')}"
     return action
+
+
+MAX_RELOGINS = 3
 
 
 # Field values by label, for expected-vs-actual. Passwords and hidden fields are never read.

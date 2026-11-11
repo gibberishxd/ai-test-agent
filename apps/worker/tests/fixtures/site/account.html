@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Account</title><link rel="icon" href="data:,">
+<script>if (!localStorage.getItem("session")) location.replace("/signin.html");</script>
+</head>
+<body>
+  <main>
+    <h1>Your account</h1>
+    <p id="who">Signed in as tester@example.com</p>
+    <button type="button" id="logout">Log out</button>
+    <button type="button" id="delete">Delete account</button>
+    <button type="button" id="expire">Refresh data</button>
+  </main>
+  <script>
+    document.getElementById("logout").onclick = () => {
+      localStorage.removeItem("session");
+      location.href = "/signin.html";
+    };
+    // Stands in for a session that times out on the server: the next page load asks to sign in.
+    document.getElementById("expire").onclick = () => {
+      localStorage.removeItem("session");
+      location.href = "/account.html";
+    };
+  </script>
+</body>
+</html>

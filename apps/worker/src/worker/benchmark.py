@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from worker.config import REPO_ROOT
 from worker.db.models import BenchmarkResult, Bug, Run, Workspace
 from worker.llm import LLMClient
-from worker.queue import FINAL
+from worker.queue import BENCHMARK_SLUG, FINAL
 from worker.verify import parse_json_object
 
 BUGS_JSON = REPO_ROOT / "apps" / "demo" / "bugs.json"
@@ -282,9 +282,9 @@ def git_commit() -> str:
 
 
 def benchmark_workspace(session: Session) -> Workspace:
-    workspace = session.query(Workspace).filter_by(slug="benchmark").one_or_none()
+    workspace = session.query(Workspace).filter_by(slug=BENCHMARK_SLUG).one_or_none()
     if workspace is None:
-        workspace = Workspace(name="Benchmark", slug="benchmark")
+        workspace = Workspace(name="Benchmark", slug=BENCHMARK_SLUG)
         session.add(workspace)
         session.commit()
     return workspace

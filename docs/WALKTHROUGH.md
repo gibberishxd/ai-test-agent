@@ -940,3 +940,51 @@ single run swings a bug from 0/3 to 2/3. The clean builds turned out to have rea
    the planted list. A benchmark's clean build has to be audited too.
 3. *What would you do next?* Help the model compare expected with actual after each
    state-changing action, then measure on the holdout first.
+
+## Run 4: expected vs. actual (`agent/expect.py`, `agent/loop.py: _compare, _unresolved_gate, _dismiss`, `agent/tools.py`)
+
+**What:** before a state-changing action (click, double_click, select, reload, set_viewport) the
+model writes `expect`: one line of what should happen, with concrete values ("Total: $36.00",
+"'Profile saved'", "/cart"). The worker snapshots the page before the action and compares
+afterwards, without another model call:
+1. `Effect`: what changed: URL, lines added and removed, field values (`Quantity: 0 → 1`;
+   password fields are never read), new console errors and failed requests.
+2. `mismatches()`: the model expected a change and nothing changed; or a value it predicted
+   (amount, number, quoted text, path) is nowhere in the page text, the fields or the URL.
+   Numbers compare by value ($1,236 = 1236.00); values after "not" and dates are ignored.
+3. A mismatch becomes a `Candidate`. The next observation shows it under UNRESOLVED MISMATCH;
+   the model must `report_bug` (which resolves it) or `dismiss` it with a reason. Any other
+   action is refused once; the second time the candidate expires as "ignored", so a stubborn
+   model can't stall the run.
+
+**Why:** run 3 showed Gemma reaching 7 of 12 bug states and reporting 1: it acted, glanced at
+"ok" and moved on. Writing the expectation first makes the model do the arithmetic before it
+sees the answer, and the deterministic comparison puts the contradiction in front of it. It's
+the human tester's habit ("I expect $36") turned into a protocol.
+
+**Cost:** about 20 output tokens per checked action for `expect`, and a candidate line only
+when there is a mismatch. No extra model call. The comparison is a few string operations.
+
+**Weak spots:** the check only knows what the model wrote: a vague "page updates" catches
+only "nothing changed". A wrong expectation (the model miscalculates) creates a candidate it
+must dismiss, costing a step. Values present anywhere on the page count as found, so "$12"
+expected for a line and also shown elsewhere passes.
+
+**Also in J1:**
+- `ModelTimeout` (Ollama's read timeout): the loop retries the decision once with a
+  `trimmed` observation (first line of the task, 30 elements, 4 recent steps, 800 characters of
+  page text, no image). A second timeout ends the run cleanly (D61).
+- claude-cli: if the CLI reports `permission_denials` (the model tried to call a tool
+  natively), the answer is not taken; one corrective message says it does have the listed
+  tools and must answer with the JSON object.
+- `bench --holdout-first`: judge a change on the holdout before spending hours on the shop.
+
+**Interview Q&A**
+1. *Why not ask the model "was that right?" after every action?* That is a second model call
+   per step (double cost and time) and a weak model says "yes". Writing the expectation first
+   is cheaper and the comparison is deterministic.
+2. *Isn't refusing actions until a mismatch is resolved heavy-handed?* Only once per
+   candidate, then it expires. The point is that a contradiction can't scroll out of view.
+3. *How do you know it helps and isn't benchmark tuning?* Nothing in it knows any site; it is
+   kept only if the holdout (never tuned against) doesn't drop and clean-build false alarms
+   don't rise (MISS_ANALYSIS, run 4).

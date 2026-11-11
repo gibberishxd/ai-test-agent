@@ -71,6 +71,7 @@ model Workspace {
   auditLog     AuditLog[]
   domains      Domain[]
   modelConfigs ModelConfig[]
+  loginSetups  LoginSetup[]
 
   @@map("workspaces")
 }
@@ -318,4 +319,38 @@ model ModelConfig {
 
   @@index([workspaceId])
   @@map("model_configs")
+}
+
+/// How the worker signs in to a target before the agent starts. A TEST account only. The
+/// password and a recorded storage state (cookies + local storage) are encrypted like model
+/// keys (AES-256-GCM, workspace id as associated data) and never sent back to the browser, to
+/// the model, to logs or to reports. One setup per workspace and target origin.
+model LoginSetup {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId            String    @map("workspace_id") @db.Uuid
+  /// scheme://host[:port] of the target, e.g. https://staging.example.com
+  origin                 String
+  /// "form" (the worker fills the login form) or "storage_state" (a recorded sign-in)
+  kind                   String
+  loginUrl               String?   @map("login_url")
+  /// The test account's username or email: shown in settings so you know which account it is.
+  username               String?
+  passwordCiphertext     String?   @map("password_ciphertext")
+  usernameSelector       String?   @map("username_selector")
+  passwordSelector       String?   @map("password_selector")
+  submitSelector         String?   @map("submit_selector")
+  /// An element only shown when signed in (optional): the strongest proof the sign-in worked.
+  successSelector        String?   @map("success_selector")
+  storageStateCiphertext String?   @map("storage_state_ciphertext")
+  /// Set by "Test sign-in"; the worker claims it, signs in once and clears it.
+  checkRequestedAt       DateTime? @map("check_requested_at") @db.Timestamptz(3)
+  /// The last Test sign-in result: { ok, detail, checkedAt }. Never contains a secret.
+  lastCheck              Json?     @map("last_check")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, origin])
+  @@map("login_setups")
 }

@@ -19,7 +19,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from worker.db.models import Run, RunStatus
+from worker.db.models import Run, RunStatus, Workspace
+
+BENCHMARK_SLUG = "benchmark"  # the workspace the benchmark queues its runs in
 
 # Which status changes are allowed. Anything else is a bug in the worker.
 TRANSITIONS: dict[str, set[str]] = {
@@ -52,10 +54,16 @@ def recover_stale_runs(session: Session, older_than_s: float) -> int:
 
     If a worker process dies mid-run (crash, deploy, laptop closed), its run would stay
     "running" forever. Called when a worker starts; returns how many runs were recovered.
+    A run whose worker still heartbeats is alive, however old it is: a run's time limit is its
+    own worker's setting, not the setting of the worker that is starting (run 4).
     """
     cutoff = datetime.now(UTC) - timedelta(seconds=older_than_s)
     stale = session.scalars(
-        select(Run).where(Run.status == RunStatus.RUNNING, Run.started_at < cutoff)
+        select(Run).where(
+            Run.status == RunStatus.RUNNING,
+            Run.started_at < cutoff,
+            func.coalesce(Run.heartbeat_at, Run.started_at) < cutoff,
+        )
     ).all()
     for run in stale:
         transition(run, RunStatus.FAILED, error="the worker stopped before the run finished")
@@ -63,19 +71,29 @@ def recover_stale_runs(session: Session, older_than_s: float) -> int:
     return len(stale)
 
 
-def claim_next_run(session: Session, worker_id: str) -> Run | None:
+def claim_next_run(
+    session: Session,
+    worker_id: str,
+    only: list | None = None,
+    skip_benchmark: bool = False,
+) -> Run | None:
     """Claim the oldest queued run, or return None if there is nothing to do.
 
     The status change is committed immediately: after that the row is no longer "queued", so
     no other worker can pick it up, and the lock can be released.
+
+    - `only`: claim only these runs (a benchmark processes exactly the runs it queued, with its
+      own model, and never a customer's).
+    - `skip_benchmark`: a regular worker leaves the benchmark workspace's runs alone, so a
+      worker started with another model can't run part of someone's benchmark.
     """
-    stmt = (
-        select(Run)
-        .where(Run.status == RunStatus.QUEUED)
-        .order_by(Run.created_at)
-        .limit(1)
-        .with_for_update(skip_locked=True)
-    )
+    stmt = select(Run).where(Run.status == RunStatus.QUEUED)
+    if only is not None:
+        stmt = stmt.where(Run.id.in_(only))
+    if skip_benchmark:
+        benchmark = select(Workspace.id).where(Workspace.slug == BENCHMARK_SLUG)
+        stmt = stmt.where(Run.workspace_id.not_in(benchmark.scalar_subquery()))
+    stmt = stmt.order_by(Run.created_at).limit(1).with_for_update(skip_locked=True, of=Run)
     run = session.scalars(stmt).first()
     if run is None:
         session.rollback()

@@ -13,6 +13,7 @@ import {
   holdoutPerBug,
   judgeLabel,
   latestPerProvider,
+  validResults,
   leaderboard,
   perBug,
   percent,
@@ -30,7 +31,7 @@ export const metadata: Metadata = { title: "Benchmark" };
 
 export default async function BenchmarkPage() {
   await connection();
-  const rows: BenchmarkRow[] = await db.benchmarkResult.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+  const rows: BenchmarkRow[] = validResults(await db.benchmarkResult.findMany({ orderBy: { createdAt: "desc" }, take: 200 }));
 
   if (rows.length === 0) {
     return (

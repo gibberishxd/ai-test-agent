@@ -211,3 +211,17 @@ def test_actions_that_dont_change_state_are_not_checked(agent):
     result = run.run()
     assert "check" not in result.steps[0].args and "check" not in result.steps[1].args
     assert "UNRESOLVED" not in llm.calls[1]["observation"]
+
+
+def test_a_viewport_switch_is_a_change_even_when_the_text_is_the_same():
+    # Run 4's first J1 trace: "Mobile view of the Rooms page" was flagged as "nothing changed"
+    # because the text stayed the same; the model had to spend a step dismissing it.
+    switched = Effect("/a", "/a", viewport="desktop → mobile")
+    assert switched.changed and "viewport desktop → mobile" in switched.describe()
+    assert mismatches("mobile layout of the page", switched, "Rooms", {}) == []
+
+
+def test_set_viewport_in_the_loop_raises_no_false_mismatch(agent):
+    run, llm = agent([call("set_viewport", size="mobile", expect="the basket at phone width")])
+    result = run.run()
+    assert result.steps[0].args["check"]["flags"] == []

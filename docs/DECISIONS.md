@@ -726,3 +726,62 @@ numbers are the real test (Needs me).
   is where the rescore ran.
 - **Alternatives:** leave it and explain in PROGRESS (the leaderboard would keep showing the
   wrong commit); add a new row (a duplicate result would count twice).
+
+## D64. Expected vs. actual is checked by the worker, not by a second model call (run 4, J1)
+- **Decision:** the model states `expect` with each state-changing action; the worker compares
+  it with the page's changes (expected change missing, predicted value absent). Mismatches must
+  be reported or dismissed with a reason; other actions are refused once, then the candidate
+  expires as ignored.
+- **Alternatives:** a second "did it match?" model call per action (doubles cost and latency;
+  weak models agree with themselves); a structured expectation object with fields per value
+  (small models fill nested JSON badly); no enforcement (a weak model ignores the reminder,
+  as it ignored its own notes in run 3).
+- **Kept only if** holdout AI-only recall doesn't drop and clean-build false alarms don't rise.
+
+## D65. A timed-out model call gets one retry with a trimmed observation (run 4, J1)
+- **Decision:** clients raise `ModelTimeout`; the loop retries once with a shorter observation
+  and no image, then ends the run cleanly (D61).
+- **Alternatives:** a longer timeout (hides a stuck model); retrying with the same observation
+  (a long prompt is the usual reason a local model is slow).
+
+## D66. claude-cli: an answer that came with native tool-call denials is retried with a correction
+- **Decision:** `permission_denials` in the CLI's JSON mean the model tried a native tool call;
+  the answer is discarded and one corrective message is sent. Within the existing limit of two
+  attempts per decision.
+- **Why:** in run 3 such an answer was a valid `finish` ("no tools available"), so parsing alone
+  couldn't catch it.
+
+## D67. A benchmark and regular workers keep to their own runs (run 4, J1)
+- **What happened:** the first J1 Gemma benchmark was ruined. The e2e tests start a worker with
+  the fake model on the same database; on startup it failed a 16-minute benchmark run that was
+  alive (startup recovery looked only at the start time, against its own 480 s limit), then
+  claimed every queued benchmark run and ran it with the fake model. Result `6a0d7e24` is kept,
+  marked `details.invalid`, and hidden by `validResults` on the benchmark and home pages.
+- **Decision:** `claim_next_run(only=…)`: a benchmark processes exactly the runs it queued;
+  `skip_benchmark=True`: regular workers never claim runs in the benchmark workspace. Startup
+  recovery (`recover_stale_runs`) never fails a run whose heartbeat is fresh.
+- **Alternatives:** a separate database for e2e (fixes this trigger only; two production
+  workers with different models would still mix); a "pinned worker" column (a schema change for
+  what a workspace filter already expresses).
+- **Process rule:** no e2e tests while a benchmark is running.
+
+## D68. Testing apps behind a login: the worker signs in, the agent never knows how (run 4, J2)
+- **Decision:** `login_setups` per workspace and target origin: a login form (URL, username,
+  password encrypted with the model-key scheme, optional selectors) or a recorded Playwright
+  storage state (encrypted). `guarded_browser(login=…)` signs in every context it opens, so the
+  crawl, the agent and every replay are signed in. In the loop: the password and username are
+  scrubbed from observations, steps, bug reports and replay prompts; password fields are masked
+  in every screenshot; logout, change/reset password and delete/close account are denied on
+  every target (the demo shops too); landing on the login page without going there means the
+  session ended, so the worker signs in again (at most 3 times).
+- **Only on demo shops and verified domains**, for runs and for Test sign-in: a worker that
+  submits credentials wherever a workspace says would be an abuse tool.
+- **Test sign-in** needs a browser, so the web app sets `check_requested_at` and a worker claims
+  it with `FOR UPDATE SKIP LOCKED` and stores `{ok, detail, checkedAt}`; the detail is scrubbed.
+- **The username is stored in plain text** (shown in settings so you know which account it is);
+  only the password and the storage state are secrets. It is still scrubbed from everything the
+  model or a report sees.
+- **Alternatives:** let the agent sign in with credentials in the prompt (the model and its
+  provider would see them, and the agent could type them anywhere); a separate check-jobs table
+  (one nullable timestamp on the setup does the same for a quick, idempotent job).
+- **Untested glue:** the worker loop calls `process_login_check` before each run (one line).

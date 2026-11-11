@@ -14,6 +14,7 @@ from worker.browser import VIEWPORTS, VisitOptions, visit_page
 from worker.config import Settings
 from worker.crawler import crawl
 from worker.findings import findings_from_pages
+from worker.login import LoginConfig, SignInFailed, is_logout_link, sign_in
 from worker.report import BrokenLink, PageResult, Report
 from worker.safety.network import BlockedError, NetworkGuard, dev_allowed_local
 from worker.safety.proxy import GuardProxy
@@ -31,13 +32,16 @@ def make_guard(settings: Settings, target_url: str) -> NetworkGuard:
 
 @contextmanager
 def guarded_context(
-    settings: Settings, target_url: str, browser: Browser | None = None
+    settings: Settings,
+    target_url: str,
+    browser: Browser | None = None,
+    login: LoginConfig | None = None,
 ) -> Iterator[tuple[BrowserContext, NetworkGuard]]:
     """A browser context whose traffic goes through the safety proxy (rule 6.1).
 
     Pass `browser` to reuse one (tests); otherwise a browser is launched and closed here.
     """
-    with guarded_browser(settings, target_url, browser) as (new_context, guard):
+    with guarded_browser(settings, target_url, browser, login) as (new_context, guard):
         context = new_context()
         try:
             yield context, guard
@@ -47,13 +51,19 @@ def guarded_context(
 
 @contextmanager
 def guarded_browser(
-    settings: Settings, target_url: str, browser: Browser | None = None
+    settings: Settings,
+    target_url: str,
+    browser: Browser | None = None,
+    login: LoginConfig | None = None,
 ) -> Iterator[tuple[Callable[[], BrowserContext], NetworkGuard]]:
     """One browser and safety proxy, and a function that opens fresh contexts through it.
 
     For work that needs a clean browser state several times (replaying each report): a new
     context is cheap (no cookies, no storage, nothing from the one before), launching a
     browser and proxy isn't. The caller closes each context it opens.
+
+    With `login`, every context is signed in before it is handed out (the crawl, the agent and
+    each replay alike); if signing in fails, SignInFailed says why, without any secret.
     """
     guard = make_guard(settings, target_url)
     reason = guard.check(target_url)
@@ -67,7 +77,13 @@ def guarded_browser(
         launched = browser
 
         def new_context() -> BrowserContext:
-            return launched.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
+            context = launched.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
+            if login is not None:
+                result = sign_in(context, login)
+                if not result.ok:
+                    context.close()
+                    raise SignInFailed(result.detail)
+            return context
 
         yield new_context, guard
 
@@ -80,8 +96,11 @@ def passive_scan(
     on_page: Callable[[PageResult], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     browser: Browser | None = None,
+    login: LoginConfig | None = None,
 ) -> Report:
-    """Crawl and check `target_url`: look only, follow links, run every deterministic check."""
+    """Crawl and check `target_url`: look only, follow links, run every deterministic check.
+
+    With `login`, the crawl runs signed in and never follows a link that would log it out."""
     started = datetime.now(UTC)
     counter = itertools.count(1)
 
@@ -95,7 +114,7 @@ def passive_scan(
     def save_mobile(png: bytes, url: str) -> str:
         return storage.save(f"{key_prefix}/page-{number:03d}-mobile.png", png)
 
-    with guarded_context(settings, target_url, browser) as (context, guard):
+    with guarded_context(settings, target_url, browser, login) as (context, guard):
         options = VisitOptions(save_screenshot=save, save_mobile_screenshot=save_mobile)
 
         def visit(url: str) -> tuple[PageResult, list[str]]:
@@ -111,6 +130,7 @@ def passive_scan(
             max_depth=settings.max_depth,
             on_page=on_page,
             should_stop=should_stop,
+            skip_link=is_logout_link if login else None,
         )
 
     return Report(

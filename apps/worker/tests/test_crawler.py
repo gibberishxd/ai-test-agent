@@ -83,3 +83,14 @@ def test_follows_links_after_the_site_upgrades_to_https():
         "https://site.test/about",
         "https://site.test/contact",
     ]
+
+
+def test_links_the_skip_function_refuses_are_never_visited():
+    # Run 4, J2: a signed-in crawl must not follow a "log out" link and end its own session.
+    site = {f"{BASE}/": [f"{BASE}/account", f"{BASE}/logout"], f"{BASE}/account": []}
+    pages = crawl(
+        f"{BASE}/",
+        lambda url: (PageResult(url=url, status=200), site.get(url, [])),
+        skip_link=lambda url: url.endswith("/logout"),
+    )
+    assert visited_urls(pages) == [f"{BASE}/", f"{BASE}/account"]

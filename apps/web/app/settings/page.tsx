@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DomainList } from "@/components/domain-list";
+import { LoginSettings } from "@/components/login-settings";
 import { ModelSettings } from "@/components/model-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { currentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatCost, formatDate, hostOf } from "@/lib/format";
+import { listLoginSetups } from "@/lib/login-setups";
 import { listModelConfigs } from "@/lib/model-configs";
 import { auditLog, listDomains, usageThisMonth } from "@/lib/settings-data";
 
@@ -28,12 +30,13 @@ export default async function SettingsPage() {
   const user = await currentUser();
   if (!user) redirect("/signin");
 
-  const [workspace, domains, usage, log, models] = await Promise.all([
+  const [workspace, domains, usage, log, models, loginSetups] = await Promise.all([
     db.workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
     listDomains(user.workspaceId),
     usageThisMonth(user.workspaceId),
     auditLog(user.workspaceId),
     listModelConfigs(user.workspaceId),
+    listLoginSetups(user.workspaceId),
   ]);
   const used = Math.min(usage.runs / usage.quota, 1);
 
@@ -118,6 +121,19 @@ export default async function SettingsPage() {
               method: d.method,
             }))}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Sign-in for apps behind a login</CardTitle>
+          <CardDescription>
+            For a verified domain, the worker can sign in with a test account before the agent starts, so the
+            agent tests what signed-in users see. The password is stored encrypted and never reaches the AI model.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LoginSettings setups={loginSetups} />
         </CardContent>
       </Card>
 

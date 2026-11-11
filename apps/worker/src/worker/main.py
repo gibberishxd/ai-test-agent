@@ -39,6 +39,7 @@ from worker.db.models import BenchmarkResult, Run
 from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
 from worker.llm import LLMClient, make_client, make_judge
+from worker.login_checks import process_login_check
 from worker.model_configs import client_for_run
 from worker.queue import recover_expired_leases, recover_stale_runs
 from worker.report import write_report
@@ -141,7 +142,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         return
     if args.once:
-        if not process_next(sessions, llm, execute, client_for):
+        if not process_next(sessions, llm, execute, client_for, skip_benchmark=True):
             log.info("queue is empty")
         return
     last_recovery = 0.0
@@ -151,7 +152,10 @@ def main(argv: list[str] | None = None) -> None:
                 if recovered := recover_expired_leases(session, LEASE_S):
                     log.warning("failed %d run(s) whose worker stopped responding", recovered)
             last_recovery = time.monotonic()
-        if not process_next(sessions, llm, execute, client_for):
+        # A "Test sign-in" is quick and someone is waiting for it: before the next run.
+        checked = process_login_check(sessions, settings)
+        busy = process_next(sessions, llm, execute, client_for, skip_benchmark=True)
+        if not busy and not checked:
             time.sleep(POLL_INTERVAL_S)
 
 
@@ -209,7 +213,7 @@ def run_benchmark(
             queue()
     every_run = [run_id for ids in run_ids.values() for run_id in ids]
     log.info("benchmark: %d runs queued (%s)", len(every_run), mode)
-    wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute))
+    wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute, only=every_run))
     score_runs(sessions, judge, run_ids, commit)
 
 
