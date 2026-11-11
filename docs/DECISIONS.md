@@ -922,3 +922,13 @@ numbers are the real test (Needs me).
   no answer, so the one allowed claude-cli benchmark was not run. A missing answer was not taken
   as a yes for anything that spends the owner's Pro limit. The command to run it is in PROGRESS,
   "Needs me".
+
+## D79. CI's browser jobs run in Playwright's images (run 4, J8)
+- **What happened:** from about 14:00 on 2026-11-11, GitHub's runners couldn't resolve Ubuntu's
+  package archive, so `playwright install --with-deps` (apt) failed in the python and e2e jobs on
+  both ubuntu-latest (now 26.04) and ubuntu-24.04, for hours.
+- **Decision:** those jobs run in `mcr.microsoft.com/playwright/python:v1.64.0-noble` and
+  `mcr.microsoft.com/playwright:v1.64.0-noble`, which already contain Chromium's system libraries;
+  only the browser binary is installed (from Playwright's CDN, no apt). The database service is
+  reached by its name inside a container job. Runners stay pinned to ubuntu-24.04. CI green
+  (run 43062066917).

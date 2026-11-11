@@ -167,7 +167,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | J5 Teams and isolation | done | `roles.test.ts` (the whole table), `route-roles.db.test.ts` (every protected route × every role), `members.db.test.ts`, `rls.db.test.ts` (no WHERE → own rows only; cross-workspace writes fail; unset workspace sees nothing), partial unique index test; RLS cost +0.004–0.03 ms per query (D73, D74). |
 | J6 Production readiness | done | Images (web 319 MB, worker 3.2 GB with Chromium); `docker-compose.prod.yml` up locally: migrations once, web ready, 2 workers. A Gemma run started via `/api/v1` with an API key: done in 494 s, 11 pages, 20 agent steps, 6 findings confirmed (incl. planted bug 8 by the agent); 42 screenshots in the object store, served through a presigned link (302 → 200 image/png; 404 without access). Health, ready, metrics answer; JSON logs carry `run_id`. Actions pinned by SHA. `docs/DEPLOY.md` with a threat model (D76, D77). |
 | J7 Measure | done (Gemma only) | Gemma 12B full benchmark `bd88e166`: shop AI-only 0% (7% before verification: bug 8 reported twice, dismissed by the gemma judge), holdout 0% / 33%, 0 false alarms; signed-in runs reached `/orders` and logout was refused 3 times. The Sonnet run was not made: the owner didn't approve it today (rule: only with a yes). |
-| J8 Wrap-up | done | README (pipeline section, run-4 rows), WALKTHROUGH (one section per goal with Q&A), PROGRESS (this table, Needs me with exact steps), ROADMAP (what moved), DECISIONS D63–D78, DEVLOG; `npm test` and `npm run lint` exit 0; e2e 8/8 locally; pushed, nothing merged; servers and the production stack stopped, Ollama left running. |
+| J8 Wrap-up | done | README (pipeline section, run-4 rows), WALKTHROUGH (one section per goal with Q&A), PROGRESS (this table, Needs me with exact steps), ROADMAP (what moved), DECISIONS D63–D78, DEVLOG; `npm test` and `npm run lint` exit 0; e2e 8/8 locally; CI green (typescript, python, e2e; browser jobs in Playwright's images, D79); pushed, nothing merged; servers and the production stack stopped, Ollama left running. |
 
 ### Run 4 measurements (Gemma 4 12B, judge gemma4:12b, 1200 s)
 | Run | Agent code | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | False alarms | Correct but discarded | Avg run |
@@ -191,9 +191,6 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
      `lib/*.ts` data functions one file at a time; `rls.db.test.ts` shows the pattern.
    - **Production database role:** create a non-superuser role that owns the tables and is
      granted `app_tenant` (docs/DEPLOY.md, "On a managed platform"); otherwise RLS can be bypassed.
-   - **CI e2e and python jobs** failed at 14:30 because GitHub's runners couldn't resolve the
-     Ubuntu archive (apt, not our code; typescript passed). Re-run: `gh run rerun <id> --failed`.
-     If it keeps failing, run those jobs in Playwright's container image (no apt step).
    - **Email for invitations and magic links** (a provider, small cost): invitation links are
      copied by hand today.
    - **Pick a production object store** (S3, R2 or self-run SeaweedFS/MinIO); only `S3_*` change.
