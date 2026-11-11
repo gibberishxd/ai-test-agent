@@ -130,7 +130,7 @@ judge). No previously verified report is lost: all 16 confirmed agent reports of
 | Run | Agent code | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | Precision | False alarms | Correct but discarded | Avg run |
 |---|---|---|---|---|---|---|---|---|---|
 | Run 2, G6 rerun | 21e5669 (480 s) | 4% | 36% | 0% | 33% | 100% | 0.0 / 0.0 | not measured | 501 s |
-| Run 3, R3a | f1bf08a, replay fix (row labelled 984755e, D58) | **8%** (bug 8 in 2/3) | 39% | 0% | 33% | 100% | 0.0 / 0.0 | 0 (18 + 8 reports, none discarded) | 1083 s |
+| Run 3, R3a | f1bf08a, replay fix (row corrected from 984755e in run 4, D63) | **8%** (bug 8 in 2/3) | 39% | 0% | 33% | 100% | 0.0 / 0.0 | 0 (18 + 8 reports, none discarded) | 1083 s |
 | Run 3, R3b | 984755e, + D58–D60 (untried techniques, notes aren't reports) | **8%** (bug 9 in 2/3) | 39% | 0% | 33% | 100% | 0.0 / 0.0 | 0 (17 + 8 reports, none discarded) | 1075 s |
 
 R3a's result row `a4d5781c` was scored by the old code; `1eccde57` is its `--rescore` with the
@@ -177,8 +177,6 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
      gemma4:12b). Since D61 such a run ends cleanly with its steps kept, but it still costs that
      run. Options: a smaller context, a longer `TIMEOUT_S` in `llm/ollama.py`, or a machine with
      more memory.
-   - **R3a's result row says commit 984755e**, but its runs were made on f1bf08a (fixed for new
-     results by D58; the old row is left as recorded).
    - **CI actions are pinned by major/minor tag**, not by commit SHA. Pinning by SHA is safer
      against a hijacked tag; a Dependabot config would keep them current.
    - **Only one default model per workspace** is enforced by the app, not the database. A

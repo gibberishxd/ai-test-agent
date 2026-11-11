@@ -20,7 +20,7 @@ Runs read (all on the buggy apps; step logs in the database, run ids below):
 |---|---|---|---|---|
 | R2 | gemma4:12b | run 2 after D52 (commit 21e5669) | shop 804c2a85, e2ccf43f, d750ccfc; holdout d712b435, fba800a4 | 480 s |
 | S | Sonnet via claude-cli | run 2 (commit 0124950) | shop be495c9f | 480 s |
-| R3a | gemma4:12b | run 3 after the replay fix (f1bf08a; the result row says 984755e, see D58) | shop 6f8600fc, 88dafc6f, 906111fd; holdout e9a9fe78, 7c8f8521 | 1200 s |
+| R3a | gemma4:12b | run 3 after the replay fix (f1bf08a; the result row said 984755e until run 4, D58, D63) | shop 6f8600fc, 88dafc6f, 906111fd; holdout e9a9fe78, 7c8f8521 | 1200 s |
 | R3b | gemma4:12b | run 3 with D58–D60 (984755e) | shop 9590b85f (failed at step 31), a0e4c761, d52e106d; holdout 73b945f8, ab273f55 (failed at step 17) | 1200 s |
 
 How "did it trigger the bug" was judged: by reading what the agent typed and clicked, and on

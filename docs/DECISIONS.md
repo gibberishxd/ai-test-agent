@@ -717,3 +717,12 @@ numbers are the real test (Needs me).
   builds have real unplanted bugs that count as false alarms, and one run finished early after
   a native tool-call attempt in `claude -p`. All three are under "Needs me": each changes the
   benchmark or needs another Sonnet run to verify, which this run doesn't allow.
+
+## D63. A mislabelled benchmark row is corrected in place, with a note (run 4, J0)
+- **What:** result rows `a4d5781c` (R3a) and `1eccde57` (its rescore) said commit 984755e;
+  their runs were made on f1bf08a (the old bench read the commit after the runs, fixed by D58).
+- **Decision:** set `git_commit` to f1bf08a and add `details.correction` saying what changed,
+  when and why. The rows' scores are untouched; `rescore_commit` (984755e) stays, since that
+  is where the rescore ran.
+- **Alternatives:** leave it and explain in PROGRESS (the leaderboard would keep showing the
+  wrong commit); add a new row (a duplicate result would count twice).
