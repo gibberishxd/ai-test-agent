@@ -865,3 +865,16 @@ numbers are the real test (Needs me).
 - **Not yet:** every web query through `tenantDb` (the run page, lists and the API reads are; some
   writes and settings queries still use the plain client with their WHERE). Listed under Needs me.
 - **Cost:** +0.004–0.03 ms per query from the policies, +~0.1–0.3 ms from the extra statements.
+
+## D75. The login-only demo bug and a signed-in shop benchmark (run 4, J2) — decided without owner, revisit
+- **Owner's question 2 (unanswered), option a:** "My orders" (`/orders`, `/orders/:id`) only for a
+  signed-in user; planted bug 13: opening an order shows the next order's number, items and total.
+  Reachable by clicking, a realistic data bug, and a test of expected vs. actual. In `bugs.json`,
+  a unit test, and verify-bugs on both builds (plus a check that the pages need a sign-in).
+- **Owner's question 3 (unanswered), option a:** the shop benchmark (buggy and clean builds) runs
+  with a saved sign-in setup for the demo account the shop itself shows; logout is denied there, so
+  planted bug 11 (session survives logout) can't be triggered. Run 4's results are reported with
+  and without bug 11. The holdout app has no login and is unchanged.
+- **Also:** the login page's `?next=` accepts only paths in the shop (no open redirect); the
+  worker's sign-in check polls for up to 5 s, because a single-page app changes view after the click
+  without a page load (the real demo shop failed the first check; a fixture now covers it).

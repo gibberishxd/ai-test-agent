@@ -15,6 +15,7 @@ The same sign-in is applied to the crawl, the agent's browser and every replay's
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -31,6 +32,8 @@ from worker.secret_box import decrypt_secret
 log = logging.getLogger(__name__)
 
 TIMEOUT_MS = 15_000
+JUDGE_MS = 5000  # how long a sign-in may take to show its result
+POLL_MS = 100
 SETTLE_MS = 2000
 ACCOUNT_MASK = "[test account]"
 SECRET_MASK = "[secret]"
@@ -216,14 +219,26 @@ def _fill_form(context: BrowserContext, login: LoginConfig) -> SignInResult:
 
 
 def _judge(page: Page, login: LoginConfig) -> SignInResult:
-    """Did it work? A success selector is proof; otherwise the password field must be gone."""
-    if login.success_selector:
-        if page.locator(login.success_selector).first.is_visible():
-            return SignInResult(True, f"signed in: {login.success_selector} is shown")
-        return SignInResult(False, _failure(page, login, f"{login.success_selector} isn't shown"))
-    if _first_visible(page, PASSWORD_FIELDS) is None:
-        return SignInResult(True, f"signed in: now on {_path(page.url)}")
-    return SignInResult(False, _failure(page, login, "still on the sign-in page"))
+    """Did it work? A success selector is proof; otherwise the password field must be gone.
+
+    Polled for up to JUDGE_MS: a single-page app changes its view a moment after the click,
+    without a page load or a request that "network idle" could wait for."""
+    deadline = time.monotonic() + JUDGE_MS / 1000
+    while True:
+        if login.success_selector:
+            if page.locator(login.success_selector).first.is_visible():
+                return SignInResult(True, f"signed in: {login.success_selector} is shown")
+        elif _first_visible(page, PASSWORD_FIELDS) is None:
+            return SignInResult(True, f"signed in: now on {_path(page.url)}")
+        if time.monotonic() > deadline:
+            break
+        page.wait_for_timeout(POLL_MS)
+    what = (
+        f"{login.success_selector} isn't shown"
+        if login.success_selector
+        else "still on the sign-in page"
+    )
+    return SignInResult(False, _failure(page, login, what))
 
 
 def _failure(page: Page, login: LoginConfig, what: str) -> str:

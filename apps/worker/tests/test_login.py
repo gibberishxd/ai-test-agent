@@ -205,3 +205,11 @@ def test_a_failed_sign_in_stops_the_run_with_a_safe_message(site_url, browser):
         with guarded_browser(settings, f"{site_url}/", browser, login=login) as (new_context, _):
             new_context()
     assert "wrong-Pass-123" not in str(failed.value) and USERNAME not in str(failed.value)
+
+
+def test_a_single_page_app_that_changes_view_a_moment_later_counts_as_signed_in(context, site_url):
+    # Run 4: the demo shop navigates in the browser after login (no page load, no request), so
+    # right after the click the password field is still there for a few hundred milliseconds.
+    login = form_login(site_url)
+    login.login_url = f"{site_url}/signin-spa.html"
+    assert sign_in(context, login).ok

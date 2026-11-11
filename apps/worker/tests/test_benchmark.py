@@ -36,9 +36,11 @@ def decision(run, matched):
     )
 
 
-def test_bugs_json_has_twelve_planted_bugs():
+def test_bugs_json_has_thirteen_planted_bugs():
+    # Bug 13 (run 4) is only reachable when signed in: the order history.
     planted = load_planted()
-    assert [b.id for b in planted] == list(range(1, 13))
+    assert [b.id for b in planted] == list(range(1, 14))
+    assert planted[-1].page == "/orders" and planted[-1].detection == "agent"
 
 
 def test_candidates_are_narrowed_by_page():

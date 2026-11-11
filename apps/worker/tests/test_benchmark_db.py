@@ -194,3 +194,38 @@ def test_holdout_first_queues_the_holdout_before_the_shop(sessions, monkeypatch)
         "http://shop/",
         "http://shop-clean/",
     ]
+
+
+def test_the_shop_benchmark_runs_signed_in_with_the_demo_account(sessions, monkeypatch):
+    # Run 4, J2/J7 (owner's question 3, decided without owner: option a): the shop is tested
+    # the way customers use the product, with a saved sign-in; the holdout app has no login.
+    import base64
+    import os
+
+    from worker.config import Settings
+    from worker.db.models import LoginSetup
+    from worker.main import run_benchmark
+    from worker.secret_box import decrypt_secret
+
+    monkeypatch.setattr("worker.main.git_commit", lambda: "abc1234")
+    key = os.urandom(32)
+    settings = Settings(
+        _env_file=None,
+        demo_url="http://shop:5173/",
+        clean_demo_url="http://shop:5174/",
+        demo2_url="http://holdout:5175/",
+        clean_demo2_url="http://holdout:5176/",
+        model_keys_secret=base64.b64encode(key).decode(),
+    )
+    run_benchmark(settings, FakeClient(), FakeClient(), sessions, lambda *_: None, 1, "passive", 1)
+    with sessions() as session:
+        setups = {s.origin: s for s in session.query(LoginSetup).all()}
+        assert set(setups) == {"http://shop:5173", "http://shop:5174"}
+        shop = setups["http://shop:5173"]
+        assert (shop.login_url, shop.username) == ("http://shop:5173/login", "demo@example.com")
+        assert (
+            decrypt_secret(shop.password_ciphertext, str(shop.workspace_id), key) == "password123"
+        )
+    run_benchmark(settings, FakeClient(), FakeClient(), sessions, lambda *_: None, 1, "passive", 0)
+    with sessions() as session:
+        assert session.query(LoginSetup).count() == 2  # saved once, not again per benchmark

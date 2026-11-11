@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sign in</title><link rel="icon" href="data:,"></head>
+<body>
+  <main id="app">
+    <form id="form">
+      <label for="email">Email</label>
+      <input id="email" type="email">
+      <label for="pw">Password</label>
+      <input id="pw" type="password">
+      <button type="submit">Log in</button>
+    </form>
+  </main>
+  <script>
+    // Like a single-page app: no page load and no request; the view changes a moment later.
+    document.getElementById("form").onsubmit = (event) => {
+      event.preventDefault();
+      if (document.getElementById("pw").value !== "s3cret-Pass!") return;
+      setTimeout(() => { document.getElementById("app").innerHTML = "<h1>Profile</h1>"; }, 300);
+    };
+  </script>
+</body>
+</html>

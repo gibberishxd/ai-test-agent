@@ -205,6 +205,7 @@ def run_benchmark(
     commit = git_commit()
     with sessions() as session:
         workspace = benchmark_workspace(session)
+        ensure_demo_sign_in(session, workspace, settings)
         run_ids: dict[str, list[str]] = {}
 
         def queue_shop() -> None:
@@ -226,6 +227,46 @@ def run_benchmark(
     log.info("benchmark: %d runs queued (%s)", len(every_run), mode)
     wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute, only=every_run))
     score_runs(sessions, judge, run_ids, commit)
+
+
+# The demo shop's own test account, shown on its login page (apps/demo/src/store.tsx): not a secret.
+DEMO_ACCOUNT = ("demo@example.com", "password123")
+
+
+def ensure_demo_sign_in(session: Session, workspace, settings: Settings) -> None:
+    """Run 4 (owner's question 3, decided without owner, option a): the shop benchmark runs signed
+    in with a saved sign-in setup, as a customer's app behind a login would; logout is then denied,
+    so planted bug 11 can't be triggered (reported separately). The holdout app has no login."""
+    from urllib.parse import urlsplit
+
+    from worker.db.models import LoginSetup
+    from worker.secret_box import encrypt_secret, server_key
+
+    raw_key = settings.model_keys_secret.get_secret_value()
+    if not raw_key:
+        log.warning("MODEL_KEYS_SECRET isn't set: the shop benchmark runs without a saved sign-in")
+        return
+    key = server_key(raw_key)
+    for url in (settings.demo_url, settings.clean_demo_url):
+        parts = urlsplit(url)
+        origin = f"{parts.scheme}://{parts.netloc}"
+        exists = (
+            session.query(LoginSetup).filter_by(workspace_id=workspace.id, origin=origin).first()
+        )
+        if exists:
+            continue
+        username, password = DEMO_ACCOUNT
+        session.add(
+            LoginSetup(
+                workspace_id=workspace.id,
+                origin=origin,
+                kind="form",
+                login_url=f"{origin}/login",
+                username=username,
+                password_ciphertext=encrypt_secret(password, str(workspace.id), key),
+            )
+        )
+    session.commit()
 
 
 def rescore_latest(sessions: sessionmaker[Session], judge: LLMClient) -> None:
