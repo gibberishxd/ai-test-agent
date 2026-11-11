@@ -138,3 +138,38 @@ def test_every_call_refuses_a_working_folder_that_contains_the_repo(tmp_path):
     with pytest.raises(RuntimeError, match="inside the repo"):
         ClaudeCliClient(run=cli, temp_dir=REPO_ROOT.parent).complete("hi")
     assert cli.calls == []
+
+
+class FakeCliWithDenials(FakeCli):
+    """Like FakeCli, but each scripted answer can come with the CLI's permission_denials."""
+
+    def __init__(self, *answers: tuple[str, list[str]]):
+        super().__init__(*[text for text, _ in answers])
+        self.denials = [names for _, names in answers]
+
+    def __call__(self, command, stdin, cwd):
+        data = json.loads(super().__call__(command, stdin, cwd))
+        data["permission_denials"] = [
+            {"tool_name": name, "tool_input": {}} for name in self.denials.pop(0)
+        ]
+        return json.dumps(data)
+
+
+def test_a_native_tool_call_attempt_gets_one_corrective_message():
+    # Run 3, H7: Sonnet tried to call set_viewport natively inside `claude -p`, was refused,
+    # concluded it had no tools, and answered "finish". That answer must not be taken.
+    cli = FakeCliWithDenials(
+        ('{"name": "finish", "arguments": {"summary": "no tools available"}}', ["set_viewport"]),
+        ('{"name": "click", "arguments": {"element_id": 2, "reasoning": "go on"}}', []),
+    )
+    decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
+    assert decision.tool_call == ToolCall("click", {"element_id": 2, "reasoning": "go on"})
+    retry = cli.calls[1]["stdin"]
+    assert "set_viewport" in retry and "JSON" in retry and "you do have" in retry.lower()
+
+
+def test_an_answer_without_denials_is_taken_as_it_is():
+    cli = FakeCliWithDenials(('{"name": "finish", "arguments": {"summary": "done"}}', []))
+    decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
+    assert decision.tool_call == ToolCall("finish", {"summary": "done"})
+    assert len(cli.calls) == 1

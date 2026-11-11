@@ -164,3 +164,33 @@ def test_a_benchmark_is_labelled_with_the_commit_its_runs_were_made_on(
     with sessions() as session:
         latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
         assert latest.git_commit == "made0on"
+
+
+def test_holdout_first_queues_the_holdout_before_the_shop(sessions, monkeypatch):
+    # Run 4, J1: a change is judged on the holdout first, so its runs must come first; if the
+    # holdout drops, the shop runs can be stopped before they use hours of local compute.
+    from worker.config import Settings
+    from worker.main import run_benchmark
+
+    monkeypatch.setattr("worker.main.git_commit", lambda: "abc1234")
+    order = []
+
+    def execute(_session, run, *_):
+        order.append(run.target_url)
+
+    settings = Settings(
+        _env_file=None,
+        demo_url="http://shop/",
+        clean_demo_url="http://shop-clean/",
+        demo2_url="http://holdout/",
+        clean_demo2_url="http://holdout-clean/",
+    )
+    run_benchmark(
+        settings, FakeClient(), FakeClient(), sessions, execute, 1, "passive", 1, holdout_first=True
+    )
+    assert order == [
+        "http://holdout/",
+        "http://holdout-clean/",
+        "http://shop/",
+        "http://shop-clean/",
+    ]

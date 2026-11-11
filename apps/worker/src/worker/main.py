@@ -76,6 +76,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     bench.add_argument("--mode", choices=["interactive", "passive"], default="interactive")
     bench.add_argument(
+        "--holdout-first",
+        action="store_true",
+        help="run the holdout app before the shop (judge a change on the holdout first)",
+    )
+    bench.add_argument(
         "--rescore", action="store_true", help="re-match the latest benchmark's runs, no new runs"
     )
     again = sub.add_parser("reverify", help="replay an old run's agent reports (read-only)")
@@ -124,7 +129,15 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.command == "bench":
         run_benchmark(
-            settings, llm, judge, sessions, execute, args.runs, args.mode, args.holdout_runs
+            settings,
+            llm,
+            judge,
+            sessions,
+            execute,
+            args.runs,
+            args.mode,
+            args.holdout_runs,
+            holdout_first=args.holdout_first,
         )
         return
     if args.once:
@@ -164,8 +177,12 @@ def run_benchmark(
     runs: int,
     mode: str,
     holdout_runs: int = 0,
+    holdout_first: bool = False,
 ) -> None:
     """Queue the benchmark runs, process them with `llm`, then score them with `judge`.
+
+    `holdout_first` queues the holdout app's runs before the shop's: a change is judged on the
+    holdout first, and the shop runs can be stopped if it drops.
 
     The commit is read before the runs start: the runs use the code loaded now, and new
     commits made while a long benchmark runs must not relabel it.
@@ -173,17 +190,23 @@ def run_benchmark(
     commit = git_commit()
     with sessions() as session:
         workspace = benchmark_workspace(session)
-        run_ids = {
-            "buggy": queue_runs(session, workspace.id, [settings.demo_url] * runs, mode),
-            "clean": queue_runs(session, workspace.id, [settings.clean_demo_url], mode),
-        }
-        if holdout_runs > 0:
-            run_ids["holdout_buggy"] = queue_runs(
-                session, workspace.id, [settings.demo2_url] * holdout_runs, mode
-            )
-            run_ids["holdout_clean"] = queue_runs(
-                session, workspace.id, [settings.clean_demo2_url], mode
-            )
+        run_ids: dict[str, list[str]] = {}
+
+        def queue_shop() -> None:
+            run_ids["buggy"] = queue_runs(session, workspace.id, [settings.demo_url] * runs, mode)
+            run_ids["clean"] = queue_runs(session, workspace.id, [settings.clean_demo_url], mode)
+
+        def queue_holdout() -> None:
+            if holdout_runs > 0:
+                run_ids["holdout_buggy"] = queue_runs(
+                    session, workspace.id, [settings.demo2_url] * holdout_runs, mode
+                )
+                run_ids["holdout_clean"] = queue_runs(
+                    session, workspace.id, [settings.clean_demo2_url], mode
+                )
+
+        for queue in (queue_holdout, queue_shop) if holdout_first else (queue_shop, queue_holdout):
+            queue()
     every_run = [run_id for ids in run_ids.values() for run_id in ids]
     log.info("benchmark: %d runs queued (%s)", len(every_run), mode)
     wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute))

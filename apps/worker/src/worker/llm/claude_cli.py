@@ -69,9 +69,17 @@ class ClaudeCliClient(LLMClient):
         usage = Usage(model=self.agent_model)
         problem = ""
         for _attempt in range(2):  # the first answer, and one retry with the reason
-            text, used = self._call(self.agent_model, system, prompt, image_path)
+            text, used, denied = self._call_with_denials(
+                self.agent_model, system, prompt, image_path
+            )
             usage.input_tokens += used.input_tokens
             usage.output_tokens += used.output_tokens
+            if denied:
+                # The model tried to call a tool natively, was refused by the CLI and may have
+                # concluded it has no tools (run 3, H7). Don't take that answer; correct it once.
+                problem = f"you tried to call {', '.join(denied)} as a native tool"
+                prompt += native_tool_correction(denied)
+                continue
             call, problem = parse_tool_answer(text, tools)
             if call:
                 return Decision(tool_call=call, text=text, usage=usage)
@@ -102,6 +110,14 @@ class ClaudeCliClient(LLMClient):
     def _call(
         self, model: str, system: str | None, prompt: str, image_path: Path | None = None
     ) -> tuple[str, Usage]:
+        text, usage, _ = self._call_with_denials(model, system, prompt, image_path)
+        return text, usage
+
+    def _call_with_denials(
+        self, model: str, system: str | None, prompt: str, image_path: Path | None = None
+    ) -> tuple[str, Usage, list[str]]:
+        """The answer, its usage, and the tools the CLI refused (native tool-call attempts;
+        reading the screenshot with Read is allowed and isn't one)."""
         command = [
             "claude",
             "-p",
@@ -124,12 +140,32 @@ class ClaudeCliClient(LLMClient):
                 outside_repo(folder)
         data = json.loads(self._run(command, prompt, self._temp_dir))
         usage = data.get("usage") or {}
-        return str(data.get("result") or ""), Usage(
-            model=model,
-            input_tokens=usage.get("input_tokens", 0) or 0,
-            output_tokens=usage.get("output_tokens", 0) or 0,
-            cost_usd=0.0,  # the Pro plan: no per-call charge
+        denied = list(
+            dict.fromkeys(
+                str(d.get("tool_name") or "?")
+                for d in data.get("permission_denials") or []
+                if isinstance(d, dict)
+            )
         )
+        return (
+            str(data.get("result") or ""),
+            Usage(
+                model=model,
+                input_tokens=usage.get("input_tokens", 0) or 0,
+                output_tokens=usage.get("output_tokens", 0) or 0,
+                cost_usd=0.0,  # the Pro plan: no per-call charge
+            ),
+            denied,
+        )
+
+
+def native_tool_correction(denied: list[str]) -> str:
+    return (
+        f"\n\nYou tried to call {', '.join(denied)} as a native tool. That is not how tools work "
+        "here, and it does not mean you have no tools: you do have every tool listed above. "
+        'Choose one by answering with only the JSON object {"name": ..., "arguments": {...}}, '
+        "and keep testing."
+    )
 
 
 def outside_repo(folder: Path) -> None:

@@ -5,13 +5,22 @@ import json
 import os
 
 from worker.config import Settings
-from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
+from worker.llm.base import (
+    Decision,
+    LLMClient,
+    ModelTimeout,
+    TextResult,
+    ToolCall,
+    ToolSpec,
+    Usage,
+)
 from worker.llm.fake import FakeClient
 
 __all__ = [
     "Decision",
     "FakeClient",
     "LLMClient",
+    "ModelTimeout",
     "TextResult",
     "ToolCall",
     "ToolSpec",

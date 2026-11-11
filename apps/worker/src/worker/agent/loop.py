@@ -15,12 +15,19 @@ from urllib.parse import urljoin, urlsplit
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
+from worker.agent.expect import (
+    EXPECT_ACTIONS,
+    RESOLVING_ACTIONS,
+    Candidate,
+    Effect,
+    mismatches,
+)
 from worker.agent.observe import Element, Memory, PageState, build_observation, read_page
 from worker.agent.policy import Budget, card_number_reason, deny_reason
 from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.tools import TOOL_NAMES, TOOLS
 from worker.browser import VIEWPORTS, listen, viewport_label, wait_until_quiet
-from worker.llm import LLMClient, ToolCall, Usage
+from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
@@ -77,6 +84,10 @@ class AgentResult:
     summary: str | None = None
     # Console errors and failed requests seen during the session, per URL (become findings).
     pages: dict[str, PageResult] = field(default_factory=dict)
+    # Expected-vs-actual mismatches the model closed as not a bug ({step, reason, flags}), and
+    # the steps of mismatches it ignored until they expired.
+    dismissed: list[dict] = field(default_factory=list)
+    ignored: list[int] = field(default_factory=list)
 
 
 class ModelCallFailed(Exception):
@@ -112,6 +123,7 @@ class AgentRun:
         self._seen_urls: set[str] = set()
         self._last_site_url = config.target_url  # where to return to if a step leaves the site
         self._viewport = "desktop"
+        self._pending: list[Candidate] = []  # mismatches the model hasn't resolved yet
         page.set_viewport_size(VIEWPORTS[self._viewport])
         listen(page, self._console, self._failed)
 
@@ -155,17 +167,25 @@ class AgentRun:
     def _step(self) -> StepRecord:
         """One turn: look at the page, let the model choose, check and run it, record it."""
         state, events, image, screenshot = self._observe()
-        observation = build_observation(
-            state,
-            self._task(),
-            self._budget_line(),
-            events,
-            self.memory,
-            viewport_label(self._viewport),
-        )
+
+        def observation(trimmed: bool = False) -> str:
+            return build_observation(
+                state,
+                self._task(),
+                self._budget_line(),
+                events,
+                self.memory,
+                viewport_label(self._viewport),
+                checks=self._open_mismatches(),
+                trimmed=trimmed,
+            )
+
         try:
-            decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
-        except Exception as error:  # timeout, connection refused, provider error...
+            decision = self.llm.decide(SYSTEM_PROMPT, observation(), TOOLS, image)
+        except ModelTimeout:
+            # A long observation is what makes a local model slow: one more try, shorter.
+            decision = self._decide(observation(trimmed=True), None)
+        except Exception as error:  # connection refused, provider error...
             raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
         index = len(self.result.steps) + 1
         outcome = self._act(decision.tool_call, state, index)
@@ -182,6 +202,12 @@ class AgentRun:
         self.memory.steps.append(f"#{step.index} {step.human} → {step.result}")
         self.on_step(step)
         return step
+
+    def _decide(self, observation: str, image: bytes | None):
+        try:
+            return self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
+        except Exception as error:
+            raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
 
     def _observe(self) -> tuple[PageState, list[str], bytes | None, bytes | None]:
         """The page as the model will see it: state, new events, the image for the model (if
@@ -226,6 +252,14 @@ class AgentRun:
             "element": element.target() if element else None,
             "box": element.box if element else None,
         }
+        unresolved = self._unresolved_gate(call.name)
+        if unresolved:
+            return {
+                **outcome,
+                "result": f"BLOCKED: {unresolved}",
+                "blocked": True,
+                "block_reason": unresolved,
+            }
         blocked = self._check(call.name, args, element)
         if blocked:
             return {
@@ -234,7 +268,12 @@ class AgentRun:
                 "blocked": True,
                 "block_reason": blocked,
             }
+        before = self._snapshot() if call.name in EXPECT_ACTIONS else None
         result, changed = self._execute(call.name, args, element, state, index)
+        if call.name == "report_bug" and result == "bug recorded" and self._pending:
+            result += f" (resolves the mismatch from #{self._pending.pop(0).step})"
+        if before is not None and not result.startswith("error"):
+            result = self._compare(args, before, result, index)
         left = self._return_to_site()
         if left:
             # Marked blocked so replay doesn't repeat a step that leaves the site.
@@ -308,6 +347,8 @@ class AgentRun:
                 return self._set_viewport(str(args.get("size", "")))
             elif action == "note":
                 return self._note(str(args.get("text", ""))), False
+            elif action == "dismiss":
+                return self._dismiss(args), False
             elif action == "type":
                 self.page.locator(element.locator).fill(
                     str(args.get("text", "")), timeout=ACTION_TIMEOUT_MS
@@ -370,6 +411,95 @@ class AgentRun:
         return (
             "noted (notes are only for you and are never reported; if this describes a "
             "problem you saw, report it now with report_bug)"
+        )
+
+    # --- expected vs. actual (J1) ---------------------------------------------------------------
+
+    def _snapshot(self) -> dict:
+        """What the page looks like before an action whose result will be checked."""
+        return {
+            "url": self.page.url,
+            "text": self._page_text(),
+            "fields": self._field_values(),
+            "console": len(self._console),
+            "failed": len(self._failed),
+        }
+
+    def _compare(self, args: dict, before: dict, result: str, index: int) -> str:
+        """Record what the action changed, compare it with the model's expectation, and open a
+        candidate when they don't match. Returns the result line, with the mismatch if any."""
+        text, fields = self._page_text(), self._field_values()
+        old_lines, new_lines = _lines(before["text"]), _lines(text)
+        effect = Effect(
+            url_before=before["url"],
+            url_after=self.page.url,
+            added=[line for line in new_lines if line not in set(old_lines)],
+            removed=[line for line in old_lines if line not in set(new_lines)],
+            fields=[
+                f"{name}: {before['fields'].get(name, '')} → {value}"
+                for name, value in fields.items()
+                if before["fields"].get(name) != value
+            ],
+            events=[f"{e.kind} error: {e.text[:100]}" for e in self._console[before["console"] :]]
+            + [
+                f"network: {r.method} {r.url} → {r.status or r.failure}"
+                for r in self._failed[before["failed"] :]
+            ],
+        )
+        expected = redact(str(args.get("expect") or "")).strip()[:200]
+        flags = mismatches(expected, effect, text, fields)
+        args["check"] = {"expected": expected, "happened": effect.describe(), "flags": flags}
+        if not flags:
+            return result
+        self._pending.append(Candidate(index, expected, effect.describe(), flags))
+        return (
+            f"{result} | MISMATCH with what you expected ({'; '.join(flags)}): report it with "
+            "report_bug, or dismiss it with a reason"
+        )
+
+    def _field_values(self) -> dict[str, str]:
+        try:
+            pairs = self.page.evaluate(FIELD_VALUES_JS)
+        except PlaywrightError:
+            return {}
+        return {str(name)[:60]: redact(str(value))[:100] for name, value in pairs}
+
+    def _unresolved_gate(self, action: str) -> str | None:
+        """While a mismatch is open, other actions are refused once; then it expires as ignored,
+        so a model that won't resolve it can't stall the run."""
+        if not self._pending or action in RESOLVING_ACTIONS:
+            return None
+        candidate = self._pending[0]
+        if not candidate.blocked_once:
+            candidate.blocked_once = True
+            return (
+                f"resolve the mismatch from #{candidate.step} first: report_bug if it is a bug, "
+                "or dismiss it with a reason"
+            )
+        self._pending.pop(0)
+        self.result.ignored.append(candidate.step)
+        return None
+
+    def _dismiss(self, args: dict) -> str:
+        if not self._pending:
+            return "error: there is no unresolved mismatch to dismiss"
+        reason = redact(str(args.get("reason") or "")).strip()[:300]
+        if not reason:
+            return "error: say why this is not a bug (reason)"
+        step = element_number(args.get("step_id"))
+        candidate = next((c for c in self._pending if c.step == step), self._pending[0])
+        self._pending.remove(candidate)
+        self.result.dismissed.append(
+            {"step": candidate.step, "reason": reason, "flags": candidate.flags}
+        )
+        return f"dismissed the mismatch from #{candidate.step}"
+
+    def _open_mismatches(self) -> str:
+        if not self._pending:
+            return ""
+        return (
+            "UNRESOLVED MISMATCH (resolve it before anything else: report_bug if it is a bug, "
+            "or dismiss with a reason)\n" + "\n".join(c.describe() for c in self._pending)
         )
 
     def _scroll_position(self) -> float:
@@ -549,7 +679,23 @@ def describe(action: str, args: dict, element: Element | None) -> str:
         return f"Report bug: {args.get('title', '')}"
     if action == "finish":
         return "Finish"
+    if action == "dismiss":
+        return f"Dismiss the mismatch from #{args.get('step_id', '')}"
     return action
+
+
+# Field values by label, for expected-vs-actual. Passwords and hidden fields are never read.
+FIELD_VALUES_JS = """() => Array.from(document.querySelectorAll('input, select, textarea'))
+  .filter(e => e.type !== 'password' && e.type !== 'hidden')
+  .map(e => [
+    (e.labels && e.labels[0] && e.labels[0].innerText.trim()) || e.getAttribute('aria-label')
+      || e.name || e.id || e.type,
+    (e.type === 'checkbox' || e.type === 'radio') ? String(e.checked) : e.value,
+  ])"""
+
+
+def _lines(text: str) -> list[str]:
+    return list(dict.fromkeys(line.strip() for line in text.splitlines() if line.strip()))
 
 
 # Charter techniques a model can visibly try with one tool call, and the reminder shown until it

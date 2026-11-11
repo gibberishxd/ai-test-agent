@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Basket</title><link rel="icon" href="data:,"></head>
+<body>
+  <main>
+    <h1>Basket</h1>
+    <p>Mug: $12.00 each</p>
+    <label for="qty">Quantity</label>
+    <input id="qty" type="number" value="1">
+    <button type="button" id="update">Update</button>
+    <button type="button" id="save">Save</button>
+    <button type="button" id="add">Add note</button>
+    <p id="total">Total: $12.00</p>
+    <p id="status"></p>
+  </main>
+  <script>
+    // A generic wrong-total page: the total ignores the quantity.
+    document.getElementById("update").onclick = () => {
+      document.getElementById("total").textContent = "Total: $12.00 (updated)";
+    };
+    // Save does nothing at all.
+    document.getElementById("save").onclick = () => {};
+    // Works as anyone would expect.
+    document.getElementById("add").onclick = () => {
+      document.getElementById("status").textContent = "Note added";
+    };
+  </script>
+</body>
+</html>
