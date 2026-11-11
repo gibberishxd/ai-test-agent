@@ -79,6 +79,10 @@ class AgentResult:
     pages: dict[str, PageResult] = field(default_factory=dict)
 
 
+class ModelCallFailed(Exception):
+    """The model didn't answer a decision (after the client's own timeout and retries)."""
+
+
 class AgentRun:
     def __init__(
         self,
@@ -130,7 +134,12 @@ class AgentRun:
             if reason:
                 self.result.stop_reason = reason
                 break
-            step = self._step()
+            try:
+                step = self._step()
+            except ModelCallFailed as error:
+                # Keep the steps and reports so far: they get verified like any other run's.
+                self.result.stop_reason = f"the model call failed: {error}"
+                break
             loop_reason = budget.record(
                 step.action, step.args, step.usage.cost_usd, changed=step.changed
             )
@@ -154,7 +163,10 @@ class AgentRun:
             self.memory,
             viewport_label(self._viewport),
         )
-        decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
+        try:
+            decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
+        except Exception as error:  # timeout, connection refused, provider error...
+            raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
         index = len(self.result.steps) + 1
         outcome = self._act(decision.tool_call, state, index)
         step = StepRecord(

@@ -690,3 +690,15 @@ numbers are the real test (Needs me).
   the replay steps would be far behind).
 - **Why generic:** it is about how the tool works, not about any site. Measured together with
   D59 in the second Gemma benchmark; the holdout decides.
+
+## D61. A failed model call ends the run, it doesn't fail it (run 3, H6)
+- **What happened:** in the second Gemma benchmark one `decide` call took longer than the
+  Ollama client's 300 s timeout. The exception went up through the agent loop and the run
+  became "failed": 42 steps of work, and its reports were never verified.
+- **Decision:** the loop catches a failed decision (any exception from `llm.decide`), stops
+  with `stop_reason = "the model call failed: <error>"`, and the run continues as normal:
+  errors seen are added as findings, reports are verified, the run ends "done".
+- **Alternatives:** retry the call (a model that hangs for 300 s once often hangs again, and
+  each retry costs 5 minutes); a longer timeout (hides a stuck model for longer).
+- **Note:** the benchmark that hit it was already running the old code; its failed run
+  (9590b85f) is scored as it is and noted in PROGRESS.

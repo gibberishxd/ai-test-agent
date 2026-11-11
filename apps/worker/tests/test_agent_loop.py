@@ -430,3 +430,26 @@ def test_a_note_reminds_the_model_that_notes_are_not_reports(agent):
     run, _, _ = agent([call("note", text="price shows NaN"), call("finish", summary="")])
     result = run.run().steps[0].result
     assert result.startswith("noted") and "report_bug" in result
+
+
+class BrokenModel(FakeClient):
+    """Answers the first decision, then the model call fails (a local model timing out)."""
+
+    def decide(self, system, observation, tools, image=None):
+        if self.calls:
+            self.calls.append({"method": "decide", "observation": observation})
+            raise TimeoutError("timed out")
+        return super().decide(system, observation, tools, image)
+
+
+def test_a_failing_model_call_ends_the_run_cleanly_and_keeps_its_steps(context, site_url):
+    # Run 3: one gemma call took over 300 s and the exception failed the whole run, 42 steps
+    # and its reports with it. Now the loop stops with the reason and keeps what it has.
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+    llm = BrokenModel(decisions=[call("type", element_id=NAME, text="x")])
+    config = AgentConfig(target_url=f"{site_url}/form.html", mode="interactive", budget=budget())
+    result = AgentRun(context.new_page(), llm, guard, config).run()
+    assert [s.action for s in result.steps] == ["type"]
+    assert result.stop_reason == "the model call failed: TimeoutError: timed out"
