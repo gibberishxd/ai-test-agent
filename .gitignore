@@ -38,3 +38,4 @@ apps/worker/AItestagent.txt
 aitestagentprogress*.txt
 *.transcript.txt
 testprogress*.txt
+testagentprogress*.txt

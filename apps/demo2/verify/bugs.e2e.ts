@@ -60,3 +60,15 @@ test("bug 6: long room name runs off a phone screen", async ({ page }) => {
   const overflows = await title.evaluate((el) => el.scrollWidth > el.clientWidth);
   expectBug(overflows);
 });
+
+// Not planted: a real bug the agent found in the clean build (run 3, H7), now fixed. The buggy
+// build shows no date error at all (bug 4), so only the clean build is checked.
+test("fixed: a date error goes away once the date is corrected", async ({ page }) => {
+  test.skip(test.info().project.name === "buggy", "bug 4 hides it");
+  await fillBooking(page, "2027-02-04", "2027-02-01");
+  await page.getByRole("button", { name: "Book now" }).click();
+  const error = page.getByText("Check-out must be after check-in.");
+  await expect(error).toBeVisible();
+  await page.getByLabel("Check-out").fill("2027-02-06");
+  await expect(error).toBeHidden();
+});

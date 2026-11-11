@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { bug } from "../bugs";
 import { formatPrice } from "../products";
+import { nameError } from "../profile";
 import { useStore } from "../store";
 import { usePageTitle } from "../usePageTitle";
 
@@ -13,6 +14,7 @@ export function ProfilePage() {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [ordersError, setOrdersError] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string>();
 
   useEffect(() => {
     // Bug 2 lives on the server side: in the buggy build /api/profile returns 500 (vite.config.ts).
@@ -29,8 +31,11 @@ export function ProfilePage() {
     event.preventDefault();
     // Bug 8: the save button does nothing: no update, no message, no error.
     if (bug(8)) return;
-    updateName(String(new FormData(event.currentTarget).get("name") ?? ""));
-    setSaved(true);
+    const name = String(new FormData(event.currentTarget).get("name") ?? "");
+    const problem = nameError(name);
+    setError(problem);
+    setSaved(!problem);
+    if (!problem) updateName(name);
   };
 
   return (
@@ -40,7 +45,18 @@ export function ProfilePage() {
         <form className="form" onSubmit={save}>
           <div className="field">
             <label htmlFor="name">Display name</label>
-            <input id="name" name="name" defaultValue={session.name} />
+            <input
+              id="name"
+              name="name"
+              defaultValue={session.name}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "name-error" : undefined}
+            />
+            {error && (
+              <p id="name-error" className="error" role="alert">
+                {error}
+              </p>
+            )}
           </div>
           <p className="muted">Email: {session.email}</p>
           <button type="submit" className="button">

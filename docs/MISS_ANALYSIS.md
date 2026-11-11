@@ -174,8 +174,9 @@ asked to read `apps/demo/bugs.json` was refused ("outside the working directory"
 replay. Read one by one they are real behaviour of the "clean" builds, not hallucinations:
 quantity 0 silently added as 1, the cart emptied by a reload, an empty display name saved,
 a stale "Check-out must be after check-in" message after the dates were fixed. The benchmark
-counts them as false alarms because they aren't in the planted list. Needs-me: decide whether
-to fix them in the clean builds or list them as known, unplanted bugs.
+counts them as false alarms because they aren't in the planted list. After the run, the two
+clear ones (empty display name saved, stale date error) were fixed in the shared code, with
+tests; the other two are intended behaviour of the demos and stay.
 
 **Weak spot found:** one shop run (1b473b32) finished after 26 steps saying its tools "were not
 available", although its previous step (`set_viewport`) had worked. Most likely Sonnet in

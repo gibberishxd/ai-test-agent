@@ -40,6 +40,13 @@ export function validate(form: BookingForm): FormErrors {
   return errors;
 }
 
+/** The errors left once `field` is edited: its old message no longer describes what's typed. */
+export function clearError(errors: FormErrors, field: keyof BookingForm): FormErrors {
+  const rest = { ...errors };
+  delete rest[field];
+  return rest;
+}
+
 const KEY = "harbor-bookings";
 
 export function loadBookings(): Booking[] {

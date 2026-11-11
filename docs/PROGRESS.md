@@ -162,11 +162,12 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
      three runs (H7); Gemma never does. Choose: show a code on the site (a banner, as real shops
      do) or keep it as a "guess a common code" bug. Either way, compare models on the same
      version. `docs/MISS_ANALYSIS.md`.
-   - **The clean builds have real, unplanted bugs** that Sonnet found and the benchmark counts
-     as false alarms (H7: 3.0 per clean shop run, 1.0 on the clean holdout): quantity 0 added
-     as 1, a reload empties the cart, an empty display name is saved, a stale date error stays
-     after the fix. Fix them in the clean builds, or list them as known bugs the matcher
-     ignores on the clean build.
+   - **The clean builds had real, unplanted bugs** that Sonnet found and the benchmark counted
+     as false alarms (H7: 3.0 per clean shop run, 1.0 on the clean holdout). The two clear ones
+     are fixed, with unit and browser tests: an empty display name is now refused, and a date
+     error clears once the field is edited. Left as intended behaviour, still open for you: a
+     reload empties the cart (it lives only in memory), quantity 0 is silently raised to 1.
+     False-alarm numbers from before this fix aren't directly comparable with later ones.
    - **claude-cli adapter:** one Sonnet run finished early saying its tools "were not
      available" (it tried a native tool call instead of the JSON answer). Dev-only provider.
    - **Gemma now reaches bug states but doesn't recognise them** (7 of 12 AI-only states

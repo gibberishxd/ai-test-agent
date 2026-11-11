@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { usePageTitle } from "../App";
-import { nights, saveBooking, stayTotal, validate, type BookingForm, type FormErrors } from "../booking";
+import {
+  clearError,
+  nights,
+  saveBooking,
+  stayTotal,
+  validate,
+  type BookingForm,
+  type FormErrors,
+} from "../booking";
 import { bug } from "../bugs";
 import { formatMoney, ROOMS } from "../rooms";
 
@@ -30,8 +38,10 @@ export function RoomPage() {
 
   const nightCount = nights(form.checkIn, form.checkOut);
   const total = stayTotal(room.rate, nightCount);
-  const set = (field: keyof BookingForm) => (event: { target: { value: string } }) =>
+  const set = (field: keyof BookingForm) => (event: { target: { value: string } }) => {
     setForm({ ...form, [field]: event.target.value });
+    setErrors(clearError(errors, field));
+  };
 
   function submit(event: FormEvent) {
     event.preventDefault();
