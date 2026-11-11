@@ -6,7 +6,7 @@ on:
 
 jobs:
   typescript:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moved to 26.04, where apt mirrors failed for Playwright (run 4)
     services:
       postgres:
         image: postgres:17
@@ -33,7 +33,7 @@ jobs:
       - run: npm run test --workspaces
 
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moved to 26.04, where apt mirrors failed for Playwright (run 4)
     services:
       postgres:
         image: postgres:17
@@ -64,7 +64,7 @@ jobs:
   # then the web app's end-to-end tests: real web app, demo shop and worker, with the worker on
   # the scripted FakeClient, so it is free and deterministic.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moved to 26.04, where apt mirrors failed for Playwright (run 4)
     services:
       postgres:
         image: postgres:17
