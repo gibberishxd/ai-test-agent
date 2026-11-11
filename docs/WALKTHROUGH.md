@@ -917,3 +917,26 @@ weak model may tick a technique off once and never use it where it matters.
    byte-identical for caching, and a weak model follows what's in front of it each step.
 3. *How do you know it changes behaviour?* Count technique use per run before and after
    (MISS_ANALYSIS) and compare holdout recall.
+
+## Run 3: what the measurements taught (`docs/MISS_ANALYSIS.md`, D59–D62)
+
+**What:** two Gemma benchmarks (before and after the charter reminder) and one Sonnet benchmark,
+read per bug and per step: did the agent reach the bug's page, trigger the bug, report it, and
+did verification keep it?
+
+**What it showed:** after the replay fix (D53) verification is no longer the bottleneck: 0
+correct reports discarded for Gemma, 1 for Sonnet. With the reminder (D59) Gemma reaches 7 of
+12 judgement-bug states, but reports 1. Sonnet reports most of what it reaches: shop AI-only
+38%, holdout 25%. For a small model the limit is recognising that a state is wrong.
+
+**Weak spots:** 3 Gemma runs, 2 holdout runs, one Sonnet benchmark: small samples, and a
+single run swings a bug from 0/3 to 2/3. The clean builds turned out to have real bugs, so
+"false alarms" on them overstate Sonnet's noise. Bug 7 needs a guessed code.
+
+**Interview Q&A**
+1. *How do you know a change helped and isn't noise?* Count the behaviour it targets (technique
+   use went 0 → 1 per run), not only the score, and check the holdout didn't drop.
+2. *Why did Sonnet get "false alarms"?* It found real bugs in the clean build that aren't in
+   the planted list. A benchmark's clean build has to be audited too.
+3. *What would you do next?* Help the model compare expected with actual after each
+   state-changing action, then measure on the holdout first.

@@ -53,3 +53,13 @@ Benchmark scores go here too, once Phase 2 exists.
   more planted bugs that replay dismissed. Verification is now the bottleneck, not the model.
 - Broke and fixed: claude-cli started inside the repo could read bugs.json (now runs restricted in
   a temp folder); number inputs were recorded as "textbox" instead of "spinbutton".
+
+## 2026-11-11 (run 3, unattended, branch agent-v3)
+- H0–H8 of docs/RUN_PLAN_3.md, test first: replay waits for SPA routes and starts each bug in a
+  fresh browser context (Sonnet's lost reports for bugs 5 and 8 now verify), a verification
+  funnel with "correct but discarded", the sign-in flake fixed at its cause (Auth.js CSRF race),
+  run leases and a queue concurrency test, an EXPLAIN-backed index, docs/DATABASE.md, Node 24 CI.
+- Measured: Gemma 12B with a charter reminder now uses every technique and reaches 7/12 bug
+  states but reports ~1 (shop AI-only 8%, holdout 0%). One Sonnet benchmark via claude-cli:
+  shop AI-only 38% (was 13%), recall 58%, holdout 25% / 50%; its 3 "false alarms" are real
+  bugs in the clean build. Next limit for small models: recognising a wrong state.

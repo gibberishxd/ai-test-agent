@@ -11,8 +11,8 @@ five kinds:
   report was filed.
 - **Reported, then dropped:** a report was filed but replay verification or the benchmark
   matcher threw it away.
-- **Unreachable for any agent:** the bug can't be triggered without knowledge the site never
-  gives (a benchmark flaw, not an agent miss).
+- **Needs outside knowledge:** the bug can't be triggered without something the site never
+  gives (a benchmark flaw more than an agent miss; bug 7 turned out to be guessable).
 
 Runs read (all on the buggy apps; step logs in the database, run ids below):
 
@@ -45,7 +45,7 @@ and didn't recognise it".
 |---|---|---|---|---|
 | 5. Cart total ignores quantity | 0/3 | 0/3 | **reported, dropped** → found after the H1 fix (offline) | Gemma always adds one unit, so line price = total and nothing is wrong on screen (never triggered). Sonnet typed a huge quantity, saw "$8,900,000,000,000.00 vs Total $89.00", reported it, and replay dropped it ("no textbox Quantity": the replay timing bug, D53). |
 | 6. Checkout accepts an invalid email | 0/3 | 0/3 | 0/1 | Gemma reaches /checkout in every run (6–12 steps there) but always types the valid test email (never triggered). Sonnet never went to checkout (it spent its steps on quantities and the profile). |
-| 7. Discount applies twice on double click | 0/3 | 0/3 | 0/1 | **Unreachable for any agent.** It needs the code `SAVE10`, which the shop never shows (no banner, no hint). Gemma and Sonnet only tried made-up codes ("INVALID100", double-clicking Apply with an invalid code). Needs-me: show a code on the site, or count the bug as unfindable. |
+| 7. Discount applies twice on double click | 0/3 | 0/3 | 0/1 | Needs the code `SAVE10`, which the shop never shows. Gemma and the first Sonnet run only tried made-up codes ("INVALID100"). **Correction after H7:** Sonnet typed `SAVE10` as its first and only guess in one of three runs and found the bug, so the bug is guessable (a very common code), not unreachable. It is still unfair to agents that don't guess well. Needs-me: show a code on the site, or keep it as a "guess a common code" bug. |
 | 8. "Save changes" does nothing | reported in 1/3, **dropped by replay** | **2/3** | **reported, dropped** → found after the H1 fix (offline) | Both models change the display name and click Save. Before H1 the report was lost in replay (an earlier step of another flow failed, or the timing bug). After H1 it is kept. |
 | 9. Wool Socks price shows $NaN | 1/3 | 0/3 | 1/1 | **Saw it, didn't report.** Gemma wrote the note "Wool Socks price is NaN" in 5 runs and reported it in 1. Sonnet reported it at once. Led to D60. |
 | 10. Long product name overflows on mobile | 0/3 | 0/3 | 0/1 | Gemma never changed the viewport (never triggered). Sonnet switched to mobile on /profile only, not on the long product's page. The passive scan's phone-width screenshots aren't reviewed in interactive runs (the agent decides what to look at). |
@@ -147,3 +147,41 @@ here (each is AI-core work for the owner): ask the model after each state-changi
 that a report can be built from); or let the screenshot reviewer that the passive scan
 already has look at the screens right after a technique step. Sonnet already does the
 comparison without help (it reported 7 things in one run), so the H7 run is the reference.
+
+## Sonnet benchmark (H7, claude-cli, one full run)
+
+Result row `f6151b32`, commit a8a6d13, same settings as be495c9f (480 s limit, 40 steps, judge
+pinned to gemma4:12b), shop 3 runs + clean, holdout 2 runs + clean. No usage limit was hit.
+The claude-cli process ran in a temp folder with `--restricted`; before the run, one Haiku call
+asked to read `apps/demo/bugs.json` was refused ("outside the working directory").
+
+| Bug | Sonnet H7 | How |
+|---|---|---|
+| Shop 5. Cart total ignores quantity | 1/3 | Quantity 3 → line $36.00, total $12.00. |
+| Shop 6. Invalid email at checkout | 1/3 | Typed `invalid@email`, got "Order confirmed". |
+| Shop 7. Discount twice | 1/3 | Guessed `SAVE10`, double-clicked Apply, saw "×2" and $72.09. |
+| Shop 8. Save changes does nothing | 1/3 (+1 dropped) | Saved, reloaded, saw the old name. In another run the judge dismissed the report: "nothing happened" is hard to see on one screenshot (the 1 correct-but-discarded). |
+| Shop 9. $NaN | 3/3 | |
+| Shop 10. Long name on mobile | 1/3 | Switched to 375 px on the long product's page. |
+| Shop 11. Session after logout + reload | 0/3 | Never logged out and reloaded in the same run. |
+| Shop 12. Wrong-password error placement | 1/3 | Typed a wrong password for the demo account. |
+| Holdout 3. One night charged | 1/2 | |
+| Holdout 4. Check-out before check-in | 1/2 | |
+| Holdout 5. Double-click Book now | 0/2 | |
+| Holdout 6. Room name on mobile | 0/2 | |
+
+**False alarms are now real:** 3 on the clean shop and 1 on the clean holdout, all confirmed by
+replay. Read one by one they are real behaviour of the "clean" builds, not hallucinations:
+quantity 0 silently added as 1, the cart emptied by a reload, an empty display name saved,
+a stale "Check-out must be after check-in" message after the dates were fixed. The benchmark
+counts them as false alarms because they aren't in the planted list. Needs-me: decide whether
+to fix them in the clean builds or list them as known, unplanted bugs.
+
+**Weak spot found:** one shop run (1b473b32) finished after 26 steps saying its tools "were not
+available", although its previous step (`set_viewport`) had worked. Most likely Sonnet in
+`claude -p` tried to call a tool natively instead of answering with the JSON the adapter asks
+for, and then chose `finish`. Dev-only
+provider; noted, not fixed (verifying a fix would need another Sonnet run).
+
+Sonnet finds what Gemma reaches but doesn't recognise (bugs 5, 8 and holdout 3, 4 are all
+states Gemma reached in R3b). That supports the R3b conclusion: the gap is recognition.

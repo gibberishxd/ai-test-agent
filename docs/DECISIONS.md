@@ -702,3 +702,18 @@ numbers are the real test (Needs me).
   each retry costs 5 minutes); a longer timeout (hides a stuck model for longer).
 - **Note:** the benchmark that hit it was already running the old code; its failed run
   (9590b85f) is scored as it is and noted in PROGRESS.
+
+## D62. The one Sonnet benchmark: full set, holdout included (run 3, H7)
+- **Decision:** the single allowed claude-cli run is a full `worker bench`: shop 3 runs + clean,
+  holdout 2 runs + clean, 480 s and 40 steps (be495c9f's settings), judge pinned to
+  gemma4:12b. Before it, one Haiku call started exactly as the worker starts the CLI (temp
+  folder, `--restricted`, Read allowed for that folder) was asked to read
+  `apps/demo/bugs.json` and was refused. A watcher checked the runs for a usage-limit or
+  model-call failure, to stop the benchmark at once without a retry; none happened.
+- **Alternatives:** shop only (the plan's minimum). The holdout was added because Sonnet's
+  runs are short (~4 min) and the queue ran the shop first, so a usage limit would still have
+  left the shop result complete; the holdout is the only evidence that gains generalise.
+- **Findings recorded, not acted on:** bug 7 turned out guessable (MISS_ANALYSIS), the clean
+  builds have real unplanted bugs that count as false alarms, and one run finished early after
+  a native tool-call attempt in `claude -p`. All three are under "Needs me": each changes the
+  benchmark or needs another Sonnet run to verify, which this run doesn't allow.

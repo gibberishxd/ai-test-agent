@@ -170,6 +170,10 @@ Results so far (shop: 3 buggy runs + 1 clean run each):
 | ollama · gemma4:12b, after the D52 fixes, shop (local) | 4% | 36% | 100% | 0.0 | $0.00 | 501 s | gemma4:12b (pinned) | 21e5669 |
 | ollama · gemma4:12b, after the D52 fixes, **holdout** (local) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 21e5669 |
 | claude-cli · Sonnet, **one run only** (owner's plan) | 13% | 42% | 100% | not measured | $0.00 | 302 s | gemma4:12b (pinned) | 0124950 |
+| ollama · gemma4:12b, run 3 (replay fix + charter reminder), shop (local) | 8% | 39% | 100% | 0.0 | $0.00 | 1075 s | gemma4:12b (pinned) | 984755e |
+| ollama · gemma4:12b, run 3, **holdout** (local) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 984755e |
+| claude-cli · Sonnet, run 3, shop (owner's Pro login) | **38%** | **58%** | 96% | 3.0 (real unplanted bugs) | $0.00 | 222 s | gemma4:12b (pinned) | a8a6d13 |
+| claude-cli · Sonnet, run 3, **holdout** | **25%** | **50%** | 100% | 1.0 | $0.00 | | gemma4:12b (pinned) | a8a6d13 |
 | claude · claude-sonnet-5-5 (API) | not run: needs an API key | | | | | | | |
 
 What the run-2 rows show: with the new agent, Gemma 4 12B lost its one AI bug (it wrote the
@@ -179,6 +183,13 @@ no sign of shop-specific tuning. Sonnet (one run through the `claude` CLI, so no
 explored much better: it reported a wrong cart total and the broken "Save changes" as well as
 the "$NaN" price, but replay dismissed the first two; that is the next thing to fix
 (see `docs/PROGRESS.md`). The bottleneck has moved from the model to verification.
+
+What run 3 shows: with replay fixed (it no longer throws correct reports away) Sonnet finds 7
+of the 8 judgement bugs on the shop at least once and 2 of 4 on the holdout it was never tuned
+on. Gemma 4 12B now uses the charter's techniques and reaches most bug states, but rarely
+recognises them; that, not exploration or verification, is its limit
+(`docs/MISS_ANALYSIS.md`). Sonnet's "false alarms" on the clean builds are real behaviour that
+isn't in the planted list (an empty name is saved, a reload empties the cart).
 
 AI-only recall for the first three rows is computed from their per-bug results (bug 9, "$NaN" price, was
 the only AI bug found, by Gemma in 3 of 3 runs); they predate the holdout app. Bugs 1–4 were

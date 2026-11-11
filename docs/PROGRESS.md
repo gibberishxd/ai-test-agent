@@ -106,6 +106,8 @@ The run stopped early because the Claude usage limit was reached. Root `npm test
 | H4 Database hardening | done | `test_queue_concurrency.py`: 8 concurrent workers × 300 runs, each claimed exactly once; lease tests (starts at claim, expired → failed by another worker, long live run untouched, heartbeat renews, late worker can't undo). `scripts/db_perf.py` on 10k runs / 500k steps: one index added (`benchmark_results(created_at)`, 0.87 → 0.09 ms), all other hot queries already indexed. Migrations `20261111010000_run_lease`, `20261111020000_benchmark_results_newest` (Prisma `migrate diff` against a migrated database: no difference for them), SQLAlchemy mirror, drift test now checks hot-query indexes. `docs/DATABASE.md`. D56. |
 | H5 CI cleanup | done | `actions/checkout@v7`, `actions/setup-node@v7`, `astral-sh/setup-uv@v10.3.3` (Node 24). CI run 42912487613: all three jobs green; the only annotation left is GitHub's notice about the `ubuntu-latest` label, no Node 20 deprecation. D57. |
 | H6 Make the agent find more | done | `docs/MISS_ANALYSIS.md` (every AI-only bug, every Gemma run, why missed). Generic changes, failing-first tests: D58 (`element_id: [10]`, commit read before runs), D59 (untried charter techniques in each observation, `test_charter_coverage.py`), D60 (note result says notes aren't reports), D61 (failed model call ends the run cleanly). Re-measured R3a and R3b below: shop AI-only 8% both, holdout 0% both (no drop). |
+| H7 One Sonnet benchmark | done | Empirical check first: a Haiku call started as the worker starts it (temp folder, `--restricted`, Read allowed) was refused when asked for `apps/demo/bugs.json`; the `outside_repo` guard runs before every call. Then exactly one `LLM_PROVIDER=claude-cli uv run worker bench` (shop 3 + clean, holdout 2 + clean, 480 s, judge gemma4:12b), no usage limit hit. Table below, D62. |
+| H8 Wrap-up | done | README results table (run-3 rows), WALKTHROUGH (run-3 measurements), PROGRESS (this table, Needs me), DECISIONS D62, DEVLOG entry; root `npm test` (worker 372 passed + 1 skipped) and `npm run lint` exit 0; pushed to `agent-v3`, nothing merged; demo and web servers stopped, Ollama left running. |
 
 ### H1: run be495c9f re-checked offline (`uv run worker reverify be495c9f [--judge]`)
 
@@ -141,24 +143,47 @@ but what's behind them did: Gemma now used double click, reload and the mobile v
 every run that lived (0 times in 11 earlier runs) and reached 7 of the 12 AI-only bug states
 (1 before), yet reported only bug 9. Holdout didn't drop, so D59/D60 stay.
 
+### H7: one Sonnet benchmark through claude-cli, compared with be495c9f
+
+| Run | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | Precision | False alarms (shop / holdout) | Correct but discarded | Avg run |
+|---|---|---|---|---|---|---|---|---|
+| be495c9f (run 2, one shop run, old replay) | 13% | 42% | not run | not run | 100% | not measured | 4 reports lost in replay (bugs 5, 8) | 302 s |
+| H7, result `f6151b32` (commit a8a6d13) | **38%** | **58%** | **25%** | **50%** | 96% / 100% | 3.0 / 1.0 | 1 (bug 8, judge said no) | 222 s |
+
+Funnel: shop 35 reported → 28 verified (5 duplicates, 2 discarded at replay), holdout 11 → 10.
+Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592705, clean
+28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
+Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
+
 ## Needs me
-0. **Run 2 follow-ups (no money needed unless you choose Claude API):**
-   - **Replay lost two of Sonnet's correct reports** (bugs 5 and 8, run be495c9f). Replaying
-     the steps standalone works (`uv run python <scratchpad>/replay_check.py`-style: load the
-     bug's steps with `replay_plans`, call `_replay_step` one by one), so look at what differs
-     inside `verify_and_dedupe`: one shared browser context for all bugs (cookies, storage),
-     the guard proxy, or timing. Then re-verify that run's dismissed bugs.
-   - **The full claude-cli benchmark** was not run on purpose: 7 runs × ~40 Sonnet calls would
-     use a large share of your Pro limit. To run it: `cd apps/worker && LLM_PROVIDER=claude-cli
-     uv run worker bench` (needs `DEV_MODE=true`, and the four demo servers running).
-   - **"Sign in as demo user" sometimes lands back on `/signin?callbackUrl=…`** instead of the
-     dashboard (once locally on a cold dev server, twice in CI on the second e2e test). The e2e
-     tests now retry the sign-in click (`signInAsDemoUser`), so other features stay tested, but
-     the cause is open: check the Auth.js credentials flow (CSRF cookie timing, or a dev-server
-     reload during sign-in) in the dev server's log when it happens.
-   - **CI uses actions that target Node 20** (`actions/checkout@v4`, `setup-node@v4`,
-     `setup-uv@v6`): GitHub forces them onto Node 24 with a deprecation warning. Bump to their
-     Node 24 majors when they're out.
+0. **Run 3 (branch `agent-v3`, nothing merged):**
+   - **Review and merge.** `agent-v3` is based on `agent-v2`; neither is merged into `main`.
+   - **Bug 7 needs the code `SAVE10`, which the shop never shows.** Sonnet guessed it once in
+     three runs (H7); Gemma never does. Choose: show a code on the site (a banner, as real shops
+     do) or keep it as a "guess a common code" bug. Either way, compare models on the same
+     version. `docs/MISS_ANALYSIS.md`.
+   - **The clean builds have real, unplanted bugs** that Sonnet found and the benchmark counts
+     as false alarms (H7: 3.0 per clean shop run, 1.0 on the clean holdout): quantity 0 added
+     as 1, a reload empties the cart, an empty display name is saved, a stale date error stays
+     after the fix. Fix them in the clean builds, or list them as known bugs the matcher
+     ignores on the clean build.
+   - **claude-cli adapter:** one Sonnet run finished early saying its tools "were not
+     available" (it tried a native tool call instead of the JSON answer). Dev-only provider.
+   - **Gemma now reaches bug states but doesn't recognise them** (7 of 12 AI-only states
+     reached, 1 reported). The next improvement is in the AI core (yours): for example an
+     "expected vs. happened" line after each state-changing action. `docs/MISS_ANALYSIS.md`.
+   - **Ollama sometimes takes over 300 s for one call** (3 of 7 runs in R3b, on a 16 GB Mac with
+     gemma4:12b). Since D61 such a run ends cleanly with its steps kept, but it still costs that
+     run. Options: a smaller context, a longer `TIMEOUT_S` in `llm/ollama.py`, or a machine with
+     more memory.
+   - **R3a's result row says commit 984755e**, but its runs were made on f1bf08a (fixed for new
+     results by D58; the old row is left as recorded).
+   - **CI actions are pinned by major/minor tag**, not by commit SHA. Pinning by SHA is safer
+     against a hijacked tag; a Dependabot config would keep them current.
+   - **Only one default model per workspace** is enforced by the app, not the database. A
+     partial unique index (`WHERE is_default`) would make it a database rule (`docs/DATABASE.md`).
+   - **Run 2's items are done:** replay losing correct reports (H1, D53), the sign-in flake (H3,
+     D55), CI's Node 20 actions (H5, D57), the full claude-cli benchmark (H7, below).
 1. **(Optional) A Claude API key** for real Claude numbers: put `ANTHROPIC_API_KEY=...` in `.env`
    and set `LLM_PROVIDER=claude`. Tonight runs on Ollama (`qwen3-vl:8b`, local, free).
 2. **(Optional) The `alias: ... not found` errors in `~/.bash_profile`.** Not touched: the
@@ -178,4 +203,5 @@ every run that lived (0 times in 11 earlier runs) and reached 7 of the 12 AI-onl
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.
 
 ## Spend tonight
-Claude API: $0.00 (no key, no Claude calls made). Ollama: $0 (local): ~12 agent runs + 2 benchmark scorings.
+Run 3: $0.00. No API key and no paid calls. claude-cli (owner's Pro login): one Haiku check call and one benchmark (7 runs, ~220 agent decisions), no usage limit hit. Ollama local.
+Earlier: Claude API: $0.00 (no key, no Claude calls made). Ollama: $0 (local): ~12 agent runs + 2 benchmark scorings.
