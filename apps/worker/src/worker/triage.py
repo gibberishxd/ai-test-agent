@@ -9,7 +9,7 @@ how often each model is wrong on real sites.
 
 from urllib.parse import urlsplit
 
-from sqlalchemy import event, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from worker.db.models import Bug, FindingTriage, Run
@@ -59,10 +59,3 @@ def backfill_fingerprints(session: Session, batch: int = 500) -> int:
             )
         session.commit()
         done += len(bugs)
-
-
-@event.listens_for(Bug, "before_insert")
-def _set_fingerprint(_mapper, _connection, bug: Bug) -> None:
-    """Every stored finding gets its fingerprint, whichever code path stores it."""
-    if bug.fingerprint is None:
-        bug.fingerprint = fingerprint(bug)

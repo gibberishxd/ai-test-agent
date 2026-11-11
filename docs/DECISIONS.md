@@ -878,3 +878,41 @@ numbers are the real test (Needs me).
 - **Also:** the login page's `?next=` accepts only paths in the shop (no open redirect); the
   worker's sign-in check polls for up to 5 s, because a single-page app changes view after the click
   without a page load (the real demo shop failed the first check; a fixture now covers it).
+
+## D76. Production packaging: two images, one compose profile, S3 storage, DB-derived metrics (run 4, J6)
+- **Images:** `Dockerfile.web` (multi-stage: npm ci → `next build` standalone → a runtime stage with
+  only the traced server files, running as `node`; a `migrate` target runs `prisma migrate deploy`)
+  and `Dockerfile.worker` (Playwright's own image for this Playwright version, so Chromium and its
+  system libraries match; uv from its official image; locked dependencies without dev tools;
+  runs as `pwuser`).
+- **Compose:** the production services are in `docker-compose.prod.yml` (project `ata-prod`), see
+  D77. Its own Postgres and volume, an S3-compatible store, migrations before web and workers
+  start, `WORKERS` replicas.
+- **Storage:** `Storage` gets `delete_prefix`; `S3Storage` (boto3) next to `LocalStorage`, chosen
+  by `STORAGE`. The web app checks access, then redirects to a 5-minute presigned link: the bucket
+  stays private and the app never streams image bytes. Tested with moto (no real S3).
+- **Retention:** `workspaces.retention_days` (default 30); hourly, screenshots and steps of older
+  runs are deleted and the run marked `purged_at`; findings stay for release comparison.
+- **Health and metrics:** `/api/health` (liveness), `/api/ready` (database), `/api/metrics`
+  (Prometheus text computed from Postgres, so every instance agrees and restarts lose nothing;
+  optional bearer token). JSON logs (`LOG_FORMAT=json`) with run and workspace ids from context
+  variables in the worker; secret-looking keys redacted in the web logger.
+- **CI:** actions pinned by commit SHA with the version in a comment; Dependabot keeps them current.
+  The customer-facing example workflow is pinned the same way.
+- **Alternatives:** one image for both (the worker's browser libraries would bloat the web image);
+  Kubernetes manifests (more to explain, nothing to run them on here); per-process Prometheus
+  counters (lost on restart, different on each instance).
+
+## D77. The production stack: its own compose file, and SeaweedFS instead of MinIO (run 4, J6)
+- **What happened:** the first version put the production services in a `prod` profile of
+  `docker-compose.yml`. Compose checks required variables (`${X:?}`) in the whole file, so plain
+  `npm run db:up` failed without production secrets, and `up --profile prod` with `--env-file`
+  recreated the dev database on the default port (it briefly went down; the data volume was
+  untouched). And MinIO's images (`minio/minio`, `minio/mc`, also on quay.io) are no longer
+  publicly pullable.
+- **Decision:** `docker-compose.yml` is back to the dev database only, byte for byte;
+  `docker-compose.prod.yml` (project name `ata-prod`) holds the production stack. The object store
+  is SeaweedFS 4.51 (Apache-2.0, S3 API) with credentials from `S3_ACCESS_KEY`/`S3_SECRET_KEY`; the
+  worker creates the bucket on first use (tested with moto), so no one-off bucket job is needed.
+  The owner's plan named MinIO; what it needs is "S3-compatible", and only `S3_*` variables change
+  for S3, R2, Garage or a self-run MinIO.

@@ -1,0 +1,91 @@
+# Production stack (docs/DEPLOY.md). Separate from docker-compose.yml (the dev database) so the
+# dev commands never need production secrets and production never touches the dev database:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# Postgres, an S3-compatible object store (screenshots), a one-off migration, the web app and N
+# workers. Secrets come from the environment (.env.prod, never committed), never from this file.
+name: ata-prod
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${PROD_DB_USER:-ata}
+      POSTGRES_PASSWORD: ${PROD_DB_PASSWORD:?set PROD_DB_PASSWORD}
+      POSTGRES_DB: ata
+    volumes:
+      - prod-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PROD_DB_USER:-ata} -d ata"]
+      interval: 5s
+      retries: 20
+
+  # S3-compatible object store for screenshots. SeaweedFS (Apache-2.0): MinIO's public images
+  # are no longer pullable (D77). Any S3-compatible store works (S3, R2, Garage, a hosted MinIO):
+  # only the S3_* variables change. Its S3 credentials come from S3_ACCESS_KEY / S3_SECRET_KEY.
+  objectstore:
+    image: chrislusf/seaweedfs:4.51
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        printf '{"identities":[{"name":"app","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}'
+        "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /tmp/s3.json &&
+        exec weed server -dir=/data -s3 -s3.port=9000 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=256
+    ports:
+      - "9000:9000" # browsers fetch screenshots here through presigned links (S3_PUBLIC_ENDPOINT)
+    volumes:
+      - prod-objects:/data
+
+  migrate:
+    build: { context: ., dockerfile: Dockerfile.web, target: migrate }
+    environment:
+      DATABASE_URL: postgresql://${PROD_DB_USER:-ata}:${PROD_DB_PASSWORD}@postgres:5432/ata
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  web:
+    build: { context: ., dockerfile: Dockerfile.web, target: runtime }
+    environment: &app-env
+      DATABASE_URL: postgresql://${PROD_DB_USER:-ata}:${PROD_DB_PASSWORD}@postgres:5432/ata
+      NEXTAUTH_URL: ${PUBLIC_BASE_URL:-http://localhost:3100}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3100}
+      MODEL_KEYS_SECRET: ${MODEL_KEYS_SECRET:?set MODEL_KEYS_SECRET}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      STORAGE: s3
+      S3_BUCKET: screenshots
+      S3_ENDPOINT: http://objectstore:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      DEV_MODE: ${DEV_MODE:-false}
+      DEMO_URL: ${DEMO_URL:-}
+      CLEAN_DEMO_URL: ${CLEAN_DEMO_URL:-}
+      LOG_FORMAT: json
+    ports:
+      - "3100:3000"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      objectstore: { condition: service_started }
+
+  worker:
+    build: { context: ., dockerfile: Dockerfile.worker }
+    environment:
+      <<: *app-env
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:12b}
+      MAX_RUN_SECONDS: ${MAX_RUN_SECONDS:-480}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      replicas: ${WORKERS:-2}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      objectstore: { condition: service_started }
+
+volumes:
+  prod-pgdata:
+  prod-objects:

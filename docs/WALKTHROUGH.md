@@ -1096,3 +1096,26 @@ workspace (as they should) but their name stays on them.
 3. *How did you test authorization?* One table-driven test calls every protected route as every
    role and expects 403 exactly where the permission table says no; it caught a 403 that should
    have been a 404.
+
+## Run 4: production readiness (`Dockerfile.web`, `Dockerfile.worker`, `docker-compose.prod.yml`, `storage.py`, `retention.py`, `lib/storage.ts`, `/api/health|ready|metrics`, `logs.py`)
+
+**What:** container images for the web app and the worker, a production compose stack (Postgres,
+an S3-compatible object store (SeaweedFS), migrations, web, N workers), screenshots in S3-compatible storage behind signed expiring
+links, a retention job, health and metrics endpoints, JSON logs, SHA-pinned CI actions, and
+docs/DEPLOY.md with a threat model.
+
+**How a screenshot is served in production:** the worker uploads `<run>/<file>.png` to the bucket;
+the browser asks the web app for `/api/files/<run>/<file>`; the app checks the run belongs to the
+viewer's workspace (or the share token), then answers 302 to a presigned URL valid for 5 minutes.
+
+**Weak spots:** one Postgres (no replica); the object store is a single node; the worker image is large
+(Chromium); metrics are computed per scrape with a few aggregate queries (fine at this scale,
+cache them at scale).
+
+**Interview Q&A**
+1. *Why presigned links instead of streaming through the app?* The bucket stays private, the app
+   doesn't spend memory and bandwidth on images, and a leaked link expires in minutes.
+2. *Why are migrations a separate one-off container?* So they run once per release, before any new
+   code serves traffic, and not N times in parallel from N web replicas.
+3. *How do you scale?* Add worker replicas: they coordinate through Postgres (`SKIP LOCKED`, leases);
+   the web is stateless behind a load balancer; the bottleneck becomes the model provider.

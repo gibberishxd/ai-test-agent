@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, String, func, text
+from sqlalchemy import ForeignKey, Integer, String, event, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -87,6 +87,8 @@ class Workspace(Base):
     verification_token: Mapped[str] = mapped_column(
         unique=True, server_default=text("replace(gen_random_uuid()::text, '-', '')")
     )
+    # Run 4, J6: screenshots and step timelines older than this are deleted (retention.py).
+    retention_days: Mapped[int] = mapped_column(server_default=text("30"))
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -140,6 +142,8 @@ class Run(Base):
     max_steps: Mapped[int | None]
     max_seconds: Mapped[int | None]
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("api_keys.id"))
+    # When retention deleted this run's screenshots and steps (its findings stay).
+    purged_at: Mapped[datetime | None] = mapped_column(_timestamp())
 
     steps: Mapped[list["Step"]] = relationship(back_populates="run", order_by="Step.index")
     bugs: Mapped[list["Bug"]] = relationship(back_populates="run")
@@ -423,3 +427,12 @@ class Invitation(Base):
     accepted_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     revoked_at: Mapped[datetime | None] = mapped_column(_timestamp())
     created_at: Mapped[datetime] = _created_at()
+
+
+@event.listens_for(Bug, "before_insert")
+def _set_fingerprint(_mapper, _connection, bug: Bug) -> None:
+    """Every stored finding gets its fingerprint (run 4, J4), whichever code path stores it."""
+    if bug.fingerprint is None:
+        from worker.fingerprint import fingerprint  # lazy: fingerprint.py imports report models
+
+        bug.fingerprint = fingerprint(bug)

@@ -192,6 +192,14 @@ the migration adds it). History (who changed what, when) is in `audit_log` (`tri
 Comparing with the previous run reads that run's bugs by `run_id` (indexed); no index on
 `bugs.fingerprint` is needed because fingerprints are only compared within two runs.
 
+### Retention (run 4, J6)
+`workspaces.retention_days` (default 30) and `runs.purged_at`. Once an hour a worker finds finished
+runs older than their workspace's retention (`finished_at < now() - make_interval(days =>
+retention_days)`, a join on workspaces), deletes their screenshots from storage and their steps,
+clears the findings' screenshot references and sets `purged_at`, one run per transaction. Runs and
+findings stay: release comparison needs their fingerprints. Rate-limit windows older than an hour
+are deleted in the same pass.
+
 ### runs: budgets from the API (run 4)
 `max_steps` and `max_seconds` (nullable): a CI caller may lower the worker's limits for one run,
 never raise them (`run_limits()` takes the smaller value).
@@ -391,6 +399,7 @@ LOCAL ROLE`) in the same round trip batch: about 0.1–0.3 ms locally, per query
 | `20261111160000_one_default_model` | partial unique index: one default model per workspace (run 4, J5) |
 | `20261111170000_roles_invitations` | `users.role`, `invitations` with a CHECK against owner links (run 4, J5) |
 | `20261111180000_row_level_security` | role `app_tenant`, `app_current_workspace()`, a policy on every tenant table (run 4, J5) |
+| `20261111190000_retention` | `workspaces.retention_days`, `runs.purged_at` (run 4, J6) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker

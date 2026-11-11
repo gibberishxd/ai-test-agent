@@ -11,6 +11,7 @@ uv run worker reverify ID replay an old run's agent reports again (read-only); -
 import argparse
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import UTC, datetime
@@ -40,17 +41,20 @@ from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
 from worker.llm import LLMClient, make_client, make_judge
 from worker.login_checks import process_login_check
+from worker.logs import JsonFormatter
 from worker.model_configs import client_for_run
 from worker.queue import recover_expired_leases, recover_stale_runs
 from worker.report import write_report
+from worker.retention import apply_retention
 from worker.runner import LEASE_S, ExecuteFn, process_next
 from worker.safety.secrets import RedactingFilter
 from worker.scan import passive_scan
-from worker.storage import LocalStorage
+from worker.storage import LocalStorage, make_storage
 from worker.triage import backfill_fingerprints
 from worker.webhooks import deliver_due
 
 POLL_INTERVAL_S = 1.0
+RETENTION_EVERY_S = 3600  # delete expired screenshots and steps once an hour
 STALE_GRACE_S = 300
 
 log = logging.getLogger("worker")
@@ -60,6 +64,8 @@ def setup_logging(known_secrets: tuple[str, ...]) -> None:
     logging.basicConfig(level=logging.INFO, format="[worker] %(levelname)s %(message)s")
     for handler in logging.getLogger().handlers:
         handler.addFilter(RedactingFilter(known_secrets))  # rule 6.6: no secrets in logs
+        if os.environ.get("LOG_FORMAT") == "json":  # production: one JSON object per line
+            handler.setFormatter(JsonFormatter())
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -117,7 +123,7 @@ def main(argv: list[str] | None = None) -> None:
 
     llm = make_client(settings)
     sessions = make_session_factory(make_engine(settings))
-    execute = make_execute(settings, LocalStorage(settings.data_path()))
+    execute = make_execute(settings, make_storage(settings))
     with sessions() as session:
         # A run can't legitimately take longer than its time budget plus a grace period.
         recovered = recover_stale_runs(session, settings.max_run_seconds + STALE_GRACE_S)
@@ -155,8 +161,15 @@ def main(argv: list[str] | None = None) -> None:
         if not process_next(sessions, llm, execute, client_for, skip_benchmark=True):
             log.info("queue is empty")
         return
-    last_recovery = 0.0
+    last_recovery = last_retention = 0.0
+    storage = make_storage(settings)
     while True:
+        if time.monotonic() - last_retention > RETENTION_EVERY_S:
+            with sessions() as session:
+                purged = apply_retention(session, storage)
+            if purged["runs"]:
+                log.info("retention: purged %d run(s), %d file(s)", purged["runs"], purged["files"])
+            last_retention = time.monotonic()
         if time.monotonic() - last_recovery > LEASE_S / 2:  # any live worker cleans up
             with sessions() as session:
                 if recovered := recover_expired_leases(session, LEASE_S):

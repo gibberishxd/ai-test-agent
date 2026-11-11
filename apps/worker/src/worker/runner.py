@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from worker.db.models import Run, RunStatus
 from worker.llm import LLMClient
+from worker.logs import log_context
 from worker.queue import Heartbeat, claim_next_run, transition
 from worker.webhooks import enqueue_run_finished
 
@@ -52,35 +53,41 @@ def process_next(
         run = claim_next_run(session, worker_id(), only=only, skip_benchmark=skip_benchmark)
         if run is None:
             return False
-        log.info("claimed run %s (%s, %s)", run.id, run.mode, run.target_url)
+        with log_context(run_id=str(run.id), workspace_id=str(run.workspace_id)):
+            return _process(sessions, session, run, llm, execute, client_for)
 
-        try:
-            with Heartbeat(sessions, run.id, HEARTBEAT_S):
-                # The run's own model (a workspace model) or the worker's default.
-                run_llm = client_for(session, run, llm) if client_for else llm
-                run.provider = run_llm.provider
-                run.model = run_llm.agent_model
-                session.commit()
-                execute(session, run, run_llm)
-        except Exception as error:  # any failure ends the run as "failed", with the reason
-            session.rollback()
-            log.exception("run %s failed", run.id)
-            if _still_ours(session, run):
-                transition(run, RunStatus.FAILED, error=f"{type(error).__name__}: {error}")
-                session.commit()
-                enqueue_run_finished(session, run)
-            session.commit()
-            return True
 
-        if not _still_ours(session, run):
+def _process(sessions, session: Session, run: Run, llm: LLMClient, execute, client_for) -> bool:
+    """Process a claimed run to its final status (process_next sets the log context)."""
+    log.info("claimed run %s (%s, %s)", run.id, run.mode, run.target_url)
+
+    try:
+        with Heartbeat(sessions, run.id, HEARTBEAT_S):
+            # The run's own model (a workspace model) or the worker's default.
+            run_llm = client_for(session, run, llm) if client_for else llm
+            run.provider = run_llm.provider
+            run.model = run_llm.agent_model
             session.commit()
-            return True
-        final = RunStatus.STOPPED if run.stop_requested else RunStatus.DONE
-        transition(run, final)
+            execute(session, run, run_llm)
+    except Exception as error:  # any failure ends the run as "failed", with the reason
+        session.rollback()
+        log.exception("run %s failed", run.id)
+        if _still_ours(session, run):
+            transition(run, RunStatus.FAILED, error=f"{type(error).__name__}: {error}")
+            session.commit()
+            enqueue_run_finished(session, run)
         session.commit()
-        enqueue_run_finished(session, run)  # the workspace's webhooks, sent by deliver_due
-        log.info("run %s %s", run.id, final)
         return True
+
+    if not _still_ours(session, run):
+        session.commit()
+        return True
+    final = RunStatus.STOPPED if run.stop_requested else RunStatus.DONE
+    transition(run, final)
+    session.commit()
+    enqueue_run_finished(session, run)  # the workspace's webhooks, sent by deliver_due
+    log.info("run %s %s", run.id, final)
+    return True
 
 
 def _still_ours(session: Session, run: Run) -> bool:

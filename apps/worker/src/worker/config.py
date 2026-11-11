@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     # not let the browser reach localhost (fail safe).
     dev_mode: bool = False
     data_dir: str = "apps/worker/data"
+    # Run 4, J6: STORAGE=s3 stores screenshots in an S3-compatible bucket (MinIO, S3, R2).
+    storage: str = "local"
+    s3_bucket: str = "screenshots"
+    s3_region: str = "us-east-1"
+    s3_endpoint: str = ""
+    s3_access_key: SecretStr = SecretStr("")
+    s3_secret_key: SecretStr = SecretStr("")
 
     def provider(self) -> str:
         """The LLM provider to use: LLM_PROVIDER if set, else claude with a key, else fake."""

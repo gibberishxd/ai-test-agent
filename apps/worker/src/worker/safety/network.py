@@ -125,6 +125,6 @@ def dev_allowed_local(urls: list[str]) -> set[tuple[str, int]]:
     for url in urls:
         parts = urlsplit(url)
         if parts.hostname and parts.port:
-            for host in LOCAL_HOSTS:
+            for host in (*LOCAL_HOSTS, parts.hostname.lower()):
                 allowed.add((host, parts.port))
     return allowed

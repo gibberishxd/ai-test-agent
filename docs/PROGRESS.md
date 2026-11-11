@@ -164,6 +164,8 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | J2 Apps behind a login | done | `test_login.py`, `test_signed_in_run.py` (no credential anywhere in rows or model calls), web unit + DB tests, e2e `login-setup.e2e.ts` (D68). Demo shop: `/orders` behind the login with planted bug 13; verify-bugs both builds; the shop benchmark signs in with a saved setup (D75). |
 | J3 Run it from CI | done | key, rate limit, routes, OpenAPI and webhook tests; `ata-run.mjs` against the local app exited 1 with a JUnit file (D69, D70). |
 | J4 Bugs across releases | done | `test_fingerprint.py`, `test_triage.py`, `triage.db.test.ts`; run page shows New / Still present / Fixed and triage (D72). |
+| J5 Teams and isolation | done | `roles.test.ts` (the whole table), `route-roles.db.test.ts` (every protected route × every role), `members.db.test.ts`, `rls.db.test.ts` (no WHERE → own rows only; cross-workspace writes fail; unset workspace sees nothing), partial unique index test; RLS cost +0.004–0.03 ms per query (D73, D74). |
+| J6 Production readiness | done | Images (web 319 MB, worker 3.2 GB with Chromium); `docker-compose.prod.yml` up locally: migrations once, web ready, 2 workers. A Gemma run started via `/api/v1` with an API key: done in 494 s, 11 pages, 20 agent steps, 6 findings confirmed (incl. planted bug 8 by the agent); 42 screenshots in the object store, served through a presigned link (302 → 200 image/png; 404 without access). Health, ready, metrics answer; JSON logs carry `run_id`. Actions pinned by SHA. `docs/DEPLOY.md` with a threat model (D76, D77). |
 
 ### Run 4 measurements (Gemma 4 12B, judge gemma4:12b, 1200 s)
 | Run | Agent code | Shop AI-only | Shop recall | Holdout AI-only | Holdout recall | False alarms | Correct but discarded | Avg run |

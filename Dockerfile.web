@@ -1,0 +1,32 @@
+# The web app (Next.js) for production. Build from the repo root:
+#   docker build -f Dockerfile.web -t ata-web .
+# Stages: deps (npm ci) → build (next build, standalone) → runtime (node, non-root, no source,
+# no dev dependencies) and migrate (prisma migrate deploy, run once per release).
+
+FROM node:24-bookworm-slim AS deps
+WORKDIR /repo
+COPY package.json package-lock.json ./
+COPY apps/web/package.json apps/web/
+COPY apps/demo/package.json apps/demo/
+COPY apps/demo2/package.json apps/demo2/
+COPY apps/web/prisma apps/web/prisma
+COPY apps/web/prisma.config.ts apps/web/
+RUN npm ci -w apps/web --include-workspace-root=false --no-audit --no-fund
+
+FROM deps AS build
+COPY apps/web apps/web
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build -w apps/web
+
+FROM deps AS migrate
+CMD ["npx", "--workspace", "apps/web", "prisma", "migrate", "deploy"]
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+WORKDIR /app
+COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
+COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "apps/web/server.js"]

@@ -76,6 +76,8 @@ model Workspace {
   monthlyRunQuota   Int      @default(50) @map("monthly_run_quota")
   /// Proves domain ownership: put it in a DNS TXT record or /.well-known/ai-test-agent.txt.
   verificationToken String   @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @map("verification_token")
+  /// Run 4, J6: screenshots and step timelines of runs older than this are deleted.
+  retentionDays     Int      @default(30) @map("retention_days")
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   users        User[]
@@ -145,6 +147,8 @@ model Run {
   /// run whose heartbeat is older than the lease belongs to a dead worker and is failed.
   heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(3)
   /// Run 4, J3: budgets a CI caller can lower (never above the worker's limits).
+  /// When retention deleted this run's screenshots and steps (its findings stay).
+  purgedAt      DateTime? @map("purged_at") @db.Timestamptz(3)
   maxSteps      Int?      @map("max_steps")
   maxSeconds    Int?      @map("max_seconds")
   /// The API key that started the run (null: started from the dashboard).
