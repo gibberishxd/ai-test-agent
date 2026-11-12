@@ -304,3 +304,32 @@ What happened, run by run:
 **Decision for the default:** a Gemma reviewer doesn't qualify (holdout AI-only didn't rise;
 clean-build false alarms rose 0 → 1.0). The next measurement uses the largest local model this
 Mac runs as the reviewer (below).
+
+## Run 5, K2: Gemma explorer + qwen3:14b reviewer (text-only)
+
+Result `dbc3482e` (commit e160a34: K1, K2 with the D86 follow-ups, K3–K5), gemma4:12b explorer,
+qwen3:14b reviewer (`REVIEWER_VISION=false`), judge ollama/gemma4:12b, 1200 s and 40 steps,
+holdout first.
+
+| Set | AI-only | Recall | Precision | False alarms |
+|---|---|---|---|---|
+| Shop (3 buggy + 1 clean) | **19%** | **44%** | 92% | 0.0 |
+| Holdout (2 buggy + 1 clean) | 0% | 33% | 89% | 0.0 |
+
+- **Bug 8 ("Save changes does nothing") 2 of 3 runs**, verified by measurement (K1): nothing
+  changed after the click on a button.
+- **Bug 13 ("opening an order shows a different order") 3 of 3 runs:** the agent was reminded of
+  the order list the crawl found (D86) and opened an order; the reviewer wrote "Order details
+  page displays wrong order data". First time any model found bug 13.
+- Two unmatched reports per run ("Order #55726 not visible on /orders page"): the agent placed an
+  order and didn't find it in the list. Lowers precision; plausibly real behaviour of the demo
+  shop's in-memory orders, not a planted bug.
+- **Holdout:** no judgement bug. Three reports dismissed by the judge, all rightly (a link that
+  does navigate, a confirmation with a link). One "Book now has no effect" confirmed, unmatched.
+- **The reviewer was asked 1–3 times per run**; each call took ~30 s including swapping models.
+
+**Default decision (the owner's rule, set before measuring):** the tiered setup becomes the
+default only if holdout AI-only recall rises and clean-build false alarms don't. Holdout AI-only
+stayed at 0%, so **the default stays without a reviewer** (D87). The shop gains need explaining:
+K1 and the list seeding work without a reviewer too, so the K6 benchmark (Gemma alone, same
+code) separates them.
