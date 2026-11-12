@@ -76,3 +76,33 @@ export type MetricRow = { metric: string; label: string; value: number };
 export async function serviceMetrics(): Promise<MetricRow[]> {
   return db.$queryRaw<MetricRow[]>`SELECT * FROM service_metrics()`;
 }
+
+/**
+ * Usage across every workspace, for a platform admin (users.is_platform_admin, set from the CLI).
+ * The database checks the flag (platform_usage); anyone else gets null.
+ */
+export async function platformUsageRows(userId: string, since: Date) {
+  try {
+    const [, rows] = await db.$transaction([
+      db.$executeRaw`SELECT set_config('app.user_id', ${userId}, true)`,
+      db.$queryRaw<
+        { workspace_id: string; name: string; slug: string; plan_id: string; members: number; runs: number; explorer_cost_usd: number; reviewer_cost_usd: number; input_tokens: bigint; output_tokens: bigint }[]
+      >`SELECT * FROM platform_usage(${since})`,
+    ]);
+    return rows.map((r) => ({
+      workspaceId: r.workspace_id,
+      name: r.name,
+      slug: r.slug,
+      planId: r.plan_id,
+      members: Number(r.members),
+      runs: Number(r.runs),
+      explorerCostUsd: Number(r.explorer_cost_usd),
+      reviewerCostUsd: Number(r.reviewer_cost_usd),
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
+    }));
+  } catch (error) {
+    if (userMessage(error)) return null;
+    throw error;
+  }
+}

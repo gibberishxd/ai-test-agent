@@ -23,7 +23,8 @@ import { hasTestDb } from "../test/use-test-db";
 const DEMO = "http://localhost:5173/";
 
 async function workspace(slug: string, quota = 50) {
-  return db.workspace.create({ data: { name: slug, slug, monthlyRunQuota: quota } });
+  // Team plan: these tests bring their own hosted models, which the Free plan doesn't include.
+  return db.workspace.create({ data: { name: slug, slug, monthlyRunQuota: quota, planId: "team" } });
 }
 
 function signedIn(workspaceId: string): RequestContext {

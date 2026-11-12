@@ -78,11 +78,14 @@ export async function startRun(
   // A workspace model must be this workspace's own and have passed Test connection; without
   // one, the worker's own (server default) model runs.
   const modelConfigId = typeof body.modelConfigId === "string" && body.modelConfigId ? body.modelConfigId : null;
+  let provider: string | null = null; // null: the server's own model, whatever the plan
   if (modelConfigId) {
     const usable = isUuid(modelConfigId)
       ? await usableModel(context.workspaceId, modelConfigId)
       : ({ ok: false, error: "Choose one of your workspace's models." } as const);
     if (!usable.ok) return { ok: false, status: 400, errors: { model: usable.error } };
+    const config = await tenantDb(context.workspaceId).modelConfig.findFirst({ where: { id: modelConfigId }, select: { provider: true } });
+    provider = config?.provider ?? null;
   }
 
   if (!context.signedIn) {
@@ -92,8 +95,11 @@ export async function startRun(
 
   const audit: Record<string, string> = extras.apiKeyId ? { ip, apiKeyId: extras.apiKeyId } : { ip };
   return inTenant({ workspaceId: context.workspaceId, userId: context.userId, audit }, async (tx): Promise<StartResult> => {
-    const [quota] = await tx.$queryRaw<{ allowed: boolean; used: number; quota: number }[]>`
-      SELECT * FROM consume_quota(${context.workspaceId}::uuid)`;
+    // The plan's limits, enforced by the database (consume_quota, run 5): the workspace row is
+    // locked until this transaction ends, so concurrent starts count each other.
+    const [quota] = await tx.$queryRaw<{ allowed: boolean; used: number; quota: number; max_steps: number; reason: string | null }[]>`
+      SELECT * FROM consume_quota(${context.workspaceId}::uuid, ${provider})`;
+    if (quota.reason) return { ok: false, status: 403, errors: { model: quota.reason } };
 
     if (!context.signedIn) {
       const recent = await tx.auditLog.count({
@@ -111,7 +117,9 @@ export async function startRun(
     const overQuota = quota.allowed ? null : quotaError(quota.used, quota.quota);
     if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
 
-    const run = await createRun(tx, context.workspaceId, context.userId, input, modelConfigId, extras);
+    // A run never takes more steps than the plan allows (the worker reads runs.max_steps).
+    const maxSteps = Math.min(extras.maxSteps ?? quota.max_steps, quota.max_steps);
+    const run = await createRun(tx, context.workspaceId, context.userId, input, modelConfigId, { ...extras, maxSteps });
     return { ok: true, id: run.id };
   });
 }

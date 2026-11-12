@@ -89,6 +89,8 @@ class Workspace(Base):
     )
     # Run 4, J6: screenshots and step timelines older than this are deleted (retention.py).
     retention_days: Mapped[int] = mapped_column(server_default=text("30"))
+    # Run 5, K4: the plan whose limits apply (consume_quota, retention, seats).
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"), server_default="free")
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -104,6 +106,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         _pg_enum(WorkspaceRole, "workspace_role"), server_default="member"
     )
+    # Run 5, K4: an operator of the service (usage across workspaces); set from the CLI only.
+    is_platform_admin: Mapped[bool] = mapped_column(server_default=text("false"))
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -442,3 +446,48 @@ def _set_fingerprint(_mapper, _connection, bug: Bug) -> None:
         from worker.fingerprint import fingerprint  # lazy: fingerprint.py imports report models
 
         bug.fingerprint = fingerprint(bug)
+
+
+class Plan(Base):
+    """Run 5, K4: what a workspace may do (limits enforced by consume_quota and triggers)."""
+
+    __tablename__ = "plans"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    name: Mapped[str]
+    runs_per_month: Mapped[int]
+    max_steps_per_run: Mapped[int]
+    # Model providers a run may use; empty = every provider.
+    allowed_providers: Mapped[list[str]] = mapped_column(
+        ARRAY(String), server_default=text("ARRAY[]::text[]")
+    )
+    seats: Mapped[int]
+    retention_days: Mapped[int]
+    price_usd_month: Mapped[float | None]
+    created_at: Mapped[datetime] = _created_at()
+
+
+class UsageEvent(Base):
+    """Run 5, K4: one finished run's usage, written by the trigger runs_record_usage."""
+
+    __tablename__ = "usage_events"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), unique=True
+    )
+    kind: Mapped[str] = mapped_column(server_default="run")
+    explorer_provider: Mapped[str | None]
+    explorer_model: Mapped[str | None]
+    explorer_input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    explorer_output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    explorer_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    reviewer_provider: Mapped[str | None]
+    reviewer_model: Mapped[str | None]
+    reviewer_input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    reviewer_output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    reviewer_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    created_at: Mapped[datetime] = _created_at()

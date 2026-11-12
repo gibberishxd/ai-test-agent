@@ -6,6 +6,10 @@ uv run worker scan URL    passive scan without the database; writes reports/<tim
 uv run worker bench       benchmark: N runs on the buggy shop + 1 on the clean shop, scored
 uv run worker reverify ID replay an old run's agent reports again (read-only); --judge asks
                           the pinned judge model too
+uv run worker make-admin EMAIL        let a user see usage across workspaces (/admin/usage)
+uv run worker set-plan SLUG PLAN      put a workspace on a plan (free, team, business)
+Operator commands (bench, reverify, backfill-fingerprints, make-admin, set-plan) use the admin
+connection (DATABASE_URL); the worker loop uses its own role (WORKER_DATABASE_URL).
 """
 
 import argparse
@@ -19,6 +23,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from worker.admin import make_platform_admin, set_plan
 from worker.benchmark import (
     HOLDOUT_BUGS_JSON,
     BenchmarkScores,
@@ -99,6 +104,11 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser(
         "backfill-fingerprints", help="give findings stored before run 4 their fingerprint (J4)"
     )
+    admin = sub.add_parser("make-admin", help="let a user see usage across workspaces (K4)")
+    admin.add_argument("email")
+    plan = sub.add_parser("set-plan", help="put a workspace on a plan: free, team, business (K4)")
+    plan.add_argument("workspace_slug")
+    plan.add_argument("plan_id")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -116,6 +126,21 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "reverify":
         reverify(settings, args.run_id, args.judge)
         return
+
+    if args.command in ("make-admin", "set-plan"):
+        # Operator commands: the admin connection, never the web app.
+        with make_session_factory(make_engine(settings, admin=True))() as session:
+            if args.command == "make-admin":
+                ok = make_platform_admin(session, args.email)
+                log.info("%s is a platform admin" if ok else "no user %s", args.email)
+            else:
+                ok = set_plan(session, args.workspace_slug, args.plan_id)
+                log.info(
+                    "%s → %s" if ok else "no workspace %s or plan %s",
+                    args.workspace_slug,
+                    args.plan_id,
+                )
+        raise SystemExit(0 if ok else 1)
 
     if args.command == "backfill-fingerprints":
         # Maintenance across every workspace: the admin connection, run by an operator.

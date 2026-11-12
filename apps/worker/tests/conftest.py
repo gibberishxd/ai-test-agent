@@ -124,7 +124,8 @@ def sessions(db_engine):
     from worker.db.models import Base
     from worker.db.session import make_session_factory
 
-    tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
+    # plans is reference data seeded by its migration (run 5, K4): kept between tests.
+    tables = ", ".join(t.name for t in Base.metadata.sorted_tables if t.name != "plans")
     with db_engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} CASCADE"))
     return make_session_factory(db_engine)

@@ -161,6 +161,9 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 |---|---|---|
 | K0 Housekeeping | done | `agent-v5` from `agent-v4`; RUN_PLAN_5.md; demos and worker start; baseline `npm test` + `npm run lint` exit 0. PR question asked; nothing done to PRs yet. |
 | K1 Before/after replay | done | `page_state.py` + `verify_bug` judge the change made by the last replayed action (D80); 50+ new tests incl. clock, spinner, polling, toast, dialog. Offline re-check (MISS_ANALYSIS "Run 5, K1"): all 7 rejected bug-8 reports verify; no clean-build report was ever dismissed, so none can become a new false alarm. |
+| K2 Reviewer tier + list → detail | code done, measuring | `REVIEWER_PROVIDER`/`REVIEWER_MODEL` (any provider) decide on flagged steps and the explorer's reports; reviewer tokens/cost in `runs.reviewer_*`; per-list "open one item" reminder + charter item 9 (D81, D82). Benchmarks: see K6 rows. |
+| K3 Database rules | done | Roles ata_owner/web/worker (none superuser or BYPASSRLS); every web query through the tenant client, worker per-run tenant; justified bypasses as narrow functions; audit/updated_at/triage triggers, claim/quota/retention functions, two views, CHECKs; tested as each role (D83, D84; DATABASE.md). |
+| K4 Plans and usage | done | `plans`, `usage_events` (trigger, explorer/reviewer apart), plan-aware `consume_quota`, seats, retention cap; /settings/usage and /admin/usage (`worker make-admin`, `set-plan`); ROADMAP "Billing" (D85, placeholders). |
 
 ## Run 4 (branch `agent-v4`, plan in `docs/RUN_PLAN_4.md`)
 

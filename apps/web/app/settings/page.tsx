@@ -67,7 +67,10 @@ export default async function SettingsPage() {
         <CardHeader>
           <CardTitle>Members</CardTitle>
           <CardDescription>
-            You are {role === "owner" ? "the owner" : `a${role === "admin" ? "n" : ""} ${role}`} of this workspace.
+            You are {role === "owner" ? "the owner" : `a${role === "admin" ? "n" : ""} ${role}`} of this workspace.{" "}
+            <Link href="/settings/usage" className="underline">
+              Plan and usage
+            </Link>
             {admin && (
               <>
                 {" "}

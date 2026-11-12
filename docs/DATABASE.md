@@ -17,35 +17,317 @@ the queue is polled (each idle worker asks once per second), which is cheap at t
 
 ## Entity diagram
 
+Generated from the real schema (run 5): `node apps/web/scripts/er-diagram.mjs <database url>`
+reads tables, columns and foreign keys from Postgres's catalog after the migrations ran, so it
+can't drift from them. `||--o{` = one to many; `|o--o{` = the key may be null. `plans` is the
+only table every workspace points at; `benchmark_results` and `verification_tokens` stand alone.
+
 ```mermaid
 erDiagram
-    workspaces ||--o{ users : "has"
-    workspaces ||--o{ runs : "owns"
-    workspaces ||--o{ domains : "verifies"
-    workspaces ||--o{ model_configs : "brings"
-    workspaces ||--o{ audit_log : "records"
-    workspaces ||--o{ login_setups : "signs in with"
-    workspaces ||--o{ api_keys : "issues"
-    workspaces ||--o{ webhook_endpoints : "notifies"
-    api_keys ||--o{ api_rate_windows : "counted in"
-    api_keys |o--o{ runs : "started"
-    webhook_endpoints ||--o{ webhook_deliveries : "log"
-    runs |o--o{ webhook_deliveries : "about"
-    workspaces ||--o{ finding_triage : "decides"
-    workspaces ||--o{ invitations : "invites"
-    users ||--o{ accounts : "signs in with"
-    users |o--o{ runs : "started"
-    users |o--o{ audit_log : "did"
-    model_configs |o--o{ runs : "used by"
-    runs ||--o{ steps : "timeline"
-    runs ||--o{ bugs : "found"
-    bugs |o--o{ bugs : "duplicate_of_id"
-    benchmark_results
-    verification_tokens
+  users ||--o{ accounts : "user_id"
+  workspaces ||--o{ api_keys : "workspace_id"
+  api_keys ||--o{ api_rate_windows : "api_key_id"
+  users |o--o{ audit_log : "user_id"
+  workspaces ||--o{ audit_log : "workspace_id"
+  runs ||--o{ bugs : "run_id"
+  workspaces ||--o{ domains : "workspace_id"
+  workspaces ||--o{ finding_triage : "workspace_id"
+  workspaces ||--o{ invitations : "workspace_id"
+  workspaces ||--o{ login_setups : "workspace_id"
+  workspaces ||--o{ model_configs : "workspace_id"
+  api_keys |o--o{ runs : "api_key_id"
+  users |o--o{ runs : "created_by_id"
+  model_configs |o--o{ runs : "model_config_id"
+  workspaces ||--o{ runs : "workspace_id"
+  runs ||--o{ steps : "run_id"
+  runs |o--o{ usage_events : "run_id"
+  workspaces ||--o{ usage_events : "workspace_id"
+  workspaces ||--o{ users : "workspace_id"
+  webhook_endpoints ||--o{ webhook_deliveries : "endpoint_id"
+  runs |o--o{ webhook_deliveries : "run_id"
+  workspaces ||--o{ webhook_endpoints : "workspace_id"
+  plans ||--o{ workspaces : "plan_id"
+  accounts {
+    uuid id PK
+    uuid user_id FK
+    text type
+    text provider
+    text provider_account_id
+    text refresh_token
+    text access_token
+    integer expires_at
+    text token_type
+    text scope
+    text id_token
+    text session_state
+  }
+  api_keys {
+    uuid id PK
+    uuid workspace_id FK
+    text name
+    text prefix
+    text key_hash
+    uuid created_by_id
+    timestamp_with_time_zone last_used_at
+    timestamp_with_time_zone revoked_at
+    timestamp_with_time_zone created_at
+  }
+  api_rate_windows {
+    uuid api_key_id PK
+    timestamp_with_time_zone window_start PK
+    integer count
+  }
+  audit_log {
+    uuid id PK
+    uuid workspace_id FK
+    uuid user_id FK
+    text action
+    text target_url
+    run_mode mode
+    uuid run_id
+    jsonb metadata
+    timestamp_with_time_zone created_at
+  }
+  benchmark_results {
+    uuid id PK
+    text provider
+    text model
+    text git_commit
+    integer runs_buggy
+    double_precision recall
+    double_precision precision
+    double_precision false_alarms
+    double_precision avg_cost_usd
+    double_precision avg_duration_s
+    jsonb details
+    timestamp_with_time_zone created_at
+    double_precision ai_recall
+    integer holdout_runs_buggy
+    double_precision holdout_recall
+    double_precision holdout_ai_recall
+    double_precision holdout_precision
+    double_precision holdout_false_alarms
+    text judge
+    text rescore_commit
+  }
+  bugs {
+    uuid id PK
+    uuid run_id FK
+    text title
+    severity severity
+    text category
+    text page_url
+    text expected
+    text actual
+    jsonb repro_steps
+    jsonb evidence
+    text reasoning
+    text screenshot
+    int4[] step_indexes
+    bug_source source
+    bug_status status
+    text dismiss_reason
+    uuid duplicate_of_id
+    timestamp_with_time_zone created_at
+    text fingerprint
+    boolean suppressed
+  }
+  domains {
+    uuid id PK
+    uuid workspace_id FK
+    text hostname
+    timestamp_with_time_zone verified_at
+    text method
+    timestamp_with_time_zone created_at
+  }
+  finding_triage {
+    uuid id PK
+    uuid workspace_id FK
+    text origin
+    text fingerprint
+    text state
+    text comment
+    text title
+    uuid updated_by_id
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  invitations {
+    uuid id PK
+    uuid workspace_id FK
+    text token_hash
+    workspace_role role
+    uuid created_by_id
+    timestamp_with_time_zone expires_at
+    timestamp_with_time_zone accepted_at
+    uuid accepted_by_id
+    timestamp_with_time_zone revoked_at
+    timestamp_with_time_zone created_at
+  }
+  login_setups {
+    uuid id PK
+    uuid workspace_id FK
+    text origin
+    text kind
+    text login_url
+    text username
+    text password_ciphertext
+    text username_selector
+    text password_selector
+    text submit_selector
+    text success_selector
+    text storage_state_ciphertext
+    timestamp_with_time_zone check_requested_at
+    jsonb last_check
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  model_configs {
+    uuid id PK
+    uuid workspace_id FK
+    text label
+    text provider
+    text base_url
+    text model
+    text cheap_model
+    text api_key_ciphertext
+    text api_key_last4
+    double_precision input_price
+    double_precision output_price
+    boolean is_default
+    jsonb probe
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  plans {
+    text id PK
+    text name
+    integer runs_per_month
+    integer max_steps_per_run
+    text[] allowed_providers
+    integer seats
+    integer retention_days
+    double_precision price_usd_month
+    timestamp_with_time_zone created_at
+  }
+  runs {
+    uuid id PK
+    uuid workspace_id FK
+    uuid created_by_id FK
+    text target_url
+    run_mode mode
+    text focus
+    run_status status
+    boolean stop_requested
+    text claimed_by
+    text provider
+    text model
+    integer pages_visited
+    integer step_count
+    integer input_tokens
+    integer output_tokens
+    double_precision cost_usd
+    text error
+    jsonb summary
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone started_at
+    timestamp_with_time_zone finished_at
+    text share_token
+    uuid model_config_id FK
+    timestamp_with_time_zone heartbeat_at
+    uuid api_key_id FK
+    integer max_seconds
+    integer max_steps
+    timestamp_with_time_zone purged_at
+    text reviewer_provider
+    text reviewer_model
+    integer reviewer_input_tokens
+    integer reviewer_output_tokens
+    double_precision reviewer_cost_usd
+  }
+  steps {
+    uuid id PK
+    uuid run_id FK
+    integer index
+    text action
+    jsonb args
+    text reasoning
+    text url
+    text screenshot
+    jsonb events
+    boolean blocked
+    text block_reason
+    integer input_tokens
+    integer output_tokens
+    double_precision cost_usd
+    timestamp_with_time_zone created_at
+  }
+  usage_events {
+    uuid id PK
+    uuid workspace_id FK
+    uuid run_id FK
+    text kind
+    text explorer_provider
+    text explorer_model
+    integer explorer_input_tokens
+    integer explorer_output_tokens
+    double_precision explorer_cost_usd
+    text reviewer_provider
+    text reviewer_model
+    integer reviewer_input_tokens
+    integer reviewer_output_tokens
+    double_precision reviewer_cost_usd
+    timestamp_with_time_zone created_at
+  }
+  users {
+    uuid id PK
+    text email
+    text name
+    uuid workspace_id FK
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone email_verified
+    text image
+    workspace_role role
+    boolean is_platform_admin
+  }
+  verification_tokens {
+    text identifier
+    text token
+    timestamp_with_time_zone expires
+  }
+  webhook_deliveries {
+    uuid id PK
+    uuid endpoint_id FK
+    uuid run_id FK
+    text event
+    jsonb payload
+    text status
+    integer attempts
+    timestamp_with_time_zone next_attempt_at
+    integer last_status_code
+    text last_error
+    timestamp_with_time_zone delivered_at
+    timestamp_with_time_zone created_at
+  }
+  webhook_endpoints {
+    uuid id PK
+    uuid workspace_id FK
+    text url
+    text secret_ciphertext
+    boolean enabled
+    timestamp_with_time_zone created_at
+  }
+  workspaces {
+    uuid id PK
+    text name
+    text slug
+    integer monthly_run_quota
+    timestamp_with_time_zone created_at
+    text verification_token
+    integer retention_days
+    text plan_id FK
+  }
 ```
-
-`||--o{` = one to many; `|o--o{` = optional (the column may be null). `benchmark_results` and
-`verification_tokens` stand alone.
 
 ## Tables
 
@@ -373,9 +655,9 @@ migration, an operator with psql). Run 5 moves the rules that must never be skip
 Postgres, each tested by calling the database directly (`apps/worker/tests/test_db_rules.py`,
 `apps/web/lib/rls.db.test.ts`).
 
-**Tables: 18** (plus Prisma's `_prisma_migrations`; K4 adds plans and usage events). No table
-was added for K3: the rules are functions, triggers, views and constraints on the tables that
-exist.
+**Tables: 20** (plus Prisma's `_prisma_migrations`). K3 added none: its rules are functions,
+triggers, views and constraints on the tables that existed. K4 added two that billing genuinely
+needs: `plans` and `usage_events` (below).
 
 ### Roles
 | Role | Login | Used by | Can |
@@ -489,6 +771,32 @@ In app code: anything that needs the outside world or a model (fingerprints are 
 worker in Python: they normalize URLs and messages; replay, model calls, storage deletes), and
 input validation with good error messages (the CHECKs are the backstop, not the UX).
 
+## Plans and usage (run 5, K4)
+
+### plans — what a workspace may do
+`id` (`free`, `team`, `business`), `runs_per_month`, `max_steps_per_run`, `allowed_providers`
+(empty = every provider), `seats`, `retention_days`, `price_usd_month` (no billing connected).
+Seeded by the migration; public reference data (everyone reads, only the owner writes). CHECKs
+keep limits in range and providers known. Each workspace has `plan_id` (default `free`); the
+numbers are placeholders (DECISIONS D85).
+
+### usage_events — what a bill would be computed from
+One row per finished run (`run_id` unique), written by the trigger `runs_record_usage` when a
+run's status becomes final: the explorer's provider, model, tokens and cost (the run's totals
+minus the reviewer's) and the reviewer's, apart. Tenant data under row-level security;
+append-only for the apps (they can't insert, change or delete a billing record). Index
+`(workspace_id, created_at)` serves "this month's usage".
+
+### Enforcement
+- `consume_quota(workspace, provider)` returns `allowed, used, quota, max_steps, reason`: the
+  quota is the lower of the plan's and the workspace's own `monthly_run_quota` (a custom
+  contract can lower it); a provider outside the plan is refused with a reason; `max_steps` is
+  the plan's cap, which the web app writes to `runs.max_steps` (the worker obeys it).
+- Seats: `accept_invitation` locks the workspace and refuses when the plan's seats are taken.
+- Retention: `apply_retention` uses the lower of the workspace's and the plan's days.
+- `platform_usage(since)`: usage per workspace, only for a user with `is_platform_admin` (set by
+  `worker make-admin`), checked inside the function.
+
 ## Prisma and SQLAlchemy: one schema, two apps
 
 - **Prisma owns the schema.** `apps/web/prisma/schema.prisma` is the source of truth; every
@@ -527,6 +835,7 @@ input validation with good error messages (the CHECKs are the backstop, not the 
 | `20261112110000_database_rules` | roles, ownership, queue/quota/retention functions, audit, updated_at and triage triggers, the two views, check constraints (run 5, K3) |
 | `20261112120000_web_access` | the web app's justified bypasses: sign-in lookup policy and narrow functions (run 5, K3) |
 | `20261112130000_worker_access` | due webhooks and requested sign-in checks for the worker (run 5, K3) |
+| `20261112140000_plans_usage` | `plans`, `workspaces.plan_id`, `users.is_platform_admin`, `usage_events` + trigger, plan-aware `consume_quota`, seats, retention, `platform_usage` (run 5, K4) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker

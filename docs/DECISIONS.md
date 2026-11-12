@@ -998,3 +998,48 @@ numbers are the real test (Needs me).
   until a URL under that parent is visited. Opening a product doesn't tick off the orders list.
 - **Generic:** nothing names a site, a product or a bug; tests check the charter says nothing
   site-specific.
+
+## D83. Roles and row-level security everywhere (run 5, K3)
+- **Decision:** three login roles, none superuser or BYPASSRLS: `ata_owner` (owns the schema),
+  `ata_web`, `ata_worker`; the apps are members of `app_tenant`, so they see no tenant rows
+  without a workspace set (fail closed). The web app goes through `tenantDb(ctx)` /
+  `inTenant(ctx, fn)` for everything; the worker ties a claimed run's session to its workspace
+  (`enter_tenant`). What must cross workspaces is a narrow SECURITY DEFINER function owned by
+  `ata_owner`, with EXECUTE for one role (DATABASE.md, "Justified bypasses"); sign-in reads
+  users through a read-only policy. Operator commands (bench, reverify, backfill, make-admin,
+  set-plan) use the admin connection.
+- **Env:** `DATABASE_URL` stays the admin connection (migrations, tests, operator commands);
+  `WEB_DATABASE_URL` / `WORKER_DATABASE_URL` are the apps' roles and fall back to it while unset,
+  so nothing breaks before `npm run db:roles` has run. Production compose gives each container
+  only its own URL.
+- **Alternatives:** keep the worker on the owner role (run 4; one compromised worker could read
+  every workspace); a separate database per tenant (heavy to operate at this size); app-level
+  checks only (one forgotten WHERE leaks data).
+- **Tested** as each role (`SET LOCAL ROLE` in the worker's database tests, a real `ata_web` login
+  in the web tests, a real `ata_worker` login for the worker's jobs).
+
+## D84. Rules in Postgres: triggers, functions, views, constraints (run 5, K3)
+- **Decision:** the audit log is written by triggers (actor from `app.user_id`, context from
+  `app.audit_metadata`; no secret values; append-only for the apps), `updated_at` by triggers,
+  triage carry-forward by a trigger on `bugs`; the queue, quota and retention are functions
+  (`claim_next_run`, `consume_quota`, `apply_retention`, …) the apps call; `target_bug_history`
+  (security_invoker) and `model_leaderboard` (materialized, refreshed by a statement trigger on
+  every write: results are rare and the table tiny) are views; fixed sets and ranges are CHECKs.
+  The app's own audit writes and the worker's `apply_triage` were removed.
+- **Why:** these rules must hold for every writer. A rule in one app holds only there.
+- **Kept in code:** fingerprints (Python normalisation), replay, model calls, storage deletes,
+  validation messages.
+
+## D85. Plans and usage (run 5, K4) — decided without owner, revisit
+- **Plans (placeholders until the owner sets prices):** Free 30 runs/month, 40 steps, local
+  models only (Ollama), 3 seats, 7 days; Team 300, 80, any model, 10, 30 days; Business 2000, 150,
+  any, 50, 90 days. New workspaces start on Free; `worker set-plan` moves one.
+- **Enforced by Postgres:** `consume_quota(workspace, provider)` → runs (the lower of the plan's
+  and the workspace's own quota), allowed providers, and the step cap (the web app writes it to
+  `runs.max_steps`); seats in `accept_invitation`; retention in `apply_retention`.
+- **Usage events:** one per finished run, written by a trigger, explorer and reviewer apart;
+  append-only for the apps. The run's own model counts as allowed when it is the server's
+  default (the operator's choice).
+- **Admin view:** `users.is_platform_admin`, set only by `worker make-admin` (owner's question d2,
+  my pick), checked by the database function `platform_usage`.
+- **No payment provider:** ROADMAP.md, "Billing", says what Stripe would add.

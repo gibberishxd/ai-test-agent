@@ -78,8 +78,12 @@ model Workspace {
   verificationToken String   @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @map("verification_token")
   /// Run 4, J6: screenshots and step timelines of runs older than this are deleted.
   retentionDays     Int      @default(30) @map("retention_days")
+  /// Run 5, K4: the plan whose limits apply (consume_quota, retention, seats).
+  planId            String   @default("free") @map("plan_id")
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  plan         Plan              @relation(fields: [planId], references: [id])
+  usageEvents  UsageEvent[]
   users        User[]
   runs         Run[]
   auditLog     AuditLog[]
@@ -95,15 +99,17 @@ model Workspace {
 }
 
 model User {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email         String        @unique
-  name          String?
-  image         String?
-  emailVerified DateTime?     @map("email_verified") @db.Timestamptz(3)
-  workspaceId   String        @map("workspace_id") @db.Uuid
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String        @unique
+  name            String?
+  image           String?
+  emailVerified   DateTime?     @map("email_verified") @db.Timestamptz(3)
+  workspaceId     String        @map("workspace_id") @db.Uuid
   /// Whoever creates a workspace (signs up) is its owner; invited people get the invitation's role.
-  role          WorkspaceRole @default(member)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  role            WorkspaceRole @default(member)
+  /// Run 5, K4: an operator of the service (usage across workspaces). Set from the CLI only.
+  isPlatformAdmin Boolean       @default(false) @map("is_platform_admin")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      Run[]
@@ -169,6 +175,7 @@ model Run {
   modelConfig       ModelConfig?      @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
   apiKey            ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
   webhookDeliveries WebhookDelivery[]
+  usageEvent        UsageEvent?
 
   @@index([status, createdAt])
   @@index([workspaceId, createdAt])
@@ -514,4 +521,48 @@ model Invitation {
 
   @@index([workspaceId, createdAt])
   @@map("invitations")
+}
+
+/// Run 5, K4: what a workspace may do. Seeded by its migration; prices are placeholders.
+model Plan {
+  id               String   @id
+  name             String
+  runsPerMonth     Int      @map("runs_per_month")
+  maxStepsPerRun   Int      @map("max_steps_per_run")
+  /// Model providers a run may use; empty = every provider.
+  allowedProviders String[] @default([]) @map("allowed_providers")
+  seats            Int
+  retentionDays    Int      @map("retention_days")
+  priceUsdMonth    Float?   @map("price_usd_month")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspaces Workspace[]
+
+  @@map("plans")
+}
+
+/// Run 5, K4: one finished run's usage, written by the database (trigger runs_record_usage),
+/// with the explorer's and the reviewer's tokens and cost apart.
+model UsageEvent {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String   @map("workspace_id") @db.Uuid
+  runId                String?  @unique @map("run_id") @db.Uuid
+  kind                 String   @default("run")
+  explorerProvider     String?  @map("explorer_provider")
+  explorerModel        String?  @map("explorer_model")
+  explorerInputTokens  Int      @default(0) @map("explorer_input_tokens")
+  explorerOutputTokens Int      @default(0) @map("explorer_output_tokens")
+  explorerCostUsd      Float    @default(0) @map("explorer_cost_usd")
+  reviewerProvider     String?  @map("reviewer_provider")
+  reviewerModel        String?  @map("reviewer_model")
+  reviewerInputTokens  Int      @default(0) @map("reviewer_input_tokens")
+  reviewerOutputTokens Int      @default(0) @map("reviewer_output_tokens")
+  reviewerCostUsd      Float    @default(0) @map("reviewer_cost_usd")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       Run?      @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@map("usage_events")
 }
