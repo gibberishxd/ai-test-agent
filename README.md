@@ -218,7 +218,13 @@ Results so far (shop: 3 buggy runs + 1 clean run each):
 | ollama · gemma4:12b, run 4 (expected vs. actual), shop (local) | 8% | 39% | 100% | 0.0 | $0.00 | 1156 s | gemma4:12b (pinned) | a0af21e |
 | ollama · gemma4:12b, run 4 (everything; shop signed in, 13 bugs) | 0% | 31% | 94% | 0.0 | $0.00 | 1277 s | gemma4:12b (pinned) | b114b43 |
 | ollama · gemma4:12b, run 4, **holdout** | 0% | 33% | 89% | 0.0 | $0.00 | | gemma4:12b (pinned) | b114b43 |
-| claude · claude-sonnet-5-5 (API) | not run: needs an API key | | | | | | | |
+| ollama · gemma4:12b + **gemma4:12b reviewer**, run 5, shop | 0% | 31% | 88% | 0.0 | $0.00 | 1312 s | gemma4:12b (pinned) | da16f0e |
+| ollama · gemma4:12b + gemma4:12b reviewer, run 5, **holdout** | 0% | 33% | 100% | 1.0 | $0.00 | | gemma4:12b (pinned) | da16f0e |
+| ollama · gemma4:12b + **qwen3:14b reviewer** (text-only), run 5, shop | **19%** | **44%** | 92% | 0.0 | $0.00 | 1319 s | gemma4:12b (pinned) | e160a34 |
+| ollama · gemma4:12b + qwen3:14b reviewer, run 5, **holdout** | 0% | 33% | 89% | 0.0 | $0.00 | | gemma4:12b (pinned) | e160a34 |
+| ollama · gemma4:12b alone, run 5 (before/after replay, list reminder), shop | 7% | 36% | 95% | 0.0 | $0.00 | 1302 s | gemma4:12b (pinned) | a72290d |
+| ollama · gemma4:12b alone, run 5, **holdout** | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | a72290d |
+| claude · claude-sonnet-5-5 (API) | not run: needs an API key and budget | | | | | | | |
 
 What the run-2 rows show: with the new agent, Gemma 4 12B lost its one AI bug (it wrote the
 "$NaN" price in a note instead of reporting it) and found "Save does nothing" once, but replay
@@ -234,6 +240,14 @@ on. Gemma 4 12B now uses the charter's techniques and reaches most bug states, b
 recognises them; that, not exploration or verification, is its limit
 (`docs/MISS_ANALYSIS.md`). Sonnet's "false alarms" on the clean builds are real behaviour that
 isn't in the planted list (an empty name is saved, a reload empties the cart).
+
+What run 5 shows: verification that measures a change (not one screenshot) keeps the "Save
+changes does nothing" bug Gemma used to lose, and a reminder to open an item of every list the
+crawl found gets the agent to the order pages. A local 14B reviewer on the flagged steps then
+recognises what the 12B explorer reaches: the shop's judgement-only recall goes 0% → 7% (Gemma
+alone) → 19% (with the reviewer), and bug 13 is found for the first time. The holdout stays at
+0% for every local setup, so the reviewer isn't the default yet (the rule: it must lift the
+holdout); a stronger model is the next measurement.
 
 AI-only recall for the first three rows is computed from their per-bug results (bug 9, "$NaN" price, was
 the only AI bug found, by Gemma in 3 of 3 runs); they predate the holdout app. Bugs 1–4 were

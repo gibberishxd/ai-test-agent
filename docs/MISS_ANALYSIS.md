@@ -333,3 +333,31 @@ default only if holdout AI-only recall rises and clean-build false alarms don't.
 stayed at 0%, so **the default stays without a reviewer** (D87). The shop gains need explaining:
 K1 and the list seeding work without a reviewer too, so the K6 benchmark (Gemma alone, same
 code) separates them.
+
+## Run 5, K6: Gemma alone with everything in run 5
+
+Result `8546919c` (commit a72290d), gemma4:12b, no reviewer (the default, D87), judge
+ollama/gemma4:12b, 1200 s and 40 steps, holdout first. Same settings as runs 2–4.
+
+| Set | AI-only | Recall | Precision | False alarms |
+|---|---|---|---|---|
+| Shop (3 buggy + 1 clean) | 7% | 36% | 95% | 0.0 |
+| Holdout (2 buggy + 1 clean) | 0% | 33% | 100% | 0.0 |
+
+Gemma across runs (shop AI-only / holdout AI-only / clean-build false alarms):
+run 2 4% / 0% / 0; run 3 8% / 0% / 0; run 4 0% / 0% / 0; **run 5 alone 7% / 0% / 0;
+run 5 + qwen3:14b reviewer 19% / 0% / 0**.
+
+What separates the parts:
+- **K1 (before/after replay)** keeps bug 8: "Profile update button does not save changes" was
+  confirmed by measurement (in run 4 the judge rejected it twice).
+- **Bug 9** ("$NaN") counted once, on the page the matcher allows.
+- **Bug 13 needs the reviewer:** with the crawl-seeded reminder Gemma alone opens orders too, but
+  doesn't report the wrong one; qwen3:14b, shown the flagged step, called it a bug 3 of 3 times.
+- **The holdout is still 0% for every Gemma setup.** Its judgement bugs (a total that ignores
+  the stay length, a check-out before check-in accepted, a double booking, a mobile overflow)
+  are reached but not recognised; Sonnet found 25% there in run 3. The next lever is a stronger
+  explorer or a hosted reviewer, which needs an API budget or the owner's Pro limit.
+
+Sonnet (claude-cli) was not re-run: no yes from the owner this run. No Claude API call was
+made: `API_BUDGET_USD` was 0.

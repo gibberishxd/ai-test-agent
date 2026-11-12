@@ -165,6 +165,8 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | K3 Database rules | done | Roles ata_owner/web/worker (none superuser or BYPASSRLS); every web query through the tenant client, worker per-run tenant; justified bypasses as narrow functions; audit/updated_at/triage triggers, claim/quota/retention functions, two views, CHECKs; tested as each role (D83, D84; DATABASE.md). |
 | K4 Plans and usage | done | `plans`, `usage_events` (trigger, explorer/reviewer apart), plan-aware `consume_quota`, seats, retention cap; /settings/usage and /admin/usage (`worker make-admin`, `set-plan`); ROADMAP "Billing" (D85, placeholders). |
 | K5 First-run path | done | Dashboard "Getting started" (workspace → target → model → run → report, from the database); dev-only "create a test account" sign-up standing in for an email link; the unverified-domain error says where to verify; `e2e/first-run.e2e.ts` covers sign-up to report (9/9 e2e locally, with web and worker on their own database roles); fixed on the way: concurrent first sign-ins, the e2e fake model's script shared between runs, Free-plan limits on the dev demo account. Fresh screenshots via `e2e/screenshots.mjs`. |
+| K6 Measure | done | Gemma alone (default setup) `8546919c`: shop AI-only 7%, recall 36%, 0 false alarms; holdout 0% / 33% / 0. With the qwen3:14b reviewer `dbc3482e`: shop 19% / 44% / 0, holdout 0% / 33% / 0 (bug 13 found 3/3, first time). Gemma+Gemma reviewer `14203d1f`: 0% / 0%, holdout false alarms 1.0. Sonnet not run (no yes); no API calls (`API_BUDGET_USD` 0). Leaderboard rows per reviewer (materialized view). MISS_ANALYSIS "Run 5". |
+| K7 Wrap-up | done | README (run 5 section, results, screenshots), WALKTHROUGH (K1–K5 with Q&A), PROGRESS, ROADMAP, DATABASE (every object, roles, ER diagram from the schema), DECISIONS D80–D87, DEVLOG; tests and lint green; e2e 9/9 locally; pushed, nothing merged; servers stopped by PID, Ollama running. |
 
 ## Run 4 (branch `agent-v4`, plan in `docs/RUN_PLAN_4.md`)
 
@@ -274,5 +276,6 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.
 
 ## Spend tonight
+Run 5: $0.00. No Claude API call (`API_BUDGET_USD` = 0), no claude-cli call (no yes for Sonnet). Ollama local: three benchmarks (21 runs), the K1 re-check, one qwen3:14b download (9.3 GB).
 Run 3: $0.00. No API key and no paid calls. claude-cli (owner's Pro login): one Haiku check call and one benchmark (7 runs, ~220 agent decisions), no usage limit hit. Ollama local.
 Earlier: Claude API: $0.00 (no key, no Claude calls made). Ollama: $0 (local): ~12 agent runs + 2 benchmark scorings.

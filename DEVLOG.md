@@ -74,3 +74,15 @@ Benchmark scores go here too, once Phase 2 exists.
   the replay judge). Sonnet not run without the owner's yes.
 - Learned the hard way: no e2e tests during a benchmark (D67), stop processes by PID only (D71),
   and keep the dev and production compose files apart (D77).
+
+## 2026-11-12 (run 5, branch agent-v5)
+- Trustworthy: replay measures what the last action changed (text, fields, storage, requests,
+  dialogs, toasts, browser validation) instead of judging one screenshot; all 7 rejected "Save
+  does nothing" reports verify. A reviewer tier (any provider, text-only too) judges flagged steps;
+  lists the crawl finds remind the agent to open an item. Postgres enforces its own rules:
+  non-superuser roles, every query under RLS, audit/triage/updated_at triggers, claim/quota/
+  retention functions, plans and usage events. New teams get a Getting started path (e2e).
+- Measured on a 16 GB Mac: Gemma alone shop AI-only 7%, with a local qwen3:14b reviewer 19% (bug
+  13 found for the first time), holdout 0% either way, so the reviewer stays optional.
+- Learned: the browser's own form validation looks like "nothing happened" to a DOM diff; a
+  dev-only fake model shared between runs breaks the second e2e test; test as the real roles.
