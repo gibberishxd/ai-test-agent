@@ -9,7 +9,7 @@ import { getServerSession, type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import EmailProvider from "next-auth/providers/email";
 import GitHubProvider from "next-auth/providers/github";
-import { appAdapter, createUserWithWorkspace, type AppUser } from "@/lib/auth-adapter";
+import { appAdapter, findOrCreateUser, type AppUser } from "@/lib/auth-adapter";
 import { db } from "@/lib/db";
 
 export const DEMO_USER_EMAIL = "demo-user@example.com";
@@ -47,9 +47,8 @@ function providers(): NextAuthOptions["providers"] {
         name: "Demo user",
         credentials: {},
         async authorize() {
-          const existing = await db.user.findUnique({ where: { email: DEMO_USER_EMAIL } });
-          if (existing) return { ...existing, image: existing.image ?? undefined };
-          return createUserWithWorkspace(db, { email: DEMO_USER_EMAIL, name: "Demo User" });
+          const user = await findOrCreateUser(db, { email: DEMO_USER_EMAIL, name: "Demo User" });
+          return { ...user, image: user.image ?? undefined };
         },
       }),
     );

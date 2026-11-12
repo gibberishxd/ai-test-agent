@@ -66,6 +66,27 @@ export async function createUserWithWorkspace(
   return toAdapterUser(user);
 }
 
+/**
+ * The user with this email, created (with a workspace) if there is none. Two first sign-ins at
+ * the same moment both see "none" and both insert; the loser's insert fails on the unique email
+ * (its workspace rolls back with it), so it reads the winner's user instead.
+ */
+export async function findOrCreateUser(
+  db: PrismaClient,
+  data: { email: string; name?: string | null },
+): Promise<AppUser> {
+  const email = data.email.toLowerCase();
+  const existing = await db.user.findUnique({ where: { email } });
+  if (existing) return toAdapterUser(existing);
+  try {
+    return await createUserWithWorkspace(db, { ...data, email });
+  } catch (error) {
+    const raced = await db.user.findUnique({ where: { email } });
+    if (raced) return toAdapterUser(raced);
+    throw error;
+  }
+}
+
 export function appAdapter(db: PrismaClient): Adapter {
   return {
     createUser: (user: Omit<AdapterUser, "id">) => createUserWithWorkspace(db, user),
