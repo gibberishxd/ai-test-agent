@@ -190,13 +190,11 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
 ## Needs me
 0. **Run 5 (branch `agent-v5`, nothing merged):**
-   - **The PR question (K0):** close PR #2 and open one PR `agent-v5` → main with a summary of
-     runs 2–5 (my recommendation), or keep #2 and stack. I did nothing to the PRs without an
-     answer. When the PR is merged, tell me: I rebase `agent-v5` onto main with
-     `--force-with-lease`.
-   - **Sonnet (K6):** not run: no yes this run (Pro limit). To run it with the same settings as
+   - **PRs (answered):** #2 and #3 (`agent-v5` → main) were merged by the owner on 2026-11-12;
+     #4 holds the commits pushed after #3 (measurements, settings UI fixes, docs). Not merged.
+   - **Sonnet (K6):** the owner said no for now. To run it later with the same settings as
      f6151b32 plus bug 13: `cd apps/worker && LLM_PROVIDER=claude-cli uv run worker bench
-     --holdout-first` (~30 minutes of your Pro limit).
+     --holdout-first` (~30 minutes of the Pro limit).
    - **API budget:** `API_BUDGET_USD` was 0, so no Claude API call was made. With a budget, the
      first step is one smoke run through `ClaudeClient` (LLM_PROVIDER=claude), then a benchmark
      with a Claude reviewer behind Gemma (`REVIEWER_PROVIDER=claude REVIEWER_MODEL=...`).
