@@ -49,6 +49,28 @@ browser pane, and compare models on a public benchmark with planted bugs and a h
 - **Run it yourself:** Docker images and a production compose stack (Postgres, S3-compatible
   storage, N workers), health, readiness and Prometheus metrics. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
+## Trustworthy by construction (run 5)
+
+- **Verification judges a change, not a picture.** Replay records the page just before and just
+  after the reported action (text, form values, totals, stored data, requests, dialogs, toasts,
+  the browser's own form validation) and decides on the difference. "Save changes does nothing"
+  on a real button is now confirmed by measurement; harmless changes (spinners, clocks, polling)
+  are set aside.
+- **A stronger model only where it matters.** The cheap explorer drives the browser; steps where
+  what it expected didn't happen, and its reports, go to a reviewer model of your choice
+  (`REVIEWER_PROVIDER` / `REVIEWER_MODEL`, any provider, text-only models too). Explorer and
+  reviewer tokens and cost are recorded apart.
+- **The database enforces its own rules.** The apps connect as their own non-superuser roles and
+  see nothing outside one workspace (Postgres row-level security); the audit log, quota, run
+  claiming, retention and triage carry-forward are triggers and functions in Postgres, with
+  check constraints behind them. See [`docs/DATABASE.md`](docs/DATABASE.md).
+- **Usage you could bill for.** Plans with limits (runs, steps, models, seats, retention) and one
+  usage event per run; a usage page per workspace and an operator view across workspaces.
+- **First run without help.** A new workspace gets a "Getting started" path from sign-up to its
+  first report, covered by an end-to-end test.
+
+![Getting started](docs/screenshots/getting-started.png)
+
 ## How it works
 
 ```mermaid

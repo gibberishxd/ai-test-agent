@@ -187,6 +187,31 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
+0. **Run 5 (branch `agent-v5`, nothing merged):**
+   - **The PR question (K0):** close PR #2 and open one PR `agent-v5` → main with a summary of
+     runs 2–5 (my recommendation), or keep #2 and stack. I did nothing to the PRs without an
+     answer. When the PR is merged, tell me: I rebase `agent-v5` onto main with
+     `--force-with-lease`.
+   - **Sonnet (K6):** not run: no yes this run (Pro limit). To run it with the same settings as
+     f6151b32 plus bug 13: `cd apps/worker && LLM_PROVIDER=claude-cli uv run worker bench
+     --holdout-first` (~30 minutes of your Pro limit).
+   - **API budget:** `API_BUDGET_USD` was 0, so no Claude API call was made. With a budget, the
+     first step is one smoke run through `ClaudeClient` (LLM_PROVIDER=claude), then a benchmark
+     with a Claude reviewer behind Gemma (`REVIEWER_PROVIDER=claude REVIEWER_MODEL=...`).
+   - **Plans (D85, decided without you, revisit):** placeholder limits and prices: Free 30 runs,
+     40 steps, local models, 3 seats, 7 days; Team 300/80/any/10/30; Business 2000/150/any/50/90.
+     Change them in a migration (or tell me the numbers). `worker set-plan <slug> <plan>` moves a
+     workspace.
+   - **Platform admins:** `cd apps/worker && uv run worker make-admin you@company.com`, then
+     /admin/usage.
+   - **Dev database roles:** `.env` now has `WEB_DATABASE_URL` / `WORKER_DATABASE_URL` (dev-only
+     passwords, set by `npm run db:roles`). A fresh clone: `npm run db:migrate && npm run
+     db:roles`, then copy those lines from `.env.example`.
+   - **Production stack:** `.env.prod` needs `DB_WEB_PASSWORD` and `DB_WORKER_PASSWORD` (long
+     random values); the migrate job sets them on the roles.
+   - **Still yours from earlier runs:** bug 7's hidden code, the cart emptied by a reload,
+     quantity 0 → 1, and the matcher offering only bugs listed on a report's own page (bug 9's
+     "$NaN" seen on /cart doesn't count).
 0. **Run 4 (branch `agent-v4`, nothing merged):**
    - **Merge PR #2 (`agent-v3` → main)**, then tell me: I rebase `agent-v4` onto main
      (`--force-with-lease`, the one allowed exception) and open its PR.
