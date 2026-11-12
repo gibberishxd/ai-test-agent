@@ -1,7 +1,8 @@
 """Claude prices in USD per million tokens, used to compute the cost of every call.
 
-Source: Anthropic's model table (cached 2026-10-06). Cache writes (5-minute TTL) cost 1.25x the
-input price; cache reads ~0.1x (Sonnet 5.5 and Opus 5.5 publish their own read prices).
+Source: Anthropic's model table (cached 2026-11-03). Cache writes (5-minute TTL) cost 1.25x
+the input price; cache reads ~0.1x, except where a model publishes its own read price
+(Sonnet 5.5: $0.10, Opus 5.5: $0.20).
 Update this table when prices change; the benchmark records cost per run, so a change shows up.
 """
 
@@ -20,7 +21,7 @@ class Price:
 
 PRICES: dict[str, Price] = {
     "claude-opus-5-5": Price(input=4.00, output=20.00, cache_read=0.20, cache_write=5.00),
-    "claude-sonnet-5-5": Price(input=2.00, output=10.00, cache_read=0.20, cache_write=2.50),
+    "claude-sonnet-5-5": Price(input=2.00, output=10.00, cache_read=0.10, cache_write=2.50),
     "claude-haiku-5-5": Price(input=0.10, output=0.50, cache_read=0.01, cache_write=0.125),
 }
 

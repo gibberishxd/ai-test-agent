@@ -1,0 +1,13 @@
+{
+  "id": "chatcmpl-local",
+  "object": "chat.completion",
+  "model": "llama-local",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "I will scroll. {\"name\": \"scroll\", \"arguments\": {\"direction\": \"down\", \"reasoning\": \"see more\"}}"},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {"prompt_tokens": 800, "completion_tokens": 30, "total_tokens": 830}
+}

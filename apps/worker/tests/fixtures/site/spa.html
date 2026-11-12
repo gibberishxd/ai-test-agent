@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tiny shop (single-page app)</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <!-- Like a real single-page app: links change the URL with pushState (no page load), and a
+         route's content appears a moment later (code-split chunk, data fetch). The cart lives in
+         localStorage, so it outlives a page and leaks into any later page of the same context. -->
+    <header>
+      <a id="home" href="?">Shop</a> <span id="cart">Cart (0)</span>
+      <a id="view-cart" href="?cart">View cart</a>
+    </header>
+    <main id="main"></main>
+    <script>
+      const RENDER_DELAY_MS = 700;
+      const main = document.getElementById("main");
+      const cartCount = () => Number(localStorage.getItem("cart") || 0);
+      const showCart = () => {
+        document.getElementById("cart").textContent = `Cart (${cartCount()})`;
+      };
+
+      function home() {
+        main.innerHTML = '<h1>Shop</h1><a id="item" href="?item">Wool Socks</a>';
+        document.getElementById("item").onclick = (event) => {
+          event.preventDefault();
+          history.pushState({}, "", "?item");
+          route();
+        };
+      }
+
+      function item() {
+        main.innerHTML = "<p>Loading…</p>";
+        setTimeout(() => {
+          main.innerHTML =
+            '<h1>Wool Socks</h1><label for="qty">Quantity</label> ' +
+            '<input id="qty" type="number" value="1" /> <button id="add">Add to cart</button>';
+          document.getElementById("add").onclick = () => {
+            const qty = Number(document.getElementById("qty").value);
+            localStorage.setItem("cart", String(cartCount() + qty));
+            showCart();
+          };
+        }, RENDER_DELAY_MS);
+      }
+
+      // Like a router that renders in a transition: the URL changes at once, the page a bit
+      // later, with no "loading" state in between.
+      function cart() {
+        setTimeout(() => {
+          main.innerHTML = `<h1>Your cart</h1><p>${cartCount()} pairs of socks</p>`;
+        }, 300);
+      }
+
+      function route() {
+        if (location.search === "?item") item();
+        else if (location.search === "?cart") cart();
+        else home();
+        showCart();
+      }
+      document.getElementById("view-cart").onclick = (event) => {
+        event.preventDefault();
+        history.pushState({}, "", "?cart");
+        route();
+      };
+      window.onpopstate = route;
+      route();
+    </script>
+  </body>
+</html>

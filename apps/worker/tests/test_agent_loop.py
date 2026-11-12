@@ -27,11 +27,11 @@ def agent(context, site_url):
         allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
     )
 
-    def make(decisions, mode="interactive", **budget_fields):
+    def make(decisions, mode="interactive", target="/form.html", **budget_fields):
         llm = FakeClient(decisions=decisions)
         page = context.new_page()
         config = AgentConfig(
-            target_url=f"{site_url}/form.html", mode=mode, budget=budget(**budget_fields)
+            target_url=f"{site_url}{target}", mode=mode, budget=budget(**budget_fields)
         )
         return AgentRun(page, llm, guard, config), llm, page
 
@@ -79,6 +79,44 @@ def test_navigate_off_origin_is_blocked(agent):
     assert result.steps[0].blocked
 
 
+PARTNER_LINK, REDIRECT_BUTTON = 1, 2  # element ids on offsite.html
+
+
+def test_link_to_another_site_is_blocked_before_the_click(agent, site_url):
+    run, llm, page = agent(
+        [call("click", element_id=PARTNER_LINK), call("finish", summary="")],
+        target="/offsite.html",
+    )
+    result = run.run()
+    blocked = result.steps[0]
+    assert blocked.blocked and "another site" in blocked.block_reason
+    assert page.url == f"{site_url}/offsite.html"  # the click never happened
+    assert "BLOCKED" in llm.calls[1]["observation"]  # the model is told
+
+
+def test_button_that_leaves_the_site_is_undone(agent, site_url):
+    # A button gives no warning where it leads: the worker notices afterwards and goes back.
+    run, llm, page = agent(
+        [call("click", element_id=REDIRECT_BUTTON), call("finish", summary="")],
+        target="/offsite.html",
+    )
+    result = run.run()
+    left = result.steps[0]
+    assert left.blocked and "another site" in left.block_reason  # blocked: replay skips it
+    assert page.url == f"{site_url}/offsite.html"
+    assert "URL: http://localhost" not in llm.calls[1]["observation"]  # never observed there
+
+
+def test_target_that_redirects_to_another_site_stops_the_run(agent, site_url):
+    other = site_url.replace("127.0.0.1", "localhost")
+    run, llm, _ = agent(
+        [call("type", element_id=NAME, text="x")], target=f"/redirect?to={other}/form.html"
+    )
+    result = run.run()
+    assert "another site" in result.stop_reason
+    assert result.steps == [] and llm.calls == []
+
+
 def test_step_budget_stops_the_run(agent):
     alternating = [call("scroll", direction="down"), call("scroll", direction="up")] * 5
     run, _, _ = agent(alternating, max_steps=3)
@@ -88,10 +126,29 @@ def test_step_budget_stops_the_run(agent):
 
 
 def test_repeated_action_is_detected_as_a_loop(agent):
-    run, _, _ = agent([call("click", element_id=SAVE)] * 5)
+    # The first Save writes "Saved: "; the next three change nothing, and that is the loop.
+    run, _, _ = agent([call("click", element_id=SAVE)] * 6)
     result = run.run()
-    assert len(result.steps) == 3
+    assert len(result.steps) == 4
     assert "loop" in result.stop_reason
+
+
+MORE = 1  # element id on counter.html
+
+
+def test_repeating_a_click_that_works_is_not_a_loop(agent):
+    clicks = [call("click", element_id=MORE)] * 4
+    run, llm, page = agent([*clicks, call("finish", summary="")], target="/counter.html")
+    result = run.run()
+    assert result.stop_reason == "finished"
+    assert page.locator("#quantity").inner_text() == "5"
+    assert not any("WARNING" in c["observation"] for c in llm.calls)
+
+
+def test_scrolling_down_a_long_page_is_not_a_loop(agent):
+    scrolls = [call("scroll", direction="down")] * 4
+    run, _, _ = agent([*scrolls, call("finish", summary="")], target="/counter.html")
+    assert run.run().stop_reason == "finished"
 
 
 def test_cost_budget_stops_the_run(agent):
@@ -181,13 +238,218 @@ def test_model_is_warned_before_loop_detection_ends_the_run(agent):
     run, llm, _ = agent([call("scroll", direction="down")] * 3)
     run.run()
     assert "WARNING" not in llm.calls[1]["observation"]
-    assert "WARNING: your last two actions were identical" in llm.calls[2]["observation"]
+    assert "WARNING: you keep repeating the same action" in llm.calls[2]["observation"]
 
 
 def test_text_changes_lists_new_lines_only():
     from worker.agent.loop import text_changes
 
     assert text_changes("Cart (1)\nShop", "Cart (2)\nShop\nAdded to your cart.") == (
-        "Cart (2) | Added to your cart."
+        "Cart (1) → (2) | Added to your cart."
     )
     assert text_changes("same", "same") == ""
+
+
+# --- tools a manual tester has: double-click, reload, phone-sized screen, a notepad ------------
+
+
+def test_double_click_clicks_the_element_twice(agent):
+    run, _, page = agent(
+        [call("double_click", element_id=MORE), call("finish", summary="")], target="/counter.html"
+    )
+    result = run.run()
+    assert page.locator("#quantity").inner_text() == "3"
+    assert result.steps[0].human == 'Double-click button "Increase quantity"'
+    assert result.steps[0].changed
+
+
+def test_reload_loads_the_page_again(agent):
+    run, _, page = agent(
+        [call("click", element_id=MORE), call("reload"), call("finish", summary="")],
+        target="/counter.html",
+    )
+    result = run.run()
+    assert page.locator("#quantity").inner_text() == "1"  # the page's memory is gone
+    assert result.steps[1].result.startswith("ok, the page was reloaded")
+    assert result.steps[1].human == "Reload the page"
+
+
+def test_set_viewport_switches_between_phone_and_desktop(agent):
+    run, llm, page = agent(
+        [
+            call("set_viewport", size="mobile"),
+            call("set_viewport", size="mobile"),
+            call("set_viewport", size="desktop"),
+            call("finish", summary=""),
+        ],
+        target="/counter.html",
+    )
+    sizes = []
+    run.on_step = lambda step: sizes.append(page.viewport_size)
+    result = run.run()
+    assert sizes[0] == {"width": 375, "height": 812}
+    assert sizes[2] == {"width": 1280, "height": 800}
+    assert result.steps[0].changed and not result.steps[1].changed  # already mobile
+    # The model sees the new layout and is told which screen it is on.
+    assert llm.calls[1]["image"] is not None
+    assert "VIEWPORT: mobile (375×812)" in llm.calls[1]["observation"]
+    assert "VIEWPORT: desktop (1280×800)" in llm.calls[0]["observation"]
+
+
+def test_set_viewport_rejects_unknown_sizes(agent):
+    run, _, _ = agent([call("set_viewport", size="watch")], target="/counter.html")
+    assert run.run().steps[0].result.startswith("error: size must be")
+
+
+def test_notes_stay_in_view_for_the_rest_of_the_run(agent):
+    filler = [call("scroll", direction=d) for d in ("down", "up")] * 7  # 14 steps
+    run, llm, _ = agent(
+        [call("note", text="cart total before: $12"), *filler, call("finish", summary="")],
+        target="/counter.html",
+    )
+    run.run()
+    last = llm.calls[-1]["observation"]
+    assert "NOTES" in last and "- cart total before: $12" in last
+    assert "#1 Note" not in last  # the step itself has scrolled out of RECENT STEPS
+
+
+def test_notes_are_capped(agent):
+    notes = [call("note", text=f"note {i}") for i in range(21)]
+    run, llm, _ = agent(notes, target="/counter.html", max_steps=30)
+    result = run.run()
+    assert result.steps[19].result.startswith("noted")
+    assert result.steps[20].result.startswith("error: the notepad is full")
+    assert len(run.memory.notes) == 20
+
+
+def test_passive_mode_allows_looking_tools_but_not_double_click(agent):
+    run, _, page = agent(
+        [
+            call("set_viewport", size="mobile"),
+            call("reload"),
+            call("note", text="seen"),
+            call("double_click", element_id=MORE),
+        ],
+        mode="passive",
+        target="/counter.html",
+    )
+    result = run.run()
+    assert [s.blocked for s in result.steps[:4]] == [False, False, False, True]
+    assert page.locator("#quantity").inner_text() == "1"
+
+
+def test_the_same_prompt_object_is_sent_on_every_step(agent):
+    class Recording(FakeClient):
+        systems = []
+
+        def decide(self, system, *args, **kwargs):
+            self.systems.append(system)
+            return super().decide(system, *args, **kwargs)
+
+    run, _, _ = agent([])
+    run.llm = Recording(
+        decisions=[
+            call("scroll", direction="down"),
+            call("note", text="x"),
+            call("finish", summary=""),
+        ]
+    )
+    run.run()
+    assert len(Recording.systems) == 3
+    assert all(system is SYSTEM_PROMPT for system in Recording.systems)  # cacheable prefix
+
+
+# --- what the live browser pane shows: the page before the action, and where the target is ----
+
+
+def test_step_records_the_page_before_the_action_and_the_targets_box(context, site_url):
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+    page = context.new_page()
+    saved = {}
+
+    def save(png, name):
+        saved[name] = png
+        return f"{name}.png"
+
+    llm = FakeClient(decisions=[call("click", element_id=SAVE), call("finish", summary="")])
+    config = AgentConfig(target_url=f"{site_url}/form.html", mode="interactive", budget=budget())
+    result = AgentRun(page, llm, guard, config, save_screenshot=save).run()
+
+    click = result.steps[0]
+    # The step's screenshot is the very image the model looked at before it chose the click.
+    assert saved["step-001"] == llm.calls[0]["image"]
+    assert click.screenshot == "step-001.png"
+    assert click.viewport == {"width": 1280, "height": 800}
+    box = click.box
+    save_button = page.locator("#save").bounding_box()
+    assert box == {
+        "x": round(save_button["x"]),
+        "y": round(save_button["y"]),
+        "width": round(save_button["width"]),
+        "height": round(save_button["height"]),
+    }
+    assert result.steps[1].box is None  # finish acts on nothing
+
+
+def test_the_box_is_where_the_element_is_on_screen_after_scrolling(agent):
+    run, _, page = agent(
+        [
+            call("scroll", direction="down"),
+            call("click", element_id=MORE),
+            call("finish", summary=""),
+        ],
+        target="/counter.html",
+    )
+    result = run.run()
+    # The button is near the top, so after scrolling 700 px down it is above the screen.
+    assert result.steps[1].box["y"] < 0
+
+
+# [2] and ["2"]: a JSON list with one id (seen from gemma4:12b on the holdout app, run 3).
+@pytest.mark.parametrize("written", ["[2]", "2", " 2 ", 2.0, [2], ["2"]])
+def test_an_element_id_written_as_text_still_finds_the_element(agent, written):
+    run, _, page = agent([call("click", element_id=written), call("finish", summary="")])
+    result = run.run()
+    assert page.locator("#status").inner_text() == "Saved:"  # Save was clicked
+    assert result.steps[0].element["name"] == "Save"
+
+
+def test_the_observation_lists_charter_techniques_not_tried_yet(agent):
+    run, llm, _ = agent([call("double_click", element_id=SAVE), call("finish", summary="")])
+    run.run()
+    first, second = (c["observation"] for c in llm.calls if c["method"] == "decide")
+    assert "NOT TRIED YET" in first and "double_click" in first.split("NOT TRIED YET")[1]
+    assert "double_click" not in second.split("NOT TRIED YET")[1]
+
+
+def test_a_note_reminds_the_model_that_notes_are_not_reports(agent):
+    # Run 3 traces: in 5 gemma4:12b runs the model noted "Wool Socks price is NaN" and never
+    # reported it. The note's result is what the model reads next, so the reminder goes there.
+    run, _, _ = agent([call("note", text="price shows NaN"), call("finish", summary="")])
+    result = run.run().steps[0].result
+    assert result.startswith("noted") and "report_bug" in result
+
+
+class BrokenModel(FakeClient):
+    """Answers the first decision, then the model call fails (a local model timing out)."""
+
+    def decide(self, system, observation, tools, image=None):
+        if self.calls:
+            self.calls.append({"method": "decide", "observation": observation})
+            raise TimeoutError("timed out")
+        return super().decide(system, observation, tools, image)
+
+
+def test_a_failing_model_call_ends_the_run_cleanly_and_keeps_its_steps(context, site_url):
+    # Run 3: one gemma call took over 300 s and the exception failed the whole run, 42 steps
+    # and its reports with it. Now the loop stops with the reason and keeps what it has.
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+    llm = BrokenModel(decisions=[call("type", element_id=NAME, text="x")])
+    config = AgentConfig(target_url=f"{site_url}/form.html", mode="interactive", budget=budget())
+    result = AgentRun(context.new_page(), llm, guard, config).run()
+    assert [s.action for s in result.steps] == ["type"]
+    assert result.stop_reason == "the model call failed: TimeoutError: timed out"

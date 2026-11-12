@@ -7,7 +7,7 @@ export type RunMode = "passive" | "interactive";
 
 export type RunInput = { targetUrl: string; mode: RunMode; focus: string | null };
 
-export type FieldErrors = Partial<Record<"targetUrl" | "mode" | "focus", string>>;
+export type FieldErrors = Partial<Record<"targetUrl" | "mode" | "focus" | "model", string>>;
 
 export type ParseResult = { ok: true; value: RunInput } | { ok: false; errors: FieldErrors };
 

@@ -12,6 +12,7 @@ planted bugs.
 - `apps/web` — Next.js (App Router, TypeScript, Tailwind, shadcn/ui) dashboard + API. Prisma owns the DB schema.
 - `apps/worker` — Python (uv, Playwright, pytest, ruff, Pydantic, SQLAlchemy). Deterministic checks, agent loop, replay.
 - `apps/demo` — Vite + React demo shop with planted bugs (5173) and a clean build (5174); bugs listed in `bugs.json`.
+- `apps/demo2` — holdout app for the benchmark (5175, clean 5176): same kinds of bugs, never used to tune the agent.
 - `docker-compose.yml` — local Postgres, the only link between web and worker.
 
 ## Commands (from the repo root)
@@ -47,7 +48,16 @@ only. In short:
 - Keep `docs/WALKTHROUGH.md` current: per component, what/how/why, weak spots, 3 interview Q&As.
 - End the night with a `DEVLOG.md` entry.
 
+## Unattended run 2 (branch `agent-v2`)
+The owner's plan and ground rules for the second unattended run are in
+[`docs/RUN_PLAN_2.md`](docs/RUN_PLAN_2.md). For that run only, its rules override "wait for a
+go-ahead" and "the AI core is the owner's to write".
+
 ## Current phase
 Demo v1 (branch `demo-v1`): milestones M1–M9 done (M4/M5 measured with a local model only).
 Next: re-run M4/M5 and the benchmark with Claude (see "Needs me" in `docs/PROGRESS.md`), then
 review and merge `demo-v1` into `main`.
+
+## Unattended run 3 (branch `agent-v3`)
+Goals and acceptance checks: [`docs/RUN_PLAN_3.md`](docs/RUN_PLAN_3.md). Same override rules as run 2,
+plus at most one claude-cli benchmark run (H7).

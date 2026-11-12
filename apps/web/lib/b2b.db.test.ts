@@ -2,13 +2,21 @@
  * M8 acceptance tests, against a real Postgres (test/global-setup.ts):
  * workspace isolation, domain verification, quota, share links, visitor limits.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createUserWithWorkspace } from "@/lib/auth-adapter";
 import { db } from "@/lib/db";
 import type { VerifyDeps } from "@/lib/domains";
 import { getRun, listRuns, requestStop, startRun } from "@/lib/runs";
 import { addDomain, checkDomain } from "@/lib/settings-data";
-import { createShareLink, getSharedRun, revokeShareLink } from "@/lib/share";
+import {
+  createModelConfig,
+  deleteModelConfig,
+  listModelConfigs,
+  replaceModelKey,
+  setDefaultModel,
+  storeProbe,
+} from "@/lib/model-configs";
+import { canReadFile, createShareLink, getSharedRun, revokeShareLink } from "@/lib/share";
 import type { RequestContext } from "@/lib/workspace";
 import { hasTestDb } from "../test/use-test-db";
 
@@ -29,7 +37,7 @@ async function addRun(workspaceId: string, createdAt = new Date()) {
 describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      "TRUNCATE workspaces, users, runs, steps, bugs, audit_log, domains, accounts, verification_tokens CASCADE",
+      "TRUNCATE workspaces, users, runs, steps, bugs, audit_log, domains, accounts, verification_tokens, model_configs CASCADE",
     );
   });
 
@@ -93,6 +101,17 @@ describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
   });
 
   describe("quota", () => {
+    it("holds under a burst of simultaneous requests", async () => {
+      // Check-then-insert would let all of these through: each sees "1 run left".
+      const a = await workspace("a", 3);
+      const burst = Array.from({ length: 10 }, () =>
+        startRun(signedIn(a.id), { targetUrl: DEMO, mode: "passive" }, "ip"),
+      );
+      const results = await Promise.all(burst);
+      expect(results.filter((r) => r.ok)).toHaveLength(3);
+      expect(await db.run.count({ where: { workspaceId: a.id } })).toBe(3);
+    });
+
     it("refuses runs once the monthly quota is used", async () => {
       const a = await workspace("a", 2);
       await addRun(a.id);
@@ -111,6 +130,26 @@ describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
   });
 
   describe("share links", () => {
+    it("serve a shared run's screenshots, and only that run's", async () => {
+      const a = await workspace("a");
+      const b = await workspace("b");
+      const runA = await addRun(a.id);
+      const runB = await addRun(a.id);
+      const token = (await createShareLink(a.id, runA.id))!;
+
+      // Someone with the link, who is in another workspace (or signed out).
+      const outsider = { workspaceId: b.id, shareToken: token };
+      expect(await canReadFile(`${runA.id}/page-001.png`, outsider)).toBe(true);
+      expect(await canReadFile(`${runB.id}/page-001.png`, outsider)).toBe(false);
+      expect(await canReadFile(`${runA.id}/page-001.png`, { workspaceId: b.id, shareToken: null })).toBe(false);
+      expect(await canReadFile(`${runA.id}/page-001.png`, { workspaceId: b.id, shareToken: "x".repeat(32) })).toBe(false);
+
+      // The owner needs no token; a revoked token stops working.
+      expect(await canReadFile(`${runB.id}/page-001.png`, { workspaceId: a.id, shareToken: null })).toBe(true);
+      await revokeShareLink(a.id, runA.id);
+      expect(await canReadFile(`${runA.id}/page-001.png`, outsider)).toBe(false);
+    });
+
     it("work until revoked", async () => {
       const a = await workspace("a");
       const run = await addRun(a.id);
@@ -147,6 +186,110 @@ describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
       expect((await startRun(visitor(pub.id), { targetUrl: DEMO, mode: "passive" }, "5.6.7.8")).ok).toBe(true);
     });
   });
+
+  describe("workspace models (bring your own model)", () => {
+    const KEY = "sk-live-ABCD1234wxyz";
+    const SERVER_KEY = Buffer.alloc(32, 9);
+    const input = {
+      label: "OpenRouter Gemini",
+      provider: "openai-compat",
+      baseUrl: "https://openrouter.example/api/v1",
+      model: "google/gemini-3-flash",
+      apiKey: KEY,
+    };
+    const passed = { ok: true, answers: true, tools: true, vision: true, error: null, checkedAt: "2026-11-10T12:00:00.000Z" };
+
+    async function created(workspaceId: string) {
+      const result = await createModelConfig(workspaceId, input, SERVER_KEY);
+      if (!result.ok) throw new Error(JSON.stringify(result.errors));
+      return result.model;
+    }
+
+    it("stores the key encrypted and never returns it", async () => {
+      const a = await workspace("a");
+      const model = await created(a.id);
+      expect(model.keyHint).toBe("•••• wxyz");
+      expect(JSON.stringify(model)).not.toContain(KEY);
+      expect(JSON.stringify(await listModelConfigs(a.id))).not.toContain(KEY);
+
+      const [row] = await db.$queryRawUnsafe<Record<string, unknown>[]>("SELECT * FROM model_configs");
+      expect(JSON.stringify(row)).not.toContain(KEY);
+      expect(JSON.stringify(row)).not.toContain("ABCD1234");
+      expect(String(row!.api_key_ciphertext)).toMatch(/^v1:/);
+    });
+
+    it("never logs the key", async () => {
+      const lines: string[] = [];
+      const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation((...args: unknown[]) => void lines.push(args.map(String).join(" "))),
+      );
+      try {
+        const a = await workspace("a");
+        const model = await created(a.id);
+        await replaceModelKey(a.id, model.id, "sk-live-NEWKEY9999", SERVER_KEY);
+        await storeProbe(a.id, model.id, passed);
+      } finally {
+        spies.forEach((spy) => spy.mockRestore());
+      }
+      expect(lines.join("\n")).not.toContain(KEY);
+      expect(lines.join("\n")).not.toContain("NEWKEY9999");
+    });
+
+    it("can be replaced and deleted, and the old key is gone", async () => {
+      const a = await workspace("a");
+      const model = await created(a.id);
+      const replaced = await replaceModelKey(a.id, model.id, "sk-live-NEWKEY9999", SERVER_KEY);
+      expect(replaced?.keyHint).toBe("•••• 9999");
+      expect(replaced?.probe).toBeNull(); // a new key must be tested again
+      expect(await deleteModelConfig(a.id, model.id)).toBe(true);
+      expect(await listModelConfigs(a.id)).toEqual([]);
+    });
+
+    it("workspace B can't see, change, delete or use workspace A's model", async () => {
+      const a = await workspace("a");
+      const b = await workspace("b");
+      const model = await created(a.id);
+      await storeProbe(a.id, model.id, passed);
+
+      expect(await listModelConfigs(b.id)).toEqual([]);
+      expect(await replaceModelKey(b.id, model.id, "sk-evil", SERVER_KEY)).toBeNull();
+      expect(await setDefaultModel(b.id, model.id)).toBe(false);
+      expect(await storeProbe(b.id, model.id, passed)).toBe(false);
+      expect(await deleteModelConfig(b.id, model.id)).toBe(false);
+
+      const stolen = await startRun(signedIn(b.id), { targetUrl: DEMO, mode: "passive", modelConfigId: model.id }, "ip");
+      expect(stolen).toMatchObject({ ok: false, status: 400 });
+      expect(await db.run.count({ where: { workspaceId: b.id } })).toBe(0);
+    });
+
+    it("a run can only use a model that passed Test connection, and records it", async () => {
+      const a = await workspace("a");
+      const model = await created(a.id);
+      const untested = await startRun(signedIn(a.id), { targetUrl: DEMO, mode: "passive", modelConfigId: model.id }, "ip");
+      expect(untested).toMatchObject({ ok: false, status: 400 });
+      if (!untested.ok) expect(untested.errors.model).toMatch(/Test connection/);
+
+      await storeProbe(a.id, model.id, { ...passed, ok: false, vision: false, error: "no images" });
+      const blind = await startRun(signedIn(a.id), { targetUrl: DEMO, mode: "passive", modelConfigId: model.id }, "ip");
+      if (!blind.ok) expect(blind.errors.model).toMatch(/no images/);
+
+      await storeProbe(a.id, model.id, passed);
+      const started = await startRun(signedIn(a.id), { targetUrl: DEMO, mode: "passive", modelConfigId: model.id }, "ip");
+      if (!started.ok) throw new Error(JSON.stringify(started.errors));
+      expect((await db.run.findUniqueOrThrow({ where: { id: started.id } })).modelConfigId).toBe(model.id);
+    });
+
+    it("one default per workspace", async () => {
+      const a = await workspace("a");
+      const first = await created(a.id);
+      const second = await created(a.id);
+      await setDefaultModel(a.id, first.id);
+      await setDefaultModel(a.id, second.id);
+      const models = await listModelConfigs(a.id);
+      expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual([second.id]);
+    });
+  });
+
 });
 
 /** Fake DNS that has the TXT record for `token`. */

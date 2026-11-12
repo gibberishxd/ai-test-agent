@@ -39,7 +39,30 @@ TOOLS = [
         "may be lost, so prefer clicking links).",
         url={"type": "string", "description": "Absolute URL or a path like /cart."},
     ),
+    _tool(
+        "double_click",
+        "Double-click an element: two clicks in quick succession, as an impatient user does. "
+        "Use it to check that nothing is submitted or applied twice.",
+        element_id=ELEMENT_ID,
+    ),
     _tool("go_back", "Go back to the previous page."),
+    _tool(
+        "reload",
+        "Reload the current page, like pressing the browser's refresh button. Use it to check "
+        "what survives a refresh (a session, a cart, a saved change).",
+    ),
+    _tool(
+        "set_viewport",
+        "Switch the browser between a desktop screen (1280×800) and a phone screen (375×812) "
+        "to check the layout at both sizes. You get a screenshot with the next observation.",
+        size={"type": "string", "enum": ["desktop", "mobile"]},
+    ),
+    _tool(
+        "note",
+        "Write a short note to yourself (a value before a change, something to check later). "
+        "Notes stay in every later observation; at most 20.",
+        text={"type": "string", "description": "One short line, e.g. 'cart total before: $12'."},
+    ),
     _tool("scroll", "Scroll the page.", direction={"type": "string", "enum": ["up", "down"]}),
     _tool("take_screenshot", "Get a screenshot of the current page with the next observation."),
     _tool(

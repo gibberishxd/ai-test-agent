@@ -48,6 +48,7 @@ class PageResult(BaseModel):
     title: str | None = None
     found_on: str | None = None  # the page that linked here; None for the start URL
     screenshot: str | None = None  # path relative to the report folder
+    mobile_screenshot: str | None = None  # the same page at 375 px wide
     console_errors: list[ConsoleError] = Field(default_factory=list)
     failed_requests: list[FailedRequest] = Field(default_factory=list)
     a11y_violations: list[A11yViolation] = Field(default_factory=list)

@@ -90,6 +90,12 @@ def test_navigation_must_stay_on_the_target_origin():
     assert g.check("https://example.com/font.woff2") is None  # subresources may be elsewhere
 
 
+def test_navigation_may_follow_the_target_to_https():
+    g = NetworkGuard(target_url="http://shop.test/", resolver=lambda host: ["93.184.215.14"])
+    assert g.check_navigation("https://shop.test/cart") is None
+    assert "origin" in g.check_navigation("https://other.test/")
+
+
 # --- 6.2 passive mode --------------------------------------------------------------------------
 
 LINK = ElementInfo(role="link", name="About", tag="a", href="/about")
@@ -156,3 +162,27 @@ def test_log_filter_redacts(caplog):
         logger.info("calling API with %s", "sk-live-123456")
     assert "sk-live-123456" not in caplog.text
     assert MASK in caplog.text
+
+
+# --- dev mode is off unless switched on ---------------------------------------------------------
+
+
+def test_without_dev_mode_the_local_demo_shops_are_refused():
+    from worker.config import Settings
+    from worker.scan import make_guard
+
+    settings = Settings(_env_file=None)  # nothing set: must be the safe choice
+    assert settings.dev_mode is False
+    guard = make_guard(settings, settings.demo_url)
+    assert "private or internal" in guard.check("http://localhost:5173/")
+    assert "private or internal" in guard.check("http://localhost:5174/")
+
+
+def test_dev_mode_has_to_be_switched_on_explicitly():
+    from worker.config import Settings
+    from worker.scan import make_guard
+
+    settings = Settings(_env_file=None, dev_mode=True)
+    guard = make_guard(settings, settings.demo_url)
+    assert guard.check("http://localhost:5173/") is None
+    assert guard.check("http://localhost:3000/") is not None  # only the demo shops' ports

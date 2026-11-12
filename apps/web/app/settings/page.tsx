@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DomainList } from "@/components/domain-list";
+import { ModelSettings } from "@/components/model-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { currentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatCost, formatDate, hostOf } from "@/lib/format";
+import { listModelConfigs } from "@/lib/model-configs";
 import { auditLog, listDomains, usageThisMonth } from "@/lib/settings-data";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -16,17 +18,22 @@ const ACTIONS: Record<string, string> = {
   "domain.verified": "Verified a domain",
   "share.created": "Shared a report",
   "share.revoked": "Revoked a share link",
+  "model.added": "Added a model",
+  "model.key_replaced": "Replaced a model's key",
+  "model.deleted": "Deleted a model",
+  "model.tested": "Tested a model connection",
 };
 
 export default async function SettingsPage() {
   const user = await currentUser();
   if (!user) redirect("/signin");
 
-  const [workspace, domains, usage, log] = await Promise.all([
+  const [workspace, domains, usage, log, models] = await Promise.all([
     db.workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
     listDomains(user.workspaceId),
     usageThisMonth(user.workspaceId),
     auditLog(user.workspaceId),
+    listModelConfigs(user.workspaceId),
   ]);
   const used = Math.min(usage.runs / usage.quota, 1);
 
@@ -75,6 +82,21 @@ export default async function SettingsPage() {
               </TableBody>
             </Table>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Models</CardTitle>
+          <CardDescription>
+            Bring any model: an OpenAI-compatible endpoint (OpenAI, Gemini, OpenRouter, Groq, LM Studio, vLLM,
+            Ollama) or an Anthropic key. The agent needs tool calling and image input, which Test connection
+            checks. See how each model scores on the <Link href="/benchmark" className="underline">benchmark</Link>{" "}
+            before you rely on it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ModelSettings models={models} />
         </CardContent>
       </Card>
 

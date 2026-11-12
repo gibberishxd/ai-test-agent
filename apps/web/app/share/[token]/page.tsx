@@ -18,7 +18,7 @@ export default async function SharedReportPage(props: PageProps<"/share/[token]"
       <p className="w-fit rounded-full border px-3 py-1 text-sm text-muted-foreground">
         Shared report · read-only
       </p>
-      <RunView initial={serializeRun(run)} readOnly />
+      <RunView initial={serializeRun(run)} readOnly filesToken={token} />
     </main>
   );
 }

@@ -10,9 +10,18 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import type { FieldErrors } from "@/lib/targets";
 
-type Props = { demoUrl: string };
+/** A workspace model offered in the picker. Only ones that passed Test connection can run. */
+export type PickerModel = { id: string; label: string; model: string; usable: boolean; isDefault: boolean };
+type Props = { demoUrl: string; models?: PickerModel[]; serverModel?: string };
 
-export async function startRun(body: { targetUrl: string; mode: string; focus?: string }) {
+export const SERVER_DEFAULT = "";
+
+/** The picker's starting value: the workspace default if it's usable, else the server's model. */
+export function initialModel(models: PickerModel[]): string {
+  return models.find((m) => m.isDefault && m.usable)?.id ?? SERVER_DEFAULT;
+}
+
+export async function startRun(body: { targetUrl: string; mode: string; focus?: string; modelConfigId?: string }) {
   const response = await fetch("/api/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -23,8 +32,9 @@ export async function startRun(body: { targetUrl: string; mode: string; focus?: 
   return { errors: (data.errors ?? { targetUrl: "Something went wrong. Try again." }) as FieldErrors };
 }
 
-export function RunForm({ demoUrl }: Props) {
+export function RunForm({ demoUrl, models = [], serverModel = "the server's default model" }: Props) {
   const router = useRouter();
+  const [modelConfigId, setModelConfigId] = useState(() => initialModel(models));
   const [targetUrl, setTargetUrl] = useState("");
   const [mode, setMode] = useState("passive");
   const [focus, setFocus] = useState("");
@@ -34,7 +44,7 @@ export function RunForm({ demoUrl }: Props) {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
-    const result = await startRun({ targetUrl, mode, focus });
+    const result = await startRun({ targetUrl, mode, focus, modelConfigId: modelConfigId || undefined });
     if ("id" in result) {
       router.push(`/runs/${result.id}`);
       return;
@@ -104,6 +114,28 @@ export function RunForm({ demoUrl }: Props) {
         />
         {errors.focus && <p className="text-sm text-destructive">{errors.focus}</p>}
       </div>
+
+      {models.length > 0 && (
+        <div className="grid gap-2">
+          <Label htmlFor="model">Model</Label>
+          <select
+            id="model"
+            value={modelConfigId}
+            onChange={(event) => setModelConfigId(event.target.value)}
+            className="h-9 w-full rounded-md border bg-transparent px-3 text-sm sm:w-fit"
+            aria-invalid={Boolean(errors.model)}
+          >
+            <option value={SERVER_DEFAULT}>Server default ({serverModel})</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id} disabled={!m.usable}>
+                {m.label} · {m.model}
+                {m.usable ? "" : " (not tested)"}
+              </option>
+            ))}
+          </select>
+          {errors.model && <p className="text-sm text-destructive">{errors.model}</p>}
+        </div>
+      )}
 
       <Button type="submit" size="lg" disabled={submitting} className="w-full sm:w-fit">
         {submitting ? <Loader2 className="animate-spin" /> : <Play />}

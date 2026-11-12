@@ -1,6 +1,6 @@
 import pytest
 
-from worker.urls import is_same_origin, normalize
+from worker.urls import is_same_origin, is_same_site, normalize
 
 START = "http://localhost:5173/"
 
@@ -34,3 +34,21 @@ def test_normalize(raw, expected):
 )
 def test_is_same_origin(url, same):
     assert is_same_origin(url, START) is same
+
+
+@pytest.mark.parametrize(
+    ("url", "target", "same"),
+    [
+        ("http://shop.test/cart", "http://shop.test/", True),  # same origin
+        ("https://shop.test/cart", "http://shop.test/", True),  # the site upgraded to https
+        ("https://SHOP.test:443/", "http://shop.test:80/", True),  # default ports written out
+        ("http://shop.test/", "https://shop.test/", False),  # a downgrade is not an upgrade
+        ("https://blog.shop.test/", "http://shop.test/", False),  # a subdomain is another host
+        ("https://other.test/", "http://shop.test/", False),
+        ("https://localhost:5173/", "http://localhost:5173/", False),  # not the default ports
+        ("https://shop.test:8443/", "http://shop.test/", False),
+        ("mailto:help@shop.test", "http://shop.test/", False),
+    ],
+)
+def test_is_same_site_allows_only_the_https_upgrade(url, target, same):
+    assert is_same_site(url, target) is same

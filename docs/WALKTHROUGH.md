@@ -326,7 +326,7 @@ reviews the first N pages rather than choosing the most interesting ones.
 
 **What:** interactive mode. Each step: observe the page → the model calls exactly one tool →
 the worker checks it against the safety rules → runs it → logs it. Ends on `finish`, a budget
-(steps, time, cost), loop detection (same action 3× in a row) or the Stop button.
+(steps, time, cost), loop detection (same action 3× in a row without changing the page, or 6× in a row) or the Stop button.
 
 **How:**
 - `observe.py` tags visible interactive elements with `data-agent-id`, lists them as
@@ -516,3 +516,427 @@ matching calls isn't included in cost per run.
 3. *What did the benchmark tell you?* With a local 8B model, recall 33% with 100% precision:
    all from the deterministic checks. The agent explores flows but rarely judges what it
    sees, which is exactly the question a Claude run answers next.
+
+---
+
+## Run 2: safety hardening (`agent/policy.py`, `agent/loop.py`, `config.py`, `urls.py`)
+
+**What:** four rules the worker enforces whatever the model asks for.
+- *Dev mode is opt-in.* `dev_mode` defaults to `False`; only `DEV_MODE=true` lets the browser
+  reach the demo shops on localhost.
+- *Safe mode is a rule table.* `DENY_RULES` lists final or destructive actions by category
+  (payment, commitment, subscription, destructive, account, outbound).
+- *The agent stays on the target site.* Three checks in `loop.py`: at the start (the target
+  must not redirect elsewhere), before a click (a link to another site is refused) and after
+  every action (`_return_to_site` goes back if the page left).
+- *Loop detection counts repeats without effect.* `Budget.record(..., changed=)`.
+
+**How:**
+- `deny_reason(element, is_demo_target)` builds five fields from the element (text,
+  aria-label, button value, link, form action) and tries each rule's regex on each. URLs go
+  through `url_words` first: host dropped, `%20` decoded, camelCase split, punctuation turned
+  into spaces, so `\bplace\s+order\b` matches `/checkout/place-order`.
+- `is_same_site(url, target)` is true for the same origin (scheme + host + port) or for the
+  https version of an http target on the same host and default ports.
+- `_execute` returns `(result, changed)`, where changed means the URL, the page text or the
+  scroll position is different. `Budget` keeps two counters: `_idle` (identical actions in a
+  row that changed nothing, limit 3) and `_same` (identical actions in a row, limit 6).
+
+**Why:** each closes a way the agent could do harm or waste a run: reaching our own network,
+committing to a purchase on a customer's site, typing into a site nobody verified, or being
+stopped for doing legitimate repeated testing.
+
+**Weak spots:** the deny list is English only and keyword based, so an icon-only "trash"
+button with no label passes, and "Remove filter" is blocked. Origins are compared strictly, so
+a login on `auth.shop.example` can't be tested from `shop.example`. A new tab opened by a link
+isn't followed. "Changed" is text based: a change that only alters colours looks like nothing.
+
+**Interview Q&A**
+1. *Why is safe mode in the worker and not in the prompt?* A prompt is a request; the model
+   can ignore it, and page text can talk it out of it (prompt injection). The worker checks
+   every tool call before running it, so the rule holds whatever the model decides.
+2. *Why check the page's site after the action as well as before?* Before the click you can
+   only read what the element says: a link has an href, a button doesn't. A button, a form
+   submit or a script can go anywhere, so the only reliable check is where the page ended up.
+3. *Why two loop counters?* "Same action three times" stopped runs that clicked "+" three
+   times, which is exactly how you test a quantity bug. Counting only repeats that changed
+   nothing fixes that, but a model adding to the cart forever changes the page every time, so
+   a second, higher limit catches that case.
+
+## Run 2: web hardening (`lib/limits.ts`, `lib/socket-address.ts`, `instrumentation.ts`, `lib/runs.ts`, `lib/share.ts`, `lib/domains.ts`)
+
+**What:**
+- *Client IP you can't fake* for the visitor rate limit.
+- *Atomic quota:* a burst of requests can't exceed the monthly quota.
+- *Shared reports show their screenshots,* and a share token opens only its own run's files.
+- *Domain verification connects to the address it checked.*
+
+**How:**
+- `instrumentation.ts` runs once at server start and wraps `http.Server.prototype.emit`; for
+  every "request" event `stampSocketAddress` writes the socket's peer address into the
+  `x-socket-address` header, replacing anything the client sent. `clientIp` reads that header,
+  or, with `TRUST_PROXY=true`, the entry of `X-Forwarded-For` that our own proxy appended.
+- `startRun` runs in `db.$transaction`: lock the workspace row with `SELECT ... FOR UPDATE`,
+  count, then insert. A second request for the same workspace waits at the lock and then
+  counts the first one's run.
+- `canReadFile(key, {workspaceId, shareToken})` looks for the run named in the file path
+  either in the caller's workspace or with that share token. `fileUrl(key, token)` adds
+  `?share=` on shared pages.
+- `fetchPinned(url, ip)` passes `lookup: pinnedLookup(ip)` to `https.get`, so Node connects to
+  `ip` without asking DNS again.
+
+**Why:** all four were holes found in review: a spoofable header, a race, a broken feature,
+and a time-of-check/time-of-use gap.
+
+**Weak spots:** the socket stamp patches a Node built-in and doesn't exist on edge runtimes.
+The row lock serialises all starts in one workspace, including the public demo workspace all
+visitors share. Screenshots are cached by the browser for an hour, so a revoked link's images
+can still show from cache. Verified domains are never re-checked.
+
+**Interview Q&A**
+1. *Why is the left-most X-Forwarded-For entry unsafe?* Each proxy appends the address it saw.
+   The left side is whatever the client sent, so only the entries written by proxies you
+   control can be trusted, and those are on the right.
+2. *What is a check-then-act race, and how does the lock fix it?* Two requests both read
+   "49 of 50 used" before either inserts, so both insert. `FOR UPDATE` makes the second
+   request wait until the first transaction commits, so it reads 50.
+3. *What is DNS rebinding?* You resolve a name, check the address is public, then connect by
+   name; the client resolves again and the attacker's DNS now answers a private address.
+   Connecting to the address you checked removes the second lookup.
+
+## Run 2: tester's tools and a richer observation (`agent/tools.py`, `agent/observe.py`, `agent/prompt.py`, `review.py`)
+
+**What:** new tools (`double_click`, `reload`, `set_viewport`, `note`), phone-width screenshots
+in the passive scan, field states and positioned messages in the observation, changed values
+first in "what changed", and a QA test charter in the system prompt.
+
+**How:**
+- `_execute` handles the new actions; `set_viewport` resizes the page and asks for a screenshot
+  next step; `note` appends to `Memory.notes`, which `build_observation` prints every step.
+- `COLLECT_ELEMENTS_JS` adds `required`, `invalid` and `described` per field.
+  `COLLECT_MESSAGES_JS` finds visible `[role=alert|status]`, `[aria-live]` and error-looking
+  classes, and assigns each the field in the same group (walking up at most 4 parents) or the
+  closest overlapping field within 60 px.
+- `text_changes` groups lines by "shape" (digits replaced by #), so `Subtotal: $12.00` and
+  `Subtotal: $24.00` pair up and print as a change.
+- `visit_page` takes a second full-page screenshot at 375×812; `review_screenshots` reviews
+  both and marks phone findings `evidence.viewport = "mobile"` so `verify_bug` checks at 375 px.
+
+**Why:** each one closes a gap between what a human tester can see or do and what the agent
+could. The charter is generic on purpose; a test fails if any demo-app detail leaks into it.
+
+**Weak spots:** "next to" is a heuristic: unusual layouts (errors in a toast at the top of the
+page) won't be tied to a field. Error classes are English-ish (`error`, `invalid`, `alert`).
+Phone screenshots double the review cost of a passive scan. The charter makes the prompt longer,
+which small local models follow less reliably.
+
+**Interview Q&A**
+1. *Why not just give the model the HTML?* It is large and mostly noise, so it costs more and
+   small models get lost in it. A short list of numbered controls with their state, plus the
+   messages and where they sit, carries what a tester actually looks at.
+2. *How do you keep the prompt from overfitting to your own demo?* The charter only names
+   techniques, never sites or bugs, and a unit test reads `bugs.json` of both demo apps and
+   fails if any title, product name, code or address appears in the prompt or tool text.
+3. *Why does the note tool help?* Each model call only sees the current observation. To check
+   "did the total double?", the agent needs the old total; a note keeps it in view.
+
+## Run 2: replay that clicks the right thing (`verify.py: find_target`, `execute.py: replay_plans`)
+
+**What:** replay finds the exact element the agent acted on or fails with a reason; it tries a
+short replay from the last navigation first; dedup runs before replay.
+
+**How:**
+- `Element.target()` stores role, name, `nth`/`count` among same role+name, `context` (first
+  nearby line that isn't its own label, from `CONTEXT_JS`) and `css` (from `CSS_PATH_JS`).
+- `find_target` tries, each only if it yields exactly one element: role+name, then the match
+  whose `CONTEXT_JS` equals the recorded context, then the CSS path if it points at one of the
+  matches, then `nth` if today's count equals the recorded count. Otherwise `ReplayError`.
+- `replay_plans` returns `[(last navigate URL, steps after it), (target, all steps)]`; blocked
+  steps are dropped; a viewport change before the navigate is carried into the short plan.
+- `verify_and_dedupe` runs `_dedupe` first (keeping deterministic findings as the original),
+  then replays only agent candidates.
+
+**Why:** "first match" made verdicts about the wrong element; full replays repeated side
+effects; and agent restatements of server errors were dismissed by a replay that can't show a
+failed request.
+
+**Weak spots:** context is the first nearby line, which may be the same for two cards ("Sale!").
+A CSS path breaks when the page structure changes. Starting at the last navigation can miss
+state built earlier in local storage; the full replay is the fallback, at the cost of a second
+model call. Dedup quality depends on the cheap model.
+
+**Interview Q&A**
+1. *Why fail instead of clicking the first match?* A wrong click produces a confident wrong
+   verdict, which is worse than "could not replay": the latter is visible and honest.
+2. *Why replay from the last navigation first?* A full page load resets in-memory state, so
+   earlier steps matter less, and skipping them avoids repeating side effects like placing an
+   order. If it doesn't reproduce, the full replay still runs.
+3. *Why dedup before replay?* Deterministic findings have hard evidence. If the agent reports
+   the same failed request, replaying it can only fail (the model can't see a network error in
+   a screenshot) and would dismiss a real bug. Merging it first avoids that.
+
+## Run 2: honest benchmark and the holdout app (`benchmark.py`, `main.py: bench`, `apps/demo2`, `apps/web/app/benchmark`)
+
+**What:** the benchmark reports AI-only recall next to overall recall, scores a second app the
+agent is never tuned against, records the judge, and keeps the original commit on a rescore.
+
+**How:**
+- `PlantedBug.detection` comes from `bugs.json`. `score()` computes recall over all planted
+  bugs and over those with detection "agent"; `per_bug` stores the detection too.
+- `run_benchmark` queues four groups of runs (shop buggy/clean, holdout buggy/clean) and
+  `score_runs` scores each app against its own `bugs.json`; the holdout scores sit in
+  `BenchmarkScores.holdout` and in their own columns (`holdout_ai_recall`, ...).
+- `rescore_latest` passes the stored `git_commit` through and sets `rescore_commit`.
+- `apps/demo2` is built like the shop: every bug behind `bug(n)`, a fake API in the Vite dev
+  server, `verify/bugs.e2e.ts` checking each bug is present on 5175 and absent on 5176.
+- The web page's helpers (`percentOrDash`, `judgeLabel`, `commitLabel`, `holdout`) show a dash
+  or "not recorded" for older rows rather than a misleading 0%.
+
+**Why:** a single recall number mixed what every model gets for free with what only a good model
+finds, and nothing showed whether the agent was learning the shop.
+
+**Weak spots:** the holdout is small (6 bugs, 2 runs), so one found bug moves its recall by
+25 points. Both apps are written by the same person, in the same style, so they share more than
+real sites would. The judge is still a model: a weak judge can mis-score both apps.
+
+**Interview Q&A**
+1. *Why report AI-only recall?* The deterministic checks find their bugs for every model, so
+   overall recall makes a weak and a strong model look alike. AI-only recall isolates the part
+   the model is responsible for.
+2. *What does the holdout prove, and what doesn't it?* It shows the techniques work on an app
+   the prompt was never adjusted for. It doesn't prove the agent works on any real site: both
+   apps are small and written by us.
+3. *Why keep the original commit on a rescore?* The scores describe the runs, and the runs were
+   made with the old code. Labelling them with the new commit would claim the new code was
+   measured when it wasn't.
+
+## Run 2: live browser pane (`components/live-pane.tsx`, `lib/live-pane.ts`, `agent/loop.py: _observe`)
+
+**What:** on the run page, the screenshot the agent looked at, the element it chose outlined,
+the action and its reason, a step counter and a filmstrip of earlier steps.
+
+**How:** the worker takes one viewport screenshot per step before the action and stores it
+with the target's bounding box (from `getBoundingClientRect`, in viewport pixels) and the
+viewport size in the step's `args`. `outlineStyle(box, viewport)` turns the box into CSS
+percentages, clipping a partly off-screen box and drawing nothing for one entirely off screen.
+The pane follows the newest step unless one is picked in the filmstrip.
+
+**Why:** percentages keep the outline aligned at any display size without measuring the image.
+Reusing the screenshot the model saw makes the pane honest: it shows exactly what the agent saw.
+
+**Weak spots:** it updates every 1.5 s, so fast steps can be skipped (the filmstrip has them
+all). Older runs have no boxes. A box is where the element was when the page was read; an
+animation could move it before the click.
+
+**Interview Q&A**
+1. *Why percentages for the outline?* The screenshot is displayed scaled. Dividing the box by
+   the viewport size gives positions that scale with the image, so no resize handling is needed.
+2. *Why take the screenshot before the action?* "What is it about to click" needs the element
+   on screen; after a click it may be gone or the page may have changed.
+3. *How would you make it truly live?* Stream screencast frames (Chrome DevTools Protocol
+   `Page.startScreencast`) over a WebSocket or SSE; the step data stays the same.
+
+## Run 2: any model (`llm/openai_compat.py`, `llm/claude_cli.py`, `model_configs.py`, `secret_box.py`, `apps/web/lib/model-*.ts`, `secret-box.ts`)
+
+**What:** an OpenAI-compatible client, per-workspace models with encrypted keys and a Test
+connection check, a model picker on the run form, a leaderboard, and a local-only claude-cli.
+
+**How:**
+- `OpenAICompatClient` builds `messages` (system, then user content with an optional
+  `image_url` data URL), `tools` as functions, `tool_choice: auto`; it reads `tool_calls` or a
+  JSON call in the text. The key is a `SecretStr` and is redacted from error messages.
+- Web: `createModelConfig` encrypts with `encryptSecret(key, workspaceId, MODEL_KEYS_SECRET)`;
+  views only carry `keyHint`. `probeModel` checks endpoint safety, then a tool call and an
+  image. `startRun` calls `usableModel` (own workspace + passed probe).
+- Worker: `client_for_run` loads the run's model, checks workspace and probe, decrypts with the
+  workspace id, checks the endpoint resolves to public addresses, builds the client. The runner
+  records the run's provider and model and fails the run with the reason if any check fails.
+- `ClaudeCliClient` runs `claude -p --output-format json`, lists the tools as JSON schemas in
+  the prompt, validates the answer, retries once.
+
+**Why:** "bring any model" is the product's main promise, so the safe parts (key storage,
+isolation, SSRF) are enforced on both sides and tested, and the leaderboard shows how a model
+does before anyone relies on it.
+
+**Weak spots:** the worker checks the endpoint's address but the HTTP client resolves it again
+(DNS rebinding is possible between the two). No key rotation. Prices are typed in by the user.
+Models differ in tool-calling quirks that one client can't all smooth over. claude-cli spends
+the owner's plan limit and is slow per step.
+
+**Interview Q&A**
+1. *How is workspace A prevented from using workspace B's key?* Every query filters by
+   workspace, `startRun` and the worker both check the model's workspace, and the ciphertext
+   is bound to the workspace id as AES-GCM associated data, so even a copied row won't decrypt.
+2. *Why probe tool calling and vision before a run?* The agent can't act without tool calls
+   or see layout without vision. A two-request check gives a clear error up front instead of
+   a run that fails or wanders.
+3. *Why one OpenAI-compatible client instead of SDKs per provider?* Most providers expose the
+   same chat-completions shape; one small client covers them, and its request can be read and
+   explained in full.
+
+## Run 2: what the measurements taught (D52, `execute.py: replay_plans`, `agent/loop.py: element_number`, `observe.py` roles)
+
+**What:** four small, generic fixes found by reading the steps of real runs rather than the scores:
+replay also starts from the agent's last return to the start page; the prompt says a note never
+replaces report_bug; element ids written as "[10]" or "10" are understood; number inputs are
+recorded with their ARIA role, "spinbutton".
+
+**Why:** each one cost a real bug or a step in a measured run. The scores alone (0% for Gemma)
+said nothing about why; the step log did.
+
+**Weak spots:** the Sonnet run shows replay is still the bottleneck: it lost two correct reports
+for a reason not yet pinned down (Needs me #0 in PROGRESS).
+
+**Interview Q&A**
+1. *Your agent's score went down after you improved the prompt. What did you do?* Read the run's
+   steps. The model had seen the bug but used the new note tool instead of reporting it, and the
+   verifier threw away a correct report. Both were fixed in a way that helps on any site.
+2. *Why does an ARIA role matter for replay?* Replay finds elements again with Playwright's
+   `get_by_role`, which uses the browser's real role. Recording a different role means the
+   lookup can never match.
+3. *How do you make sure fixes aren't tuned to your demo shop?* Each fix is phrased as general
+   tester behaviour, a test checks no demo-app detail reaches the prompt, and the holdout app,
+   never tuned against, is scored next to the shop.
+
+## Run 3: replay that waits for the page, and starts clean (`verify.py`, `execute.py: verify_and_dedupe`, `scan.py: guarded_browser`, `reverify.py`)
+
+**What:** before each element step, replay waits (at most 5 s) until the browser is on the page
+the agent was on and something matching the target exists. After the last step it waits until
+the page's DOM has been quiet for 500 ms (at most 3 s) before the judge looks. Each replay plan
+gets a fresh browser context (one browser and safety proxy for the whole run). Steps that
+errored in the agent's own run are skipped. Each failure is stored with a kind
+(`element_not_found`, `ambiguous_element`, `page_differs`, `timeout`, `navigation_error`,
+`action_failed`, `no_element_recorded`), the step number and a detail, in
+`bug.evidence.replay_failure`. `uv run worker reverify <run>` replays an old run's reports
+read-only, and adds a judge's verdict with `--judge`.
+
+**How it was found:** by replaying run be495c9f's stored steps offline. A fresh context per
+replay failed exactly like the run, which ruled out the first guess (shared context) as the
+cause of those failures. The page text showed the home page while the URL already said
+`/products/6`. A client-side (pushState) link changes the URL without a page load, so "wait for
+network idle" returns at once, and `locator.count()` doesn't wait at all.
+
+**Why:** a correct report thrown away by the verifier is worse than a miss, because nobody sees
+it. Result: 6 of 6 of Sonnet's reports from that run replay now (4 failed before), including
+bugs 5 and 8, and all 16 earlier confirmed reports still replay.
+
+**Weak spots:** a route that shows "Loading…" for more than 500 ms can still be judged too
+early. A page whose URL differs between runs (an order id) costs up to 5 s per step before
+replay tries anyway.
+
+**Interview Q&A**
+1. *Why did replay fail when the same steps worked by hand?* By hand there's always a pause.
+   Replay acted within milliseconds of a client-side navigation, before the route had drawn its
+   form, and nothing waited for it, because there was no page load to wait for.
+2. *Why a fresh browser context per replay?* Cookies and localStorage from one replay (a cart, a
+   sign-in) leaked into the next and changed what the judge saw (`Cart (6)` instead of
+   `Cart (3)`). A context is cheap; a new browser per replay isn't, so there's one browser and
+   many contexts.
+3. *How do you know the fix didn't break what worked?* `reverify` replayed every confirmed agent
+   report of 11 older runs: all 16 still replay. A new test replays two reports in a row where
+   the first leaves state behind.
+
+## Run 3: what verification throws away (`benchmark.py: score, stage_of, staged_match`, `lib/benchmark.ts: verification`)
+
+**What:** the benchmark now sends every report to the judge, including the ones verification
+dismissed, and records how each one ended: verified, judge said no, could not replay (with the
+failure kind), or duplicate. The scores the customer sees (recall, precision) still count only
+surviving reports. New numbers: recall and AI-only recall *before* verification, false alarms
+before verification, the funnel (reported → verified, duplicates, discarded at replay by
+reason), **correct but discarded**, and bugs lost. They appear in `bench` output, the
+leaderboard and each latest-score card.
+
+**Why:** run 2's lost Sonnet reports didn't show up in any number. A high "correct but
+discarded" says verification is too strict. A big drop in false alarms from before to after
+says it earns its keep.
+
+**Weak spots:** the before-verification numbers depend on the judge matching reports that
+weren't confirmed, which is the judge's least certain case. Duplicates aren't judged (they would
+only repeat their original's match).
+
+**Interview Q&A**
+1. *What is "correct but discarded"?* A report that matches a planted bug but failed
+   verification. It measures the verifier's false negatives, the cost of being strict.
+2. *Why keep recall "after verification" as the headline?* It's what the customer gets. The
+   before number is a diagnostic: it shows what the agent saw.
+3. *Why store this in JSON details rather than columns?* Nothing sorts or filters on it. The
+   page reads it from the row it already loads, so no migration was needed.
+
+## Run 3: the sign-in flake (`app/layout.tsx`, `e2e/signin.e2e.ts`, `e2e/signin-loop.mjs`)
+
+**What:** removed next-auth's `<SessionProvider>`. Nothing used `useSession`, and its
+`/api/auth/session` requests on page load raced the sign-in button's CSRF token.
+
+**How it was found:** a loop script signed in 50 times in fresh browsers and logged every auth
+response when an attempt failed. 2 of 50 failed, each with `POST /api/auth/callback/demo` sending
+the browser to Auth.js's "CSRF mismatch" redirect. Auth.js mints a new CSRF cookie for every auth
+request that arrives without one, so the page's own session requests could overwrite the cookie
+after the button had read its token. After the fix: 0 of 50 three times (one at a time, four in
+parallel, and right after a server restart). The e2e retry helper is gone.
+
+**Interview Q&A**
+1. *How do you debug a 1-in-25 flake?* Make it happen on demand (a 50× loop), record everything
+   on failure (the auth responses), and read what differs from a success.
+2. *Why remove a component instead of retrying?* A retry hides a race that real users hit. The
+   provider did nothing the app needed.
+3. *What guards against it coming back?* An e2e test asserts the sign-in page makes no auth
+   requests before the click.
+
+## Run 3: the queue under load, and leases (`queue.py: Heartbeat, recover_expired_leases`, `runner.py`, `scripts/db_perf.py`, `docs/DATABASE.md`)
+
+**What:** a test runs 8 workers at once against 300 queued runs and proves each run is claimed
+exactly once. Runs now have a lease: `heartbeat_at` is renewed every 15 s by a background
+thread. Any live worker fails runs silent for 60 s, in one conditional UPDATE, using the
+database clock. A worker that was only frozen re-reads its run under a row lock before writing
+the final status, so it can't undo the recovery. `scripts/db_perf.py` seeds 10k runs and 500k
+steps in a throwaway database and EXPLAINs the hot queries. One index came out of it
+(`benchmark_results(created_at)`). `docs/DATABASE.md` explains every table, key, index and the
+queue.
+
+**Interview Q&A:** see the end of `docs/DATABASE.md` (SKIP LOCKED, dead workers, proving an
+index helps).
+
+## Run 3: charter reminder (`agent/loop.py: untried_techniques`)
+
+**What:** every observation lists the charter techniques the run hasn't used yet: an unusual
+value in a field, double_click, reload, mobile viewport. Each one disappears once used.
+
+**Why:** over 11 runs Gemma 12B used double_click, reload and the mobile viewport 0 times, so
+bugs that need them were never triggered. A long charter in the system prompt is read once; a
+short line in every observation is in front of the model at every step.
+
+**Weak spots:** "unusual value" is a heuristic over the typed text: 0, 2+, negatives, very long
+text, special characters, empty, or a malformed email in a field whose name mentions mail. A
+weak model may tick a technique off once and never use it where it matters.
+
+**Interview Q&A**
+1. *Isn't that tuning to the benchmark?* The four techniques are standard exploratory testing
+   heuristics, and the reminder knows nothing about any site. The holdout app, never tuned
+   against, decides whether it stays.
+2. *Why not put it in the system prompt?* It's already there. The system prompt stays
+   byte-identical for caching, and a weak model follows what's in front of it each step.
+3. *How do you know it changes behaviour?* Count technique use per run before and after
+   (MISS_ANALYSIS) and compare holdout recall.
+
+## Run 3: what the measurements taught (`docs/MISS_ANALYSIS.md`, D59–D62)
+
+**What:** two Gemma benchmarks (before and after the charter reminder) and one Sonnet benchmark,
+read per bug and per step: did the agent reach the bug's page, trigger the bug, report it, and
+did verification keep it?
+
+**What it showed:** after the replay fix (D53) verification is no longer the bottleneck: 0
+correct reports discarded for Gemma, 1 for Sonnet. With the reminder (D59) Gemma reaches 7 of
+12 judgement-bug states, but reports 1. Sonnet reports most of what it reaches: shop AI-only
+38%, holdout 25%. For a small model the limit is recognising that a state is wrong.
+
+**Weak spots:** 3 Gemma runs, 2 holdout runs, one Sonnet benchmark: small samples, and a
+single run swings a bug from 0/3 to 2/3. The clean builds turned out to have real bugs, so
+"false alarms" on them overstate Sonnet's noise. Bug 7 needs a guessed code.
+
+**Interview Q&A**
+1. *How do you know a change helped and isn't noise?* Count the behaviour it targets (technique
+   use went 0 → 1 per run), not only the score, and check the holdout didn't drop.
+2. *Why did Sonnet get "false alarms"?* It found real bugs in the clean build that aren't in
+   the planted list. A benchmark's clean build has to be audited too.
+3. *What would you do next?* Help the model compare expected with actual after each
+   state-changing action, then measure on the holdout first.

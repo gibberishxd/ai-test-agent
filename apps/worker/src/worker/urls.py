@@ -35,3 +35,18 @@ def is_same_origin(url: str, start_url: str) -> bool:
     """True if `url` has the same scheme, host and port as `start_url`, and is http(s)."""
     origin = _origin(url)
     return origin[0] in DEFAULT_PORTS and origin == _origin(start_url)
+
+
+def is_same_site(url: str, target_url: str) -> bool:
+    """Same origin as the target, or the https version of an http target on the same host.
+
+    A site that answers http://shop.example with a redirect to https://shop.example is still
+    the site the user asked for. Only that direction, and only on the default ports: a
+    subdomain, another port or a downgrade to http is a different site.
+    """
+    if is_same_origin(url, target_url):
+        return True
+    scheme, host, port = _origin(url)
+    target_scheme, target_host, target_port = _origin(target_url)
+    upgrade = (target_scheme, target_port, scheme, port) == ("http", 80, "https", 443)
+    return upgrade and bool(host) and host == target_host

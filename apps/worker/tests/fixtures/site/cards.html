@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cards</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <main>
+      <h1>Products</h1>
+      <section>
+        <article><h2>Product 1</h2><p>$1.00</p><button>Add to cart</button></article>
+        <article><h2>Product 2</h2><p>$2.00</p><button>Add to cart</button></article>
+        <article><h2>Product 3</h2><p>$3.00</p><button>Add to cart</button></article>
+        <article><h2>Product 4</h2><p>$4.00</p><button>Add to cart</button></article>
+        <article><h2>Product 5</h2><p>$5.00</p><button>Add to cart</button></article>
+        <article><h2>Product 6</h2><p>$6.00</p><button>Add to cart</button></article>
+      </section>
+      <p id="cart">Cart: empty</p>
+    </main>
+    <script>
+      document.querySelectorAll("article button").forEach((button, i) => {
+        button.onclick = () => {
+          document.getElementById("cart").textContent = "Cart: Product " + (i + 1);
+        };
+      });
+    </script>
+  </body>
+</html>

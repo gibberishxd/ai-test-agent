@@ -23,3 +23,43 @@ Benchmark scores go here too, once Phase 2 exists.
 - Benchmark (local qwen3-vl:8b, no API key): recall 33%, precision 100%, 0 false alarms, $0.
   All recall came from deterministic checks; the 8B model explores but rarely reports. Next:
   the same benchmark with Claude.
+
+## 2026-11-10
+- Benchmarked a bigger local model, gemma4:12b (Ollama, ~8 GB, fits in 16 GB): recall 42% vs
+  33% for qwen3-vl:8b, 0 false alarms on the clean shop, $0, 522 s/run.
+- First bug found by the model itself: bug 9 (Wool Socks "$NaN") in 3/3 runs.
+- Precision showed 90% only because the matcher filters by page: the cart NaN (bug 9's symptom
+  on `/cart`) counted as unmatched. Next: decide how matching handles cross-page symptoms.
+
+## 2026-11-10 (run 2, stopped early at the usage limit)
+- Gemma 4 12B with a 1200 s limit used all 40 steps and still found only bug 9: recall 42%,
+  precision 100%, 0 false alarms, 1101 s/run. The time limit wasn't the bottleneck; the model is.
+- Fixed from the review, test first: off-site clicks, loop detection that punished real
+  testing, a pinned benchmark judge, DEV_MODE off by default, a rule-table deny list, an
+  unspoofable visitor rate limit with an atomic quota, share-link screenshots, a pinned
+  domain-verification fetch.
+- Next: G2.1–G2.4 (viewport/double-click/reload/note tools, richer observation, QA charter,
+  robust replay), then G3–G8 of docs/RUN_PLAN_2.md.
+
+## 2026-11-10 (run 2, unattended, branch agent-v2)
+- Built G1–G7 of docs/RUN_PLAN_2.md, test first: safety fixes (dev mode off by default, rule-table
+  deny list, unspoofable rate limit, atomic quota, share-link screenshots, pinned verification
+  fetch), tester's tools (double-click, reload, phone viewport, notes), field-aware observation,
+  a generic QA charter, exact-element replay, AI-only recall, a holdout app, a live browser pane,
+  "bring any model" (OpenAI-compatible client, encrypted workspace keys, Test connection,
+  leaderboard), a local claude-cli provider, ESLint, and an e2e CI job. CI green.
+- Measured: Gemma 4 12B 0% AI-only on shop and holdout (it noted a bug instead of reporting it;
+  replay lost a correct report). One Sonnet run via claude-cli: AI-only 13%, but it reported two
+  more planted bugs that replay dismissed. Verification is now the bottleneck, not the model.
+- Broke and fixed: claude-cli started inside the repo could read bugs.json (now runs restricted in
+  a temp folder); number inputs were recorded as "textbox" instead of "spinbutton".
+
+## 2026-11-11 (run 3, unattended, branch agent-v3)
+- H0–H8 of docs/RUN_PLAN_3.md, test first: replay waits for SPA routes and starts each bug in a
+  fresh browser context (Sonnet's lost reports for bugs 5 and 8 now verify), a verification
+  funnel with "correct but discarded", the sign-in flake fixed at its cause (Auth.js CSRF race),
+  run leases and a queue concurrency test, an EXPLAIN-backed index, docs/DATABASE.md, Node 24 CI.
+- Measured: Gemma 12B with a charter reminder now uses every technique and reaches 7/12 bug
+  states but reports ~1 (shop AI-only 8%, holdout 0%). One Sonnet benchmark via claude-cli:
+  shop AI-only 38% (was 13%), recall 58%, holdout 25% / 50%; its 3 "false alarms" are real
+  bugs in the clean build. Next limit for small models: recognising a wrong state.

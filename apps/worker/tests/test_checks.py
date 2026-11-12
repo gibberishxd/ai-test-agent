@@ -17,9 +17,12 @@ def problems(context, site_url):
         saved.append(png)
         return f"shot-{len(saved)}.png"
 
-    page, links = visit_page(
-        context, f"{site_url}/problems.html", VisitOptions(save_screenshot=save)
-    )
+    def save_mobile(png: bytes, url: str) -> str:
+        saved.append(png)
+        return "shot-mobile.png"
+
+    options = VisitOptions(save_screenshot=save, save_mobile_screenshot=save_mobile)
+    page, links = visit_page(context, f"{site_url}/problems.html", options)
     return page, links, saved
 
 
@@ -54,6 +57,17 @@ def test_takes_a_screenshot_and_times_the_load(problems):
     assert page.screenshot == "shot-1.png"
     assert saved[0].startswith(b"\x89PNG")
     assert page.load_ms is not None
+
+
+def png_width(png: bytes) -> int:
+    return int.from_bytes(png[16:20], "big")  # the IHDR chunk starts with width, height
+
+
+def test_also_takes_a_phone_width_screenshot(problems):
+    page, _, saved = problems
+    assert page.mobile_screenshot == "shot-mobile.png"
+    assert png_width(saved[0]) == 1280
+    assert png_width(saved[1]) == 375
 
 
 def test_clean_page_has_no_findings(context, site_url):

@@ -12,7 +12,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[4]  # apps/worker/src/worker/config.py → repo root
 
-PROVIDERS = ("claude", "ollama", "fake")
+# claude-cli: the owner's local testing only (Pro login, no API key); see llm/claude_cli.py.
+PROVIDERS = ("claude", "ollama", "openai-compat", "claude-cli", "fake")
 
 
 class Settings(BaseSettings):
@@ -28,6 +29,23 @@ class Settings(BaseSettings):
     cheap_model: str = "claude-haiku-5-5"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-vl:8b-instruct"
+    # Any OpenAI-style chat completions API (OpenAI, Gemini, OpenRouter, Groq, LM Studio, vLLM,
+    # Ollama's /v1). Prices are USD per million tokens, for the cost budget; 0 if unknown.
+    openai_compat_base_url: str = ""
+    openai_compat_api_key: SecretStr = SecretStr("")
+    openai_compat_model: str = ""
+    openai_compat_cheap_model: str = ""
+    openai_compat_input_price: float = 0.0
+    openai_compat_output_price: float = 0.0
+    # Benchmark judge: the model that matches reports to planted bugs. Empty = the agent's own
+    # provider / cheap model, which makes scores of different models hard to compare.
+    judge_provider: str = ""
+    # Decrypts workspace model API keys (32 random bytes, base64); shared with the web app.
+    model_keys_secret: SecretStr = SecretStr("")
+    # LLM_PROVIDER=fake only: the agent's tool calls as JSON, [["click", {"element_id": 1}], ...].
+    # Lets the end-to-end test run a real worker whose agent acts, without a model.
+    fake_script: str = ""
+    judge_model: str = ""
 
     # Run budgets, enforced by the worker
     max_steps: int = 40
@@ -43,7 +61,17 @@ class Settings(BaseSettings):
     # Targets and storage
     demo_url: str = "http://localhost:5173"
     clean_demo_url: str = "http://localhost:5174"
-    dev_mode: bool = True
+    # The holdout app (apps/demo2): benchmark only, never used to tune prompts.
+    demo2_url: str = "http://localhost:5175"
+    clean_demo2_url: str = "http://localhost:5176"
+
+    def demo_urls(self) -> list[str]:
+        """Our own demo apps: the only targets where interactive tests need no verified domain."""
+        return [self.demo_url, self.clean_demo_url, self.demo2_url, self.clean_demo2_url]
+
+    # Off unless DEV_MODE=true is set explicitly: a deployment that forgets the variable must
+    # not let the browser reach localhost (fail safe).
+    dev_mode: bool = False
     data_dir: str = "apps/worker/data"
 
     def provider(self) -> str:

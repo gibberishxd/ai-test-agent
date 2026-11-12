@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Counter</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <h1>Cart</h1>
+    <p>Quantity: <span id="quantity">1</span></p>
+    <button id="more" type="button">Increase quantity</button>
+    <!-- Tall enough to scroll several times. -->
+    <div style="height: 5000px"></div>
+    <script>
+      const quantity = document.getElementById("quantity");
+      document.getElementById("more").onclick = () => {
+        quantity.textContent = Number(quantity.textContent) + 1;
+      };
+    </script>
+  </body>
+</html>

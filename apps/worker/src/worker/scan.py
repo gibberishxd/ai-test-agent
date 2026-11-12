@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from playwright.sync_api import Browser, BrowserContext, sync_playwright
 
-from worker.browser import VisitOptions, visit_page
+from worker.browser import VIEWPORTS, VisitOptions, visit_page
 from worker.config import Settings
 from worker.crawler import crawl
 from worker.findings import findings_from_pages
@@ -20,16 +20,12 @@ from worker.safety.proxy import GuardProxy
 from worker.storage import Storage
 from worker.urls import is_same_origin
 
-VIEWPORT = {"width": 1280, "height": 800}
+VIEWPORT = VIEWPORTS["desktop"]
 
 
 def make_guard(settings: Settings, target_url: str) -> NetworkGuard:
     """In dev mode our own demo shops on localhost are allowed; everything else must be public."""
-    allowed = (
-        dev_allowed_local([settings.demo_url, settings.clean_demo_url])
-        if settings.dev_mode
-        else set()
-    )
+    allowed = dev_allowed_local(settings.demo_urls()) if settings.dev_mode else set()
     return NetworkGuard(allowed_local=allowed, target_url=target_url)
 
 
@@ -41,6 +37,24 @@ def guarded_context(
 
     Pass `browser` to reuse one (tests); otherwise a browser is launched and closed here.
     """
+    with guarded_browser(settings, target_url, browser) as (new_context, guard):
+        context = new_context()
+        try:
+            yield context, guard
+        finally:
+            context.close()
+
+
+@contextmanager
+def guarded_browser(
+    settings: Settings, target_url: str, browser: Browser | None = None
+) -> Iterator[tuple[Callable[[], BrowserContext], NetworkGuard]]:
+    """One browser and safety proxy, and a function that opens fresh contexts through it.
+
+    For work that needs a clean browser state several times (replaying each report): a new
+    context is cheap (no cookies, no storage, nothing from the one before), launching a
+    browser and proxy isn't. The caller closes each context it opens.
+    """
     guard = make_guard(settings, target_url)
     reason = guard.check(target_url)
     if reason:
@@ -50,9 +64,12 @@ def guarded_context(
             playwright = stack.enter_context(sync_playwright())
             browser = playwright.chromium.launch()
             stack.callback(browser.close)
-        context = browser.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
-        stack.callback(context.close)
-        yield context, guard
+        launched = browser
+
+        def new_context() -> BrowserContext:
+            return launched.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
+
+        yield new_context, guard
 
 
 def passive_scan(
@@ -68,11 +85,18 @@ def passive_scan(
     started = datetime.now(UTC)
     counter = itertools.count(1)
 
+    number = 0
+
     def save(png: bytes, url: str) -> str:
-        return storage.save(f"{key_prefix}/page-{next(counter):03d}.png", png)
+        nonlocal number
+        number = next(counter)
+        return storage.save(f"{key_prefix}/page-{number:03d}.png", png)
+
+    def save_mobile(png: bytes, url: str) -> str:
+        return storage.save(f"{key_prefix}/page-{number:03d}-mobile.png", png)
 
     with guarded_context(settings, target_url, browser) as (context, guard):
-        options = VisitOptions(save_screenshot=save)
+        options = VisitOptions(save_screenshot=save, save_mobile_screenshot=save_mobile)
 
         def visit(url: str) -> tuple[PageResult, list[str]]:
             blocked_before = len(guard.blocked)
@@ -101,9 +125,7 @@ def passive_scan(
 
 def is_demo_target(settings: Settings, target_url: str) -> bool:
     """Is the target one of our demo shops? (Interactive mode and the test card are OK there.)"""
-    return any(
-        is_same_origin(target_url, url) for url in (settings.demo_url, settings.clean_demo_url)
-    )
+    return any(is_same_origin(target_url, url) for url in settings.demo_urls())
 
 
 def _broken_links(pages: list[PageResult]) -> list[BrokenLink]:

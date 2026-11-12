@@ -18,3 +18,30 @@ def test_every_model_table_exists_with_the_same_columns(db_engine):
             assert column.nullable == db_columns[column.name]["nullable"], (
                 f"{table.name}.{column.name}: nullable differs"
             )
+
+
+# Each hot query and the index that serves it (docs/DATABASE.md, measured with
+# scripts/db_perf.py). Dropping one of these would turn its query into a scan of the table.
+HOT_QUERY_INDEXES = {
+    "runs_status_created_at_idx": "claim the oldest queued run; lease recovery",
+    "runs_workspace_id_created_at_idx": "runs list of a workspace; monthly quota count",
+    "steps_run_id_index_key": "a run's steps in order (run page, live pane, replay)",
+    "bugs_run_id_idx": "a run's bugs (run page, verification, benchmark)",
+    "audit_log_workspace_id_created_at_idx": "visitor rate limit",
+    "benchmark_results_created_at_idx": "newest results: leaderboard, benchmark and home page",
+}
+
+
+def test_every_hot_query_has_its_index(db_engine):
+    inspector = inspect(db_engine)
+    existing = {
+        index["name"]
+        for table in inspector.get_table_names()
+        for index in inspector.get_indexes(table)
+    }
+    existing |= {
+        constraint["name"]
+        for table in inspector.get_table_names()
+        for constraint in inspector.get_unique_constraints(table)
+    }
+    assert set(HOT_QUERY_INDEXES) - existing == set()

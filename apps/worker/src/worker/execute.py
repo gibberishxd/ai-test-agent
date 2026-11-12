@@ -7,9 +7,10 @@ finding becomes a bug, and tokens and cost are added to the run as they're spent
 import itertools
 import time
 from collections import Counter
-from urllib.parse import urlsplit
+from collections.abc import Callable
+from urllib.parse import urljoin, urlsplit
 
-from playwright.sync_api import Browser
+from playwright.sync_api import Browser, BrowserContext
 from sqlalchemy.orm import Session
 
 from worker.agent.loop import AgentConfig, AgentRun, StepRecord
@@ -22,9 +23,10 @@ from worker.report import BugReport, PageResult
 from worker.review import review_screenshots
 from worker.runner import ExecuteFn
 from worker.safety.network import BlockedError
-from worker.scan import guarded_context, is_demo_target, passive_scan
+from worker.scan import guarded_browser, guarded_context, is_demo_target, passive_scan
 from worker.storage import Storage
-from worker.verify import ReplayStep, find_duplicates, verify_bug
+from worker.urls import normalize
+from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
 
 MAX_EVENTS_PER_STEP = 20
 
@@ -52,30 +54,14 @@ def run_passive(
 ) -> None:
     step_numbers = itertools.count(run.step_count)
 
-    def on_page(page: PageResult) -> None:
-        session.add(
-            Step(
-                run_id=run.id,
-                index=next(step_numbers),
-                action="visit",
-                args={"url": page.url, "status": page.status},
-                url=page.url,
-                screenshot=page.screenshot,
-                events=page_events(page),
-                blocked=bool(page.blocked_requests),
-                block_reason=", ".join(page.blocked_requests[:3]) or None,
-            )
-        )
-        run.pages_visited += 1
-        run.step_count += 1
-        session.commit()
-
-    def should_stop() -> bool:
-        session.refresh(run, ["stop_requested"])
-        return run.stop_requested
-
     report = passive_scan(
-        run.target_url, settings, storage, str(run.id), on_page, should_stop, browser
+        run.target_url,
+        settings,
+        storage,
+        str(run.id),
+        on_page=lambda page: _save_visit(session, run, page, next(step_numbers)),
+        should_stop=lambda: _stop_requested(session, run),
+        browser=browser,
     )
     bugs = list(report.bugs)
 
@@ -206,7 +192,13 @@ def run_interactive(
                 run_id=run.id,
                 index=first_agent_step + step.index - 1,
                 action=step.action,
-                args={**args, "result": step.result, "element": step.element},
+                args={
+                    **args,
+                    "result": step.result,
+                    "element": step.element,
+                    "box": step.box,
+                    "viewport": step.viewport,
+                },
                 reasoning=step.reasoning,
                 url=step.url,
                 screenshot=step.screenshot,
@@ -305,53 +297,170 @@ def verify_and_dedupe(
     settings: Settings,
     browser: Browser | None = None,
 ) -> dict:
-    """Replay every candidate bug in a fresh browser, then merge duplicates (brief 5.3).
+    """Merge duplicates, then replay every remaining candidate in a fresh browser (brief 5.3).
+
+    Dedup comes first: an agent report that restates a deterministic finding (a failed request
+    it noticed) is merged into that finding, which has hard evidence. Replaying it instead
+    would ask the model to see a server error on screen, fail, and dismiss a real bug.
+    Deterministic findings are never replayed or dismissed by replay.
 
     Returns counts for the run summary: candidates, confirmed, dismissed by replay, duplicates.
     """
     bugs = session.query(Bug).filter_by(run_id=run.id).order_by(Bug.created_at).all()
     steps = {s.index: s for s in session.query(Step).filter_by(run_id=run.id)}
-    candidates = [b for b in bugs if b.status == "candidate"]
-    stats = {"candidates": len(candidates), "confirmed": 0, "dismissed": 0, "duplicates": 0}
+    stats = {
+        "candidates": sum(1 for b in bugs if b.status == "candidate"),
+        "confirmed": 0,
+        "dismissed": 0,
+        "duplicates": _dedupe(session, run, llm, bugs),
+    }
+    candidates = [b for b in bugs if b.status == "candidate" and b.source != "deterministic"]
 
     if candidates and not run.stop_requested:
-        with guarded_context(settings, run.target_url, browser) as (context, _guard):
+        with guarded_browser(settings, run.target_url, browser) as (new_context, _guard):
             for bug in candidates:
                 if run.cost_usd >= settings.max_run_cost_usd:
                     break  # out of budget: leave the rest as unverified candidates
-                replay_steps = [
-                    ReplayStep(s.action, s.args or {}, (s.args or {}).get("element"))
-                    for i in replay_indexes(bug)
-                    if (s := steps.get(i)) is not None and not s.blocked
-                ]
-                start_url = run.target_url if replay_steps else bug.page_url
-                verdict = verify_bug(
-                    context, llm, start_url, replay_steps, bug.title, bug.expected, bug.actual
+                verdict, start_url = _replay_bug(
+                    session, run, llm, settings, new_context, bug, steps
                 )
-                bug.status = "confirmed" if verdict.reproduced else "dismissed"
-                bug.dismiss_reason = None if verdict.reproduced else f"replay: {verdict.reason}"
-                bug.evidence = {**(bug.evidence or {}), "replay": verdict.reason}
+                if verdict.reproduced:
+                    bug.status, bug.dismiss_reason = "confirmed", None
+                elif verdict.replayed:
+                    bug.status, bug.dismiss_reason = "dismissed", f"replay: {verdict.reason}"
+                else:
+                    bug.status = "dismissed"
+                    bug.dismiss_reason = f"could not replay: {verdict.reason}"
+                evidence = {k: v for k, v in (bug.evidence or {}).items() if k != "replay_failure"}
+                bug.evidence = {**evidence, "replay": verdict.reason, "replay_start": start_url}
+                if verdict.failure:
+                    bug.evidence["replay_failure"] = verdict.failure
                 stats["confirmed" if verdict.reproduced else "dismissed"] += 1
-                _log_model_step(session, run, "verify_bug", {"bug": bug.title}, verdict.usage)
+    session.commit()
+    return stats
 
+
+def _dedupe(session: Session, run: Run, llm: LLMClient, bugs: list[Bug]) -> int:
+    """Ask the cheap model for duplicates among the bugs still standing; returns how many."""
     live = [b for b in bugs if b.status != "dismissed"]
     dedup = find_duplicates(
         llm, [{"title": b.title, "page_url": b.page_url, "actual": b.actual} for b in live]
     )
+    merged = 0
     for duplicate_index, original_index in dedup.pairs:
         duplicate, original = live[duplicate_index], live[original_index]
-        if duplicate.source == "deterministic" and original.source == "agent":
+        if duplicate.source == "deterministic" and original.source != "deterministic":
             duplicate, original = original, duplicate  # keep the one with hard evidence
+        if duplicate.source == "deterministic":
+            continue  # two hard findings: both stay, they were already merged by rule
         if duplicate.status == "dismissed" or original.status == "dismissed":
             continue
         duplicate.status = "dismissed"
         duplicate.dismiss_reason = f"duplicate of: {original.title}"
         duplicate.duplicate_of_id = original.id
-        stats["duplicates"] += 1
+        merged += 1
     if dedup.usage:
         _log_model_step(session, run, "dedupe", {"bugs": len(live)}, dedup.usage)
-    session.commit()
-    return stats
+    return merged
+
+
+def _replay_bug(
+    session: Session,
+    run: Run,
+    llm: LLMClient,
+    settings: Settings,
+    new_context: Callable[[], BrowserContext],
+    bug: Bug,
+    steps: dict[int, Step],
+) -> tuple[Verdict, str]:
+    """Try each replay plan until one reproduces the bug; returns the last verdict and start.
+
+    Every plan runs in a new browser context: cookies, localStorage and sessions left by the
+    replay before it (a cart, a sign-in) would otherwise change what this one sees. The steps
+    themselves rebuild the state the agent had (they include its sign-in and its cart).
+    """
+    verdict, start_url = Verdict(False, "nothing to replay", replayed=False), run.target_url
+    for start_url, replay_steps in replay_plans(bug, steps, run.target_url):
+        context = new_context()
+        try:
+            verdict = verify_bug(
+                context,
+                llm,
+                start_url,
+                replay_steps,
+                bug.title,
+                bug.expected,
+                bug.actual,
+                viewport=(bug.evidence or {}).get("viewport", "desktop"),
+            )
+        finally:
+            context.close()
+        _log_model_step(session, run, "verify_bug", {"bug": bug.title}, verdict.usage)
+        if verdict.reproduced or run.cost_usd >= settings.max_run_cost_usd:
+            break
+    return verdict, start_url
+
+
+def replay_plans(bug, steps: dict, target_url: str) -> list[tuple[str, list[ReplayStep]]]:
+    """Where to start replay and which steps to repeat, shortest first.
+
+    An agent report replays every agent action up to the report (the model's own step list is
+    often incomplete). Shorter plans come first: from the last navigate (a full page load), and
+    from the agent's last return to the start page (a new flow usually starts there). Earlier
+    steps matter less, can have side effects (a second order) and can fail to replay, which
+    must not dismiss a bug found later. If no short plan reproduces it, the full one runs. A
+    screenshot finding (no recorded steps) is checked on its own page.
+    """
+    indexes = replay_indexes(bug)
+    if not indexes:
+        return [(bug.page_url, [])]
+    kept = [(i, steps[i]) for i in indexes if i in steps and _took_effect(steps[i])]
+    full = [_replay_step_of(step) for _, step in kept]
+    # Shorter replays first, latest start first: what happened before a page load, or before
+    # the agent's last return to the start page, matters less, and one of those earlier steps
+    # failing to replay (or repeating a side effect) must not decide the verdict.
+    short: list[tuple[int, tuple[str, list[ReplayStep]]]] = []
+    navigations = [n for n, (_, step) in enumerate(kept) if step.action == "navigate"]
+    if navigations:
+        n = navigations[-1]
+        page = kept[n][1]
+        start_url = urljoin(page.url or target_url, str((page.args or {}).get("url", "")))
+        short.append((n + 1, (start_url, _viewport_before(kept, n) + full[n + 1 :])))
+    on_home = [_on_start_page(step, target_url) for _, step in kept]
+    arrivals = [n for n in range(1, len(kept)) if on_home[n] and not on_home[n - 1]]
+    if arrivals:
+        n = arrivals[-1]
+        short.append((n, (target_url, _viewport_before(kept, n) + full[n:])))
+    plans = [plan for _, plan in sorted(short, key=lambda item: -item[0])]
+    plans.append((target_url, full))
+    unique: list[tuple[str, list[ReplayStep]]] = []
+    for plan in plans:  # the same replay twice would only cost a second model call
+        if plan not in unique:
+            unique.append(plan)
+    return unique
+
+
+def _took_effect(step) -> bool:
+    """Did this step do something in the agent's run? Blocked steps and steps that errored
+    (an element that wasn't there, text a number field refused) left the page as it was, so
+    they aren't part of how the bug was reached, and repeating them would only fail replay."""
+    result = str((step.args or {}).get("result") or "")
+    return not step.blocked and not result.startswith("error:")
+
+
+def _viewport_before(kept: list, n: int) -> list[ReplayStep]:
+    """The last viewport change before step n: it outlives a page load, so it is set again."""
+    return [_replay_step_of(s) for _, s in kept[:n] if s.action == "set_viewport"][-1:]
+
+
+def _on_start_page(step, target_url: str) -> bool:
+    """Was this step taken on the run's start page (the same URL, ignoring #fragments)?"""
+    return normalize(step.url or "") == normalize(target_url)
+
+
+def _replay_step_of(step) -> ReplayStep:
+    args = step.args or {}
+    return ReplayStep(step.action, args, args.get("element"), step.url)
 
 
 def replay_indexes(bug: Bug) -> list[int]:

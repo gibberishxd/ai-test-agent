@@ -23,6 +23,18 @@ from worker.report import A11yViolation, ConsoleError, FailedRequest, PageResult
 from worker.safety.secrets import redact
 
 NAVIGATION_TIMEOUT_MS = 15_000
+# The two screens the worker tests on: a laptop, and a common phone size.
+VIEWPORTS = {
+    "desktop": {"width": 1280, "height": 800},
+    "mobile": {"width": 375, "height": 812},
+}
+
+
+def viewport_label(name: str) -> str:
+    size = VIEWPORTS[name]
+    return f"{name} ({size['width']}×{size['height']})"
+
+
 NETWORK_IDLE_TIMEOUT_MS = 5_000
 AXE_PATH = Path(__file__).parent / "vendor" / "axe.min.js"
 
@@ -39,6 +51,8 @@ SOFT_404 = re.compile(r"\b(404|page not found|not found)\b", re.IGNORECASE)
 @dataclass
 class VisitOptions:
     save_screenshot: Callable[[bytes, str], str] | None = None  # (png, url) -> storage ref
+    # Same, for a second screenshot at phone width (layout bugs only show there).
+    save_mobile_screenshot: Callable[[bytes, str], str] | None = None
     run_axe: bool = True
 
 
@@ -79,6 +93,11 @@ def visit_page(
             result.a11y_violations = run_axe(page)
         if options.save_screenshot:
             result.screenshot = options.save_screenshot(page.screenshot(full_page=True), url)
+        if options.save_mobile_screenshot:
+            page.set_viewport_size(VIEWPORTS["mobile"])
+            wait_until_quiet(page, 1000)
+            png = page.screenshot(full_page=True)
+            result.mobile_screenshot = options.save_mobile_screenshot(png, url)
         return result, _links_on(page)
     finally:
         page.close()

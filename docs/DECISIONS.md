@@ -266,3 +266,454 @@ numbers are the real test (Needs me).
   `REQUIRE_DB=1`). CI's TypeScript job now has a Postgres service.
 - **Why:** workspace isolation is a property of real queries; mocking the database would test
   the mock.
+
+## D29. The agent never acts on another site (after demo v1)
+- **Decision:** the agent loop checks the origin in three places: the target itself must not
+  redirect to another origin (the run stops), a link to another origin is refused before the
+  click, and after every action the worker checks where the page is and goes back to the last
+  page on the target if it left (the step is marked blocked, so replay skips it).
+- **Alternatives:** block off-origin main-frame navigations in the proxy (it can't tell a page
+  load from an image or script request); allow the origin the target redirects to (a verified
+  domain could then point the agent at a site its owner doesn't control).
+- **Why:** before this, only the `navigate` tool was origin-checked. A click on an external
+  link moved the agent to a third-party site, where interactive mode kept typing and
+  submitting, which is exactly what domain verification is meant to prevent.
+- **Same site:** the same origin, or the https version of an http target on the same host
+  and default ports (`urls.is_same_site`), so a site that upgrades `http://shop.example` to
+  `https://shop.example` still works. The crawler and the `navigate` check use the same rule.
+  Subdomains, other ports and a downgrade to http are another site.
+
+## D30. Loop detection counts repeats without effect (after demo v1)
+- **Decision:** the same action 3 times in a row is a loop only when none of them changed the
+  page (URL, page text or scroll position). The same action 6 times in a row
+  (2 × `MAX_REPEATED_ACTIONS`) is a loop even when the page changes every time.
+- **Alternatives:** keep "same action 3 times" (it ended runs that clicked "+" three times or
+  scrolled a long page, which is what finding bugs 5 and 7 takes); count only no-effect
+  repeats with no upper limit (a model that adds to the cart forever would run to the step
+  budget).
+- **Why:** repeating an action that works is testing; repeating one that does nothing is
+  being stuck. The step result already knew the difference ("nothing on the page changed").
+
+## D31. The benchmark judge is pinned separately from the agent (after demo v1)
+- **Decision:** `JUDGE_PROVIDER` / `JUDGE_MODEL` choose the model that matches reports to
+  planted bugs (`llm.make_judge`). The judge's name is saved with every benchmark result
+  (`details.judge`) and printed. Empty settings keep the old behaviour, with a warning when a
+  local model judges itself.
+- **Alternatives:** keep using the agent's client (with Ollama the judge was the model under
+  test, so the qwen and gemma results were graded by different judges); hard-code one judge
+  model (it would break for anyone who hasn't downloaded it, and for Claude-only setups).
+- **Why:** a benchmark compares agents, so everything else has to stay fixed, including who
+  decides what counts as a match.
+
+## D32. Safe mode is a table of rules, and the demo shops are fully exempt (run 2, G1.2)
+- **Decision:** `DENY_RULES` in `agent/policy.py`: each rule has a category, a phrase for the
+  block reason and a whole-word pattern. A click is checked against the control's text,
+  aria-label, button value, link path + query and form action (URL paths are split into words,
+  so `/billing/cancelSubscription` reads "cancel subscription"). Text fields are skipped: what
+  a user typed isn't an action. On our own demo shops nothing is denied.
+- **Alternatives:** the old flat list of nine words ("Place order", "Confirm" and "Cancel
+  subscription" passed); an allow list (the agent could do almost nothing on a new site); ask
+  a model whether a click is safe (a safety rule must not depend on the thing it restrains).
+- **Why:** these are the actions that commit to something or can't be undone on a real site.
+  A table is easy to read, extend and test row by row. Before, the demo shop was exempt only
+  for "buy"; it is fake end to end, so a full exemption is simpler and lets the agent test
+  checkout there.
+- **Cost:** on a real site the agent can't test deleting or removing things. That is the point
+  of safe mode; an opt-in "allow destructive actions on this domain" would be the next step.
+
+## D33. The visitor rate limit uses the socket address unless a proxy is trusted (run 2, G1.3)
+- **Decision:** `clientIp` ignores `X-Forwarded-For` unless `TRUST_PROXY=true`, and then takes
+  the entry `TRUSTED_PROXY_HOPS` from the right (the one our proxy appended). Otherwise it
+  reads `x-socket-address`, a header `instrumentation.ts` stamps on every request from the TCP
+  socket, overwriting whatever the client sent. With neither, all such requests share the
+  bucket "unknown".
+- **Alternatives:** the left-most forwarded entry (the old code: any client can write it); a
+  custom Node server to reach the socket (changes how the app starts and deploys);
+  `NextRequest.ip` (removed from Next.js).
+- **Why:** Next.js route handlers only see headers, and it fills `x-forwarded-for` from the
+  socket only when the client didn't send one. Wrapping `http.Server.prototype.emit` is a
+  small, visible hook that runs before Next.js sees the request.
+- **Weak spot:** it patches a Node built-in, and in dev the hook loads with the first request,
+  so that one request counts as "unknown". Runtimes without a Node HTTP server (edge) also
+  get "unknown", which is stricter, never looser.
+
+## D34. Limits and the insert run in one transaction that locks the workspace row (run 2, G1.3)
+- **Decision:** `startRun` opens a transaction, runs `SELECT ... FROM workspaces WHERE id = ?
+  FOR UPDATE`, counts the visitor's recent runs and the month's runs, and inserts the run.
+- **Alternatives:** a counter column updated with one conditional UPDATE (needs a monthly
+  reset and a second source of truth next to the runs table); SERIALIZABLE isolation (callers
+  must retry on serialization failures).
+- **Why:** check-then-insert let a burst of requests each see "one run left". The row lock
+  makes requests for one workspace queue up; other workspaces aren't affected. A test fires
+  10 at once with a quota of 3 and gets exactly 3.
+
+## D35. A share token opens that run's screenshots, nothing else (run 2, G1.4)
+- **Decision:** shared report pages request images as `/api/files/<run id>/<file>?share=<token>`.
+  `canReadFile` allows a file when its run is in the caller's workspace, or when the token is
+  the share token of the run named in the path.
+- **Alternatives:** make screenshots public by URL (run ids would become secrets); signed,
+  expiring URLs per image (more moving parts for the same guarantee).
+- **Why:** shared reports showed broken images to everyone outside the workspace. Revoking
+  the link clears the token, so the images stop working with it.
+
+## D36. The domain file check connects to the address it validated (run 2, G1.5)
+- **Decision:** `fetchPinned(url, ip)` uses `node:https` with a `lookup` function that always
+  answers the validated address. The URL keeps the hostname, so the Host header and the TLS
+  certificate check are unchanged.
+- **Alternatives:** `fetch(url)` after the check (resolves the name a second time: DNS
+  rebinding can answer public first and private second); fetch `https://<ip>/` with a Host
+  header (TLS would check the certificate against the IP and fail).
+- **Why:** it is the same rule the worker's proxy follows: check an address, then connect to
+  that address.
+
+## D37. Claude client: 16,000 max tokens, Sonnet 5.5 cache reads at $0.10 (run 2, G1.6)
+- **Decision:** `MAX_TOKENS = 16000` for every Claude call; a reply cut off at the limit is
+  labelled in the step. Sonnet 5.5's cache-read price is $0.10 per million tokens.
+- **Why:** Sonnet 5.5 always thinks and thinking counts toward `max_tokens`; at 4,096 a reply
+  could end before the tool call and waste the step. The price was listed as $0.20, which
+  overstated cost. Untested against the live API (no key in this run).
+
+## D38. Four more tester's tools: double_click, reload, set_viewport, note (run 2, G2.1)
+- **Decision:** the agent gets `double_click`, `reload`, `set_viewport` ("desktop" 1280×800 or
+  "mobile" 375×812) and `note` (up to 20 lines kept in every later observation). Replay repeats
+  each one exactly (a double-click stays a double-click). The passive scan also stores a 375 px
+  screenshot of every page, the model reviews both widths, and a phone-width finding is
+  verified at phone width.
+- **Alternatives:** free-form viewport sizes (more to get wrong for little gain); a scratchpad
+  inside the model's reasoning (lost after each step: the loop is stateless per call).
+- **Why:** these are things a manual tester does all the time: double-submit a button, refresh
+  to see what survives, check a phone screen, write down a total before changing it. Without
+  them some bug kinds were impossible to find, whatever the model.
+
+## D39. The observation shows field state and where each message sits (run 2, G2.2)
+- **Decision:** every field lists required/invalid and the visible text tied to it by
+  `aria-describedby`/`aria-errormessage`. A new MESSAGES section lists visible error, alert and
+  status messages with the field they sit next to: the only field in the same group, else the
+  closest field within 60 px above or below. "What changed" keeps 600 characters and lists
+  changed values first, with the old value ("Subtotal: $12.00 → $24.00").
+- **Alternatives:** send the HTML (expensive, and the model would have to work out layout);
+  rely on the screenshot (small models read layout poorly and screenshots aren't sent every step).
+- **Why:** "the error appears under the wrong field" is invisible in plain page text, and most
+  functional bugs show up as a number that didn't change the way it should.
+
+## D40. A generic QA test charter in the system prompt (run 2, G2.3)
+- **Decision:** eight techniques: boundary values, invalid input and where its error sits,
+  arithmetic on totals, doing things twice, state after reload/logout, small screens, actions
+  that do nothing, nonsensical values. A test fails if any name, code or address from our demo
+  apps appears in the prompt or tool descriptions.
+- **Alternatives:** per-site instructions (overfitting: it would score well on our shop and
+  teach nothing about other sites); no guidance (the old prompt; small models clicked around
+  without checking results).
+- **Why:** it is what a careful human tester does on any site. The prompt stays byte-identical
+  across steps so it can be cached.
+
+## D41. Replay finds the exact element or fails loudly, starts at the last navigation, and runs after dedup (run 2, G2.4)
+- **Decision:** each step records role, name, its place among same role+name elements, the
+  nearby text and a CSS path. Replay uses role+name, then nearby text, then the CSS path, then
+  the position only if the page has the same number of matches; otherwise it raises, and the
+  bug is dismissed with "could not replay: <why>". Replay first starts at the last `navigate`
+  before the report (carrying a viewport change along); if that doesn't reproduce the bug, it
+  replays from the start. Dedup now runs before replay, and deterministic findings are never
+  replayed.
+- **Alternatives:** keep "first match" (it clicked the wrong "Add to cart" and confirmed or
+  dismissed the wrong thing); replay only the steps the model listed (models forget the step
+  that set up the state); record coordinates (break on any layout change).
+- **Why:** a verdict on the wrong element is worse than no verdict. Starting late avoids
+  repeating side effects such as a second order. Before, an agent report of a server error was
+  replayed, the model couldn't see a failed request on screen, and a real bug was dismissed.
+
+## D42. AI-only recall is the headline number for comparing models (run 2, G3.1)
+- **Decision:** every benchmark result stores and shows two recalls: over all planted bugs, and
+  over the bugs whose `detection` in `bugs.json` is "agent" (those the deterministic checks
+  can't find). The CLI, the database (`ai_recall`), the README and the page lead with AI-only.
+- **Alternatives:** keep one recall (it hid that the AI found nothing: 33% came entirely from
+  free checks); drop deterministic bugs from the benchmark (the product does find them, and
+  users care about the total).
+- **Why:** the deterministic checks score the same for every model, so they make all models
+  look alike. Only the AI-only number moves when the model gets better.
+
+## D43. A holdout app the agent is never tuned against (run 2, G3.4)
+- **Decision:** `apps/demo2`, a room-booking app on 5175 (clean build 5176) with six planted
+  bugs of the same kinds as the shop (API failure, unlabelled field, wrong total, accepted
+  invalid input, double submit, mobile overflow) and different specifics, its own `bugs.json`
+  and `verify-bugs`. `bench` runs it 2× buggy + 1× clean by default and reports it separately.
+  A unit test fails if any title, product name, code or address from either app reaches the
+  prompt or tool descriptions.
+- **Alternatives:** test on real public sites (no ground truth, and interactive mode needs
+  ownership); a holdout made of more shop pages (same codebase and wording, not a real
+  generalisation test).
+- **Why:** every prompt change is made while watching the agent on the shop, so the shop score
+  can drift towards "learned the shop". A separate app with unseen specifics shows whether the
+  techniques generalise.
+
+## D44. A rescore keeps the original commit (run 2, G3.3)
+- **Decision:** `bench --rescore` saves a new row with the `git_commit` of the row it rescored
+  and its own commit in `rescore_commit`. The page shows "abc1234 (rescored at def5678)".
+- **Why:** a rescore re-matches old runs; it says nothing about the agent at the new commit.
+  Before, a rescored row looked like a fresh benchmark of newer code.
+
+## D45. The step screenshot is taken before the action, with the target's box (run 2, G4)
+- **Decision:** each agent step saves the viewport screenshot the model looked at (taken in
+  `_observe`, before the action) plus the chosen element's bounding box and the viewport size.
+  The run page's "Live browser" pane draws the box over the screenshot in percentages, follows
+  the newest step while the run is live, and has a clickable filmstrip.
+- **Alternatives:** keep the after-action thumbnail (it can't show "what the agent is about to
+  click": after a click the element may be gone); stream video from the browser (a media
+  pipeline for a demo feature); a full-page screenshot per step (slower, and the box would
+  need scroll offsets).
+- **Why:** seeing the page and the outlined target is the fastest way to understand what the
+  agent did and why. Reusing the existing screenshot and 1.5 s polling keeps it cheap. The
+  result of an action shows in the next step's screenshot.
+
+## D46. One OpenAI-compatible client for "any model" (run 2, G5.1)
+- **Decision:** `OpenAICompatClient` speaks `POST {base_url}/chat/completions` with function
+  tools and images as data URLs, and sends only parameters every major server accepts (no
+  temperature, max_tokens or parallel_tool_calls). A tool call written as JSON text is still
+  read. Prices come from configuration.
+- **Alternatives:** one client per provider (more code, same request shape); LiteLLM or a
+  similar router (a large dependency that hides the request the project should be able to
+  explain).
+- **Why:** OpenAI, Gemini, OpenRouter, Groq, LM Studio, vLLM and Ollama's /v1 all share this
+  API, so one small, tested client reaches most models.
+
+## D47. Workspace model keys: AES-256-GCM, workspace id as associated data (run 2, G5.3)
+- **Decision:** keys are encrypted by the web app with `MODEL_KEYS_SECRET` and decrypted only
+  by the worker, right before building the client. The workspace id is GCM's associated data,
+  so a ciphertext copied into another workspace's row fails to decrypt. Only "•••• last4" is
+  ever returned. A shared test vector proves Node and Python agree on the format.
+- **Alternatives:** plain text (a database leak leaks every customer key); a hosted KMS
+  (better key rotation, but a paid service and outside this repo's rules); hashing (a key
+  must be usable, so it has to be decryptable).
+- **Why:** it is the standard way to keep a secret usable but protected at rest, and binding
+  it to the workspace turns "workspace A can't use B's key" into a property of the crypto,
+  not only of the queries.
+- **Weak spot:** one server key for everything, no rotation yet.
+
+## D48. Test connection before any run, checked again by the worker (run 2, G5.2)
+- **Decision:** a probe sends one tool-call request and one image request ("what colour is
+  this red square?"). The model passes only if it answers, calls the tool and says "red". The
+  result is stored; `startRun` refuses a model that hasn't passed, and the worker checks the
+  stored result again before spending the key. The probe connects to the address it
+  validated (same SSRF rule as domain verification; private addresses only in dev mode).
+- **Why:** the agent cannot work without tool calls or vision. Finding that out on step 1 of a
+  run wastes the user's time and money; a 2-call check up front gives a clear reason instead.
+
+## D49. claude-cli: the owner's Claude login for local testing only (run 2, G5.4)
+- **Decision:** `LLM_PROVIDER=claude-cli` runs `claude -p` (Sonnet for decisions, Haiku for
+  cheap calls), asks for one strict JSON tool call, validates it against the tool schema,
+  retries once with the reason, then ends the step with an error. Cost is recorded as $0. It
+  refuses to start without `DEV_MODE=true` or when `NODE_ENV`/`ENV` is production, and the
+  workspace UI never offers it.
+- **Why:** it lets the owner see a strong model drive the agent without buying API credit.
+  It shares the owner's Pro limit with their own Claude Code use, so it is used sparingly.
+
+## D50. A model leaderboard on the benchmark page (run 2, G5.5)
+- **Decision:** one row per provider and model (its newest result), ranked by AI-only recall,
+  then overall recall; rows without AI-only recall go last instead of counting as 0%.
+- **Why:** it is the product's promise made concrete: bring any model, and see how it scores
+  here before you trust it.
+
+## D51. ESLint with the platforms' own recommended configs, and e2e + planted bugs in CI (run 2, G7)
+- **Decision:** the web app uses `eslint-config-next` (core web vitals + TypeScript); both demo
+  apps use ESLint's, typescript-eslint's and the React hooks recommended rules. `npm run lint`
+  runs type checks, ESLint and ruff. CI gets an `e2e` job: Postgres service, Playwright
+  browsers, `verify-bugs` for both demo apps, then the web app's end-to-end tests with the
+  worker on the scripted FakeClient (`FAKE_SCRIPT`), so it costs nothing.
+- **Alternatives:** a custom rule set (more to maintain and explain); running e2e only locally
+  (it had already caught real breakage locally; CI makes it stick).
+- **Why:** recommended configs are what reviewers expect, and planted bugs that silently
+  disappear would make every benchmark number meaningless; CI now notices.
+
+## D52. Three generic fixes found by reading the G6 Gemma runs (run 2, G6)
+- **What the runs showed:** with the run-2 agent, Gemma 4 12B scored 0% AI-only recall (shop
+  and holdout), down from 13%. Reading the steps: it *did* find "Save changes does nothing"
+  (bug 8) for the first time, but replay dismissed it because an unrelated step from an
+  earlier flow (typing a discount code in the cart) couldn't be repeated; it saw the "$NaN"
+  price and wrote it in a note instead of reporting it; and it once passed `element_id` as
+  the string "[10]", which wasted a step.
+- **Decision:** replay also tries from the agent's last return to the start page (a new flow
+  usually begins there), latest start first; the prompt says a note never replaces
+  report_bug; `element_number` accepts 7, 7.0, "7" and "[7]".
+- **Why:** all three are about how agents behave on any site, not about the demo shop. The
+  first one matters most: a correct report thrown away by the verifier is worse than a missed
+  one, because nobody sees it.
+
+## D53. Why replay threw away correct reports, and the fix (run 3, H1)
+- **What was wrong (three causes, found by reproducing run be495c9f's replays offline):**
+  1. *Timing on single-page apps (the main cause).* A client-side link changes the URL with
+     pushState, so there is no page load and "network idle" is already true: the next step
+     looked for its field (`count()` doesn't wait) before the route had drawn it → "no textbox
+     Quantity on the page". A fresh browser context per replay failed in exactly the same way,
+     so the run-2 first guess (the shared context) was not the cause of those failures.
+  2. *Judging too early.* The router renders a navigation in a transition: after the last click
+     the URL was `/cart` but the text was still the product page, so the judge said "not the
+     cart page" (bug 5).
+  3. *Shared context (real, but secondary).* All replays shared one browser context, so a
+     second replay saw the first one's cart (`Cart (6)` instead of `Cart (3)`): wrong verdicts,
+     not failures.
+  Plus: steps that errored in the agent's own run (typing letters into a number field) were
+  repeated and failed replay.
+- **Decision:** before an element step, wait (≤ 5 s) until the browser is on the page the
+  agent was on and something matching the target exists; after the last step, wait until the
+  DOM has been quiet for 500 ms (≤ 3 s); one fresh context per replay plan (one browser and
+  proxy for the run, `guarded_browser`); skip steps whose recorded result was an error. Every
+  failure gets a kind (`element_not_found`, `ambiguous_element`, `page_differs`, `timeout`,
+  `navigation_error`, `action_failed`, `no_element_recorded`), the step number and a detail,
+  stored as `evidence.replay_failure`.
+- **Alternatives:** a fixed sleep after each step (slow everywhere, still too short somewhere);
+  Playwright's auto-waiting `locator.click()` alone (it waits for one locator, but our target
+  search tries role, text, CSS and position, and must not pick "the first match"); restoring a
+  storage snapshot instead of replaying the sign-in (faster, but the replay would no longer
+  prove the steps lead to the bug).
+- **Why:** each wait is bounded and only as long as the page needs, and none of it is specific
+  to the demo shop: any React/Vue/Svelte app with client-side routing behaves this way.
+- **Weak spots:** a route that shows a loading state and then waits more than 500 ms for data
+  can still be judged on the loading state; a page whose URL legitimately differs between runs
+  (an order id) costs up to 5 s of waiting per step before it is tried anyway.
+- **Measured (offline, `uv run worker reverify be495c9f`, no Sonnet calls):** before, 1 of 6
+  agent reports confirmed and 4 "could not replay"; after, 6 of 6 replay, and with the pinned
+  local judge (gemma4:12b) 6 of 6 are confirmed, incl. bug 5 (cart total) and bug 8 (Save
+  changes). The original verdicts came from Sonnet, so the judge differs: the stored run is not
+  changed. All 16 previously confirmed agent reports of 11 older runs still replay.
+
+## D54. The verification funnel and "correct but discarded" (run 3, H2)
+- **Decision:** scoring now matches *every* report of a buggy run, not only the ones that
+  survived verification, and records how each one ended (`stage`: verified, judge_said_no,
+  could_not_replay, duplicate; plus the replay failure kind). Recall, AI-only recall and
+  precision still count only surviving reports (what the customer sees). New numbers:
+  recall / AI-only recall *before* verification, false alarms before verification (clean-run
+  reports incl. dismissed ones), the funnel (reported → verified, duplicates, discarded at
+  replay by reason), **correct but discarded** (discarded reports that match a planted bug)
+  and bugs lost (planted bugs a run found but lost entirely). Shown in `bench` output, on the
+  leaderboard and on each latest-score card.
+- **Alternatives:** new columns in `benchmark_results` (a migration for numbers nothing sorts
+  or filters on); judging dismissed reports in a separate script (the numbers would not be
+  next to the scores they explain).
+- **Why:** run 2's lost Sonnet reports were invisible in every score. If "correct but
+  discarded" is high, verification is too strict; if false alarms drop a lot from before to
+  after, it is earning its keep. Duplicates are not sent to the judge (the report they
+  duplicate already is), so the extra judge calls are only for discarded reports.
+- **False alarms for claude-cli:** they were "not measured" in run 2 because the single
+  Sonnet run had no clean run. The H7 benchmark run includes a clean run, so they are measured.
+
+## D55. The demo sign-in flake was a CSRF cookie race; no SessionProvider (run 3, H3)
+- **Cause (measured):** `e2e/signin-loop.mjs` signed in 50 and 60 times in fresh browsers: 2
+  and 4 failures, each one `POST /api/auth/callback/demo → 200` with a redirect to
+  `/api/auth/signin` (Auth.js's "CSRF token didn't match" path), then `/signin?callbackUrl=…`.
+  Auth.js v4 mints a new CSRF cookie for *every* auth request that arrives without one. On
+  the sign-in page `<SessionProvider>` fired `/api/auth/session` on load (twice in dev:
+  StrictMode) and on focus; when one of those answered after the button's `/api/auth/csrf`,
+  it overwrote the cookie, and the token the button posted no longer matched.
+- **Decision:** remove `SessionProvider` (and `components/auth-provider.tsx`). Nothing calls
+  `useSession`; pages read the session on the server; `signIn`/`signOut` don't need the
+  provider. The sign-in flow is then strictly sequential (providers → csrf → callback), so
+  only one token is ever minted. The e2e retry helper and the CI `retries: 1` are removed.
+- **Alternatives:** retry the sign-in (hides the race, which real users hit too); set the
+  CSRF cookie in a proxy before the page loads (copies Auth.js internals or self-fetches);
+  disable StrictMode (halves the chance, doesn't remove it).
+- **Check:** `e2e/signin.e2e.ts` asserts the sign-in page makes no auth requests before the
+  click (failed before the fix with two `/api/auth/session` calls) and signs in 10 times in a
+  row. Loop after the fix: 0 of 50 one at a time, 0 of 50 four at once, 0 of 50 right after a
+  dev-server restart.
+- **Weak spot:** a future client component that adds `useSession` would bring the provider
+  and the race back; the e2e test above would catch it.
+
+## D56. Queue proof, a lease for running runs, one index from EXPLAIN (run 3, H4)
+- **Queue:** `test_queue_concurrency.py` starts 8 worker threads (own connections) at the same
+  instant on 300 queued runs: each run claimed exactly once, none lost. No code change was
+  needed: `FOR UPDATE SKIP LOCKED` was already right.
+- **Lease:** `runs.heartbeat_at` (migration `20261111010000_run_lease`), set at claim and
+  renewed every 15 s by a `Heartbeat` thread; any live worker fails runs silent for 60 s, every
+  30 s, in one conditional UPDATE; times from the database clock; a frozen worker that wakes up
+  re-reads its run under `FOR UPDATE` and doesn't overwrite "failed".
+  - Alternatives: re-queue instead of fail (would silently repeat clicks on a customer's
+    site); Postgres advisory locks held for the whole run (die with the connection, but a
+    worker needs a connection open for 10+ minutes and they don't show in the table);
+    only the start-time check (a dead worker's run waits for some worker to restart).
+  - Not tested first: the 6 lines in `main()`'s polling loop that call recovery every 30 s
+    (glue around the tested `recover_expired_leases`; testing the infinite loop would need a
+    clock and loop-exit hooks for no extra confidence).
+- **Indexes:** `scripts/db_perf.py` (10k runs, 500k steps) showed every hot query already on an
+  index except the newest benchmark results (Seq Scan + sort of every row): added
+  `benchmark_results(created_at)` (0.87 → 0.09 ms for 200 rows, 0.96 → 0.01 ms for 1). Nothing
+  else added. `HOT_QUERY_INDEXES` in the drift test names each index and its query.
+- **Docs:** `docs/DATABASE.md` (tables, keys, indexes, queue, lease, plans, Prisma/SQLAlchemy).
+
+## D57. CI actions on their Node 24 majors (run 3, H5)
+- **Decision:** `actions/checkout@v7`, `actions/setup-node@v7`, `astral-sh/setup-uv@v10.3.3`
+  (exact: from v8 on setup-uv publishes no moving major tag, so `@v10` failed to resolve) (all
+  declare `runs.using: node24`; latest releases July–October 2026). GitHub was forcing the v4/v6
+  versions onto Node 24 with a deprecation annotation.
+- **Checked:** the breaking changes between our versions and these (setup-uv: cache defaults,
+  removed `pyproject-file`/`uv-file` inputs and old manifest format; setup-node: automatic
+  caching when `packageManager` is set). We pass no setup-uv inputs and set `cache: npm`
+  explicitly, so none changes our behaviour; uv's cache may be off on some events (slower,
+  not wrong).
+- **Alternative:** pin each action to a commit SHA (stronger supply-chain protection, but the
+  owner would need to update SHAs by hand; noted for later).
+
+## D58. Two fixes found while reading run-3 traces (run 3, H6)
+- **Element id as a JSON list:** gemma4:12b sometimes sends `element_id: [10]`; it was refused
+  ("there is no element [[10]]"), wasting 3 of 40 steps on the shop and 3 of 25 on the holdout.
+  `element_number` now accepts a one-item list. Generic: a model's way of writing an id.
+- **Benchmark commit label:** `bench` read `git rev-parse HEAD` when scoring, after the runs.
+  Commits made during a 2-hour benchmark relabelled it with code the runs never used (run 2's
+  1200 s row; run 3's H6 benchmark, which ran on f1bf08a but will show a later commit). Now
+  the commit is read before the runs start. Earlier rows are not changed; PROGRESS says which
+  code each one really ran.
+
+## D59. Remind the model of charter techniques it hasn't tried (run 3, H6)
+- **Evidence (MISS_ANALYSIS):** 11 gemma4:12b runs (shop and holdout) used double_click,
+  reload and the mobile viewport **0 times**; the one Sonnet run used each. Gemma typed only
+  ordinary values (quantity 1, valid emails, one-night stays). The planted bugs that need those
+  techniques were never triggered: not missed by judgement, just never reached.
+- **Decision:** each observation's budget line lists the charter techniques this run hasn't
+  used yet (unusual value in a field, double_click, reload, mobile viewport), tracked from the
+  steps taken; a technique disappears once used. The system prompt is unchanged (caching).
+- **Alternatives:** a longer or louder charter in the system prompt (Gemma already ignores the
+  one it has); forcing techniques at fixed steps (scripted, not testing); per-form checklists
+  (needs form understanding the agent doesn't have).
+- **Why generic:** the four techniques are from the charter and apply to any site; the
+  "unusual value" check looks only at the typed text and whether the field's name mentions
+  mail. No page, product or bug of either app appears in it.
+- **Rule:** kept only if the holdout results don't drop (measured below in PROGRESS).
+
+## D60. A note's result says notes are never reported (run 3, H6)
+- **Evidence:** in 5 gemma4:12b shop runs the model wrote the note "Wool Socks price is NaN"
+  and reported it in only one of them. Run 2's line in the system prompt ("a note is never a
+  substitute for report_bug", D52) didn't change that.
+- **Decision:** the result of `note` (what the model reads on its next step) says notes are
+  only for the model and are never reported, and to report a problem now with report_bug.
+- **Alternatives:** detect problem words in notes ("NaN", "wrong", "broken") and file a bug
+  automatically (the model's note is not a checked report: no expected/actual, no steps);
+  ask the model at the end of the run to review its notes (one more call per run, and late:
+  the replay steps would be far behind).
+- **Why generic:** it is about how the tool works, not about any site. Measured together with
+  D59 in the second Gemma benchmark; the holdout decides.
+
+## D61. A failed model call ends the run, it doesn't fail it (run 3, H6)
+- **What happened:** in the second Gemma benchmark one `decide` call took longer than the
+  Ollama client's 300 s timeout. The exception went up through the agent loop and the run
+  became "failed": 42 steps of work, and its reports were never verified.
+- **Decision:** the loop catches a failed decision (any exception from `llm.decide`), stops
+  with `stop_reason = "the model call failed: <error>"`, and the run continues as normal:
+  errors seen are added as findings, reports are verified, the run ends "done".
+- **Alternatives:** retry the call (a model that hangs for 300 s once often hangs again, and
+  each retry costs 5 minutes); a longer timeout (hides a stuck model for longer).
+- **Note:** the benchmark that hit it was already running the old code; its failed run
+  (9590b85f) is scored as it is and noted in PROGRESS.
+
+## D62. The one Sonnet benchmark: full set, holdout included (run 3, H7)
+- **Decision:** the single allowed claude-cli run is a full `worker bench`: shop 3 runs + clean,
+  holdout 2 runs + clean, 480 s and 40 steps (be495c9f's settings), judge pinned to
+  gemma4:12b. Before it, one Haiku call started exactly as the worker starts the CLI (temp
+  folder, `--restricted`, Read allowed for that folder) was asked to read
+  `apps/demo/bugs.json` and was refused. A watcher checked the runs for a usage-limit or
+  model-call failure, to stop the benchmark at once without a retry; none happened.
+- **Alternatives:** shop only (the plan's minimum). The holdout was added because Sonnet's
+  runs are short (~4 min) and the queue ran the shop first, so a usage limit would still have
+  left the shop result complete; the holdout is the only evidence that gains generalise.
+- **Findings recorded, not acted on:** bug 7 turned out guessable (MISS_ANALYSIS), the clean
+  builds have real unplanted bugs that count as false alarms, and one run finished early after
+  a native tool-call attempt in `claude -p`. All three are under "Needs me": each changes the
+  benchmark or needs another Sonnet run to verify, which this run doesn't allow.
