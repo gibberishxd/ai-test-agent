@@ -117,42 +117,48 @@ model User {
 /// One test run. The web app inserts it as "queued"; the worker claims it with
 /// SELECT ... FOR UPDATE SKIP LOCKED and writes progress, cost and the result back.
 model Run {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId   String    @map("workspace_id") @db.Uuid
-  createdById   String?   @map("created_by_id") @db.Uuid
-  targetUrl     String    @map("target_url")
-  mode          RunMode   @default(passive)
-  focus         String?
-  status        RunStatus @default(queued)
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  createdById          String?   @map("created_by_id") @db.Uuid
+  targetUrl            String    @map("target_url")
+  mode                 RunMode   @default(passive)
+  focus                String?
+  status               RunStatus @default(queued)
   /// Set by the Stop button; the worker checks it between steps.
-  stopRequested Boolean   @default(false) @map("stop_requested")
+  stopRequested        Boolean   @default(false) @map("stop_requested")
   /// Which worker process claimed the run (hostname:pid).
-  claimedBy     String?   @map("claimed_by")
-  provider      String?
-  model         String?
-  pagesVisited  Int       @default(0) @map("pages_visited")
-  stepCount     Int       @default(0) @map("step_count")
-  inputTokens   Int       @default(0) @map("input_tokens")
-  outputTokens  Int       @default(0) @map("output_tokens")
-  costUsd       Float     @default(0) @map("cost_usd")
-  error         String?
+  claimedBy            String?   @map("claimed_by")
+  provider             String?
+  model                String?
+  pagesVisited         Int       @default(0) @map("pages_visited")
+  stepCount            Int       @default(0) @map("step_count")
+  inputTokens          Int       @default(0) @map("input_tokens")
+  outputTokens         Int       @default(0) @map("output_tokens")
+  costUsd              Float     @default(0) @map("cost_usd")
+  /// The reviewer tier's share of the tokens and cost above (run 5, K2).
+  reviewerProvider     String?   @map("reviewer_provider")
+  reviewerModel        String?   @map("reviewer_model")
+  reviewerInputTokens  Int       @default(0) @map("reviewer_input_tokens")
+  reviewerOutputTokens Int       @default(0) @map("reviewer_output_tokens")
+  reviewerCostUsd      Float     @default(0) @map("reviewer_cost_usd")
+  error                String?
   /// Summary written when the run finishes (Report model in the worker).
-  summary       Json?
+  summary              Json?
   /// Unguessable token for a read-only share link; null = not shared (or revoked).
-  shareToken    String?   @unique @map("share_token")
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  startedAt     DateTime? @map("started_at") @db.Timestamptz(3)
-  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(3)
+  shareToken           String?   @unique @map("share_token")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  startedAt            DateTime? @map("started_at") @db.Timestamptz(3)
+  finishedAt           DateTime? @map("finished_at") @db.Timestamptz(3)
   /// The worker's lease: renewed every few seconds while it works (database clock). A running
   /// run whose heartbeat is older than the lease belongs to a dead worker and is failed.
-  heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(3)
+  heartbeatAt          DateTime? @map("heartbeat_at") @db.Timestamptz(3)
   /// Run 4, J3: budgets a CI caller can lower (never above the worker's limits).
   /// When retention deleted this run's screenshots and steps (its findings stay).
-  purgedAt      DateTime? @map("purged_at") @db.Timestamptz(3)
-  maxSteps      Int?      @map("max_steps")
-  maxSeconds    Int?      @map("max_seconds")
+  purgedAt             DateTime? @map("purged_at") @db.Timestamptz(3)
+  maxSteps             Int?      @map("max_steps")
+  maxSeconds           Int?      @map("max_seconds")
   /// The API key that started the run (null: started from the dashboard).
-  apiKeyId      String?   @map("api_key_id") @db.Uuid
+  apiKeyId             String?   @map("api_key_id") @db.Uuid
 
   workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy         User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)

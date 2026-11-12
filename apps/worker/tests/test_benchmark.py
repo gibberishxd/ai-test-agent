@@ -274,6 +274,16 @@ def test_stage_of_a_bug_follows_how_verification_ended():
     # Runs from before failure kinds were stored.
     assert stage_of(bug("dismissed", "could not replay: x")) == ("could_not_replay", "unknown")
     assert stage_of(bug("dismissed", "duplicate of: y", duplicate=True)) == ("duplicate", None)
+    # Run 5, K2: the reviewer dropped the explorer's report before replay.
+    assert stage_of(bug("dismissed", "reviewer: a design choice")) == ("reviewer_said_no", None)
+
+
+def test_reports_the_reviewer_dropped_count_as_discarded():
+    dropped = MatchDecision("a", "r", "/cart", [5], 5, "x", stage="reviewer_said_no")
+    scores = score({"a": [dropped]}, {}, PLANTED, [], [], "fake", "m", "abc")
+    funnel = scores.verification
+    assert scores.correct_but_discarded == 1
+    assert funnel["discard_reasons"] == {"reviewer_said_no": 1}
 
 
 def test_printed_scores_show_what_verification_threw_away(capsys):
@@ -286,3 +296,17 @@ def test_printed_scores_show_what_verification_threw_away(capsys):
     assert "element_not_found 1, judge_said_no 2" in out
     assert "recall before verification" in out
     assert "false alarms before verification" in out
+
+
+def test_a_benchmark_records_the_reviewer_and_its_cost_with_the_settings():
+    from worker.benchmark import reviewer_of
+
+    with_reviewer = SimpleNamespace(
+        reviewer_provider="ollama", reviewer_model="qwen3:14b", reviewer_cost_usd=0.0
+    )
+    without = SimpleNamespace(reviewer_provider=None, reviewer_model=None, reviewer_cost_usd=0.0)
+    assert reviewer_of([with_reviewer, with_reviewer]) == "ollama/qwen3:14b"
+    assert reviewer_of([without]) == ""
+    assert reviewer_of([]) == ""
+    scores = score(FUNNEL_RUNS, {}, PLANTED, [], [], "fake", "m", "abc", reviewer="ollama/x")
+    assert scores.reviewer == "ollama/x"

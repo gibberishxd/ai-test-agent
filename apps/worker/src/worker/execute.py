@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from worker.agent.loop import AgentConfig, AgentRun, StepRecord
 from worker.agent.policy import Budget
+from worker.agent.reviewer import review_candidate
 from worker.config import Settings
 from worker.db.models import Bug, Domain, Run, RunMode, Step
 from worker.findings import findings_from_pages
@@ -33,13 +34,19 @@ from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
 MAX_EVENTS_PER_STEP = 20
 
 
-def make_execute(settings: Settings, storage: Storage, browser: Browser | None = None) -> ExecuteFn:
-    """`browser`: reuse an already-running browser (tests); normally each run launches one."""
+def make_execute(
+    settings: Settings,
+    storage: Storage,
+    browser: Browser | None = None,
+    reviewer: LLMClient | None = None,
+) -> ExecuteFn:
+    """`browser`: reuse an already-running browser (tests); normally each run launches one.
+    `reviewer`: the reviewer tier's client (run 5, K2), or None for the explorer alone."""
 
     def execute(session: Session, run: Run, llm: LLMClient) -> None:
         if run.mode == RunMode.INTERACTIVE:
             verified = is_verified_domain(session, run.workspace_id, run.target_url)
-            run_interactive(session, run, llm, settings, storage, browser, verified)
+            run_interactive(session, run, llm, settings, storage, browser, verified, reviewer)
         else:
             run_passive(session, run, llm, settings, storage, browser)
 
@@ -165,6 +172,7 @@ def run_interactive(
     storage: Storage,
     browser: Browser | None = None,
     verified: bool = False,
+    reviewer: LLMClient | None = None,
 ) -> None:
     """Deterministic scan first (free), then the agent loop. Everything is saved as it happens."""
     if not interactive_allowed(settings, run.target_url, verified):
@@ -266,8 +274,11 @@ def run_interactive(
             on_bug=on_bug,
             should_stop=lambda: _stop_requested(session, run),
             relogin=(lambda: sign_in(context, login)) if login else None,
+            reviewer=reviewer,
         )
         result = agent.run()
+    if reviewer is not None:
+        _review_candidates(session, run, reviewer, result.reviewer_usage, login, settings)
 
     # 3. Errors seen while the agent clicked around are deterministic findings too.
     extra = [
@@ -286,6 +297,65 @@ def run_interactive(
         "suppressed": apply_triage(session, run),  # triaged as false positives earlier
         "expectation_checks": {"dismissed": result.dismissed, "ignored": result.ignored},
     }
+    session.commit()
+
+
+def _review_candidates(
+    session: Session,
+    run: Run,
+    reviewer: LLMClient,
+    loop_usage: list[Usage],
+    login: LoginConfig | None,
+    settings: Settings,
+) -> None:
+    """The reviewer looks at each report the explorer filed: keep (rewritten) or drop.
+
+    Reports the reviewer filed itself during the loop aren't reviewed again. Every reviewer
+    call (the loop's and these) is logged as a "review" step and summed into the run's
+    reviewer_* columns, apart from the explorer's share.
+    """
+    run.reviewer_provider, run.reviewer_model = reviewer.provider, reviewer.agent_model
+    usages = list(loop_usage)
+    explorer_reports = (
+        session.query(Bug)
+        .filter(Bug.run_id == run.id, Bug.source == "agent", Bug.status == "candidate")
+        .order_by(Bug.created_at)
+        .all()
+    )
+    for bug in explorer_reports:
+        if "reviewer" in (bug.evidence or {}):
+            continue
+        if run.cost_usd + sum(u.cost_usd for u in usages) >= settings.max_run_cost_usd:
+            break  # out of budget: replay still checks the rest
+        review = review_candidate(
+            reviewer,
+            target_url=run.target_url,
+            title=bug.title,
+            expected=bug.expected,
+            actual=bug.actual,
+            evidence=(bug.evidence or {}).get("observed"),
+            steps=list(bug.repro_steps or []),
+            scrub=login.scrub if login else (lambda text: text),
+        )
+        if review.usage:
+            usages.append(review.usage)
+        evidence = {**(bug.evidence or {}), "reviewer": reviewer.agent_model}
+        if not review.is_bug:
+            bug.status, bug.dismiss_reason = "dismissed", f"reviewer: {review.reason}"
+        elif review.report:
+            evidence["explorer_title"] = bug.title
+            bug.title = review.report["title"]
+            bug.severity = review.report["severity"]
+            bug.category = review.report["category"]
+            bug.expected = review.report["expected"] or bug.expected
+            bug.actual = review.report["actual"] or bug.actual
+        bug.evidence = evidence
+    for usage in usages:
+        _log_model_step(session, run, "review", {"model": usage.model}, usage)
+        fields = usage_fields(usage)
+        run.reviewer_input_tokens += fields["input_tokens"]
+        run.reviewer_output_tokens += fields["output_tokens"]
+        run.reviewer_cost_usd += fields["cost_usd"]
     session.commit()
 
 

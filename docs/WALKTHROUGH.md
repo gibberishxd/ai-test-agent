@@ -1182,3 +1182,46 @@ Changes outside the page (an email sent by the server) are invisible unless a re
 3. *How do you keep a ticking clock from making every dead button look alive?* Normalise times
    and dates out of changed lines and pair twins, drop spinner text, and treat repeated or
    pre-existing GETs as polling; each has a test with a page that does exactly that.
+
+## Run 5: the reviewer tier and list → detail (`agent/reviewer.py`, `agent/loop.py: _review_flag`, `execute.py: _review_candidates`, `agent/lists.py`, D81, D82)
+
+**What.** Two models with two jobs. The explorer (cheap, local) drives the browser for every step,
+as before. The reviewer (stronger, any provider, `REVIEWER_PROVIDER` / `REVIEWER_MODEL`) is
+called only (1) when the expected-vs-actual check flags a step and (2) once per report the
+explorer filed, after the loop. It decides "bug or not" and writes the report.
+
+**How.** In the loop, `_compare` computes the flags as in run 4; with a reviewer it calls
+`review_mismatch` immediately, with the step's action, expectation, what happened, why it was
+flagged, the page text (fenced) and a screenshot. A "bug" becomes a `BugReport` with
+`reported_at = step + 1` (replay repeats the flagged step) and `evidence.reviewer` = the model;
+a "no" is stored in `result.dismissed` with `reviewer:` in front. The explorer sees one line
+("the reviewer filed a bug: …" or "reviewer: not a bug (…)") and goes on: the run-4 gate that
+made it resolve the mismatch first is off, because the explorer is no longer the judge.
+After the loop, `_review_candidates` asks `review_candidate` about each explorer report as text:
+keep and rewrite, or drop. Every reviewer call is logged as a `review` step and summed into
+`runs.reviewer_*`; its cost is charged to the run's budget at once.
+
+**List → detail.** `ListTracker.see` finds lists on each observed page (≥ 2 same-site links under
+one parent ending in an id); `visit` marks a list opened when a URL under its parent is shown;
+`reminder()` adds "LISTS WITH NO ITEM OPENED YET" to the observation. Charter item 9 says why:
+open one item and check it shows the item you opened.
+
+**Why this split.** The 12B explorer is good at getting places and bad at judging what it sees.
+Judgement is needed at a few steps per run, so a frontier model there costs little, and a local
+model elsewhere keeps exploration cheap. Every reviewer token is recorded separately, so the
+price of better judgement is a measured number.
+
+**Weak spots.** The reviewer sees one moment, not the whole session; a mismatch only exists if
+the explorer wrote an expectation; the text-only final review can't look at the page. With two
+local models on a 16 GB Mac, Ollama swaps them in and out of memory for each review.
+
+**Interview Q&A**
+1. *Why not just use the big model for everything?* Cost and latency: ~40 decisions per run vs.
+   a handful of judgements. The tiered run records explorer and reviewer cost separately, so the
+   trade-off is measured, not assumed.
+2. *Why remove the "resolve the mismatch first" gate when there's a reviewer?* The gate existed
+   to force the explorer to judge; with a reviewer the explorer isn't the judge any more, and
+   blocking it would only waste its steps.
+3. *How do you stop the list rule from being a hint for your own demo?* It is derived from link
+   structure (a parent path with id-like children), names no site or bug, and a test asserts the
+   charter contains no site-specific words.

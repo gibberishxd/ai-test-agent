@@ -47,6 +47,10 @@ class PlantedBug:
     detection: str = "agent"
 
 
+# Stages where a report was thrown away (a duplicate isn't: its original still counts).
+DISCARD_STAGES = ("judge_said_no", "could_not_replay", "reviewer_said_no")
+
+
 @dataclass
 class MatchDecision:
     run_id: str
@@ -56,7 +60,8 @@ class MatchDecision:
     matched: int | None
     reason: str
     # How verification ended for this report: "verified" (kept: confirmed, or never checked),
-    # "judge_said_no" (replayed, the model didn't see it), "could_not_replay", "duplicate".
+    # "judge_said_no" (replayed, the model didn't see it), "could_not_replay", "duplicate",
+    # "reviewer_said_no" (the reviewer tier dropped it before replay, run 5).
     stage: str = "verified"
     failure_kind: str | None = None  # for "could_not_replay": evidence.replay_failure.kind
 
@@ -84,6 +89,7 @@ class BenchmarkScores:
     ai_recall_before: float = 0.0
     false_alarms_before: float = 0.0
     correct_but_discarded: int = 0
+    reviewer: str = ""  # "provider/model" of the reviewer tier, "" when the runs had none
     verification: dict = field(default_factory=dict)
 
 
@@ -178,6 +184,7 @@ def score(
     git_commit: str,
     judge: str = "",
     clean_before: dict[str, int] | None = None,
+    reviewer: str = "",
 ) -> BenchmarkScores:
     """Compute the scores from match decisions (one list per buggy run).
 
@@ -218,9 +225,9 @@ def score(
         for b in planted
     }
     every = [d for ds in buggy.values() for d in ds]
-    discarded = [d for d in every if d.stage in ("judge_said_no", "could_not_replay")]
+    discarded = [d for d in every if d.stage in DISCARD_STAGES]
     reasons = Counter(
-        "judge_said_no" if d.stage == "judge_said_no" else (d.failure_kind or "unknown")
+        d.stage if d.stage != "could_not_replay" else (d.failure_kind or "unknown")
         for d in discarded
     )
     bugs_lost = sum(
@@ -250,6 +257,7 @@ def score(
         per_bug=per_bug,
         decisions=every,
         judge=judge,
+        reviewer=reviewer,
         recall_before=mean(recall_over(planted, seen)),
         ai_recall_before=mean(recall_over(ai_bugs, seen)),
         false_alarms_before=mean(clean_before.values()),
@@ -265,10 +273,21 @@ def stage_of(bug) -> tuple[str, str | None]:
     if bug.status != "dismissed":
         return "verified", None
     reason = bug.dismiss_reason or ""
+    if reason.startswith("reviewer:"):
+        return "reviewer_said_no", None
     if reason.startswith("could not replay"):
         kind = ((bug.evidence or {}).get("replay_failure") or {}).get("kind", "unknown")
         return "could_not_replay", kind
     return "judge_said_no", None
+
+
+def reviewer_of(runs: list) -> str:
+    """ "provider/model" of the reviewer tier the runs used ("" for none): part of the settings
+    a benchmark result is recorded with, like the judge."""
+    for run in runs:
+        if run.reviewer_model:
+            return f"{run.reviewer_provider}/{run.reviewer_model}"
+    return ""
 
 
 def git_commit() -> str:
@@ -405,6 +424,7 @@ def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> Ben
         "decisions": data["decisions"],
         "runs": run_ids,
         "judge": scores.judge,
+        "reviewer": scores.reviewer or None,
         "verification": verification_details(scores),
     }
     if holdout:

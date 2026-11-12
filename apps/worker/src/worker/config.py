@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # Lets the end-to-end test run a real worker whose agent acts, without a model.
     fake_script: str = ""
     judge_model: str = ""
+    # Reviewer (run 5, K2): a stronger model that decides on flagged steps and on the final list
+    # of candidate bugs, while the explorer (LLM_PROVIDER) drives the browser. Both empty = no
+    # reviewer; only REVIEWER_MODEL = the explorer's provider with that model.
+    reviewer_provider: str = ""
+    reviewer_model: str = ""
 
     # Run budgets, enforced by the worker
     max_steps: int = 40

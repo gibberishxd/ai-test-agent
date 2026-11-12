@@ -225,3 +225,81 @@ def test_set_viewport_in_the_loop_raises_no_false_mismatch(agent):
     run, llm = agent([call("set_viewport", size="mobile", expect="the basket at phone width")])
     result = run.run()
     assert result.steps[0].args["check"]["flags"] == []
+
+
+# --- the reviewer tier (run 5, K2) ---------------------------------------------------------------
+
+
+@pytest.fixture
+def tiered(context, site_url):
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+
+    def make(decisions, reviewer_answers):
+        explorer = FakeClient(decisions=decisions)
+        reviewer = FakeClient(texts=reviewer_answers)
+        reviewer.agent_model = "big-reviewer"
+        config = AgentConfig(
+            target_url=f"{site_url}/expect.html",
+            mode="interactive",
+            budget=Budget(max_steps=20, max_seconds=60, max_cost_usd=1.0),
+        )
+        run = AgentRun(context.new_page(), explorer, guard, config, reviewer=reviewer)
+        return run, explorer, reviewer
+
+    return make
+
+
+BUG_ANSWER = (
+    '{"bug": true, "reason": "total ignores quantity", "title": "Total ignores quantity", '
+    '"severity": "high", "category": "functional", "expected": "$36.00", "actual": "$12.00"}'
+)
+
+
+def test_with_a_reviewer_a_flagged_step_is_decided_by_the_reviewer_not_the_explorer(tiered):
+    run, explorer, reviewer = tiered(
+        [
+            call("type", element_id=QTY, text="3"),
+            call("click", element_id=UPDATE, expect="Total: $36.00"),
+            call("click", element_id=ADD, expect="'Note added'"),  # not refused: nothing open
+        ],
+        [BUG_ANSWER],
+    )
+    result = run.run()
+    assert [c["method"] for c in reviewer.calls] == ["review_screenshot"]
+    assert "$36.00" in reviewer.calls[0]["prompt"]
+    update = result.steps[1]
+    assert "reviewer filed a bug" in update.result and "Total ignores quantity" in update.result
+    assert not result.steps[2].blocked
+    assert all("UNRESOLVED MISMATCH" not in c["observation"] for c in explorer.calls)
+    [bug] = result.bugs
+    assert bug.title == "Total ignores quantity" and bug.severity == "high"
+    assert bug.evidence["reported_at"] == 3  # replay repeats steps 1 and 2
+    assert bug.evidence["reviewer"] == "big-reviewer"
+    assert len(result.reviewer_usage) == 1
+
+
+def test_a_flagged_step_the_reviewer_rejects_is_recorded_as_dismissed(tiered):
+    run, _, _ = tiered(
+        [call("click", element_id=SAVE, expect="a confirmation appears")],
+        ['{"bug": false, "reason": "Save is disabled until something changes"}'],
+    )
+    result = run.run()
+    assert result.bugs == []
+    assert "reviewer: not a bug" in result.steps[0].result
+    assert result.dismissed[0]["reason"] == "reviewer: Save is disabled until something changes"
+    assert result.dismissed[0]["step"] == 1
+
+
+def test_reviewer_cost_counts_against_the_run_budget(tiered):
+    run, _, _ = tiered(
+        [call("click", element_id=SAVE, expect="a confirmation appears")],
+        ['{"bug": false, "reason": "r"}'],
+    )
+    run.reviewer._usage = lambda model, text: __import__("worker.llm", fromlist=["Usage"]).Usage(
+        model=model, input_tokens=100, output_tokens=10, cost_usd=0.25
+    )
+    result = run.run()
+    assert run.config.budget.cost_usd >= 0.25
+    assert result.reviewer_usage[0].cost_usd == 0.25

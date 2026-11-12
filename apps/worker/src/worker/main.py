@@ -30,6 +30,7 @@ from worker.benchmark import (
     print_scores,
     queue_runs,
     report_bugs,
+    reviewer_of,
     save_scores,
     score,
     staged_match,
@@ -39,7 +40,7 @@ from worker.config import REPO_ROOT, Settings, get_settings
 from worker.db.models import BenchmarkResult, Run
 from worker.db.session import make_engine, make_session_factory
 from worker.execute import make_execute
-from worker.llm import LLMClient, make_client, make_judge
+from worker.llm import LLMClient, make_client, make_judge, make_reviewer
 from worker.login_checks import process_login_check
 from worker.logs import JsonFormatter
 from worker.model_configs import client_for_run
@@ -123,13 +124,16 @@ def main(argv: list[str] | None = None) -> None:
 
     llm = make_client(settings)
     sessions = make_session_factory(make_engine(settings))
-    execute = make_execute(settings, make_storage(settings))
+    reviewer = make_reviewer(settings)
+    execute = make_execute(settings, make_storage(settings), reviewer=reviewer)
     with sessions() as session:
         # A run can't legitimately take longer than its time budget plus a grace period.
         recovered = recover_stale_runs(session, settings.max_run_seconds + STALE_GRACE_S)
     if recovered:
         log.warning("marked %d stale run(s) as failed", recovered)
     log.info("ready. provider=%s model=%s", llm.provider, llm.agent_model)
+    if reviewer is not None:
+        log.info("reviewer tier: provider=%s model=%s", reviewer.provider, reviewer.agent_model)
 
     def client_for(session, run, default):
         return client_for_run(session, run, default, settings)
@@ -352,6 +356,7 @@ def _score_set(session, judge, buggy_ids, clean_ids, planted, commit) -> Benchma
         git_commit=commit,
         judge=judge_name(judge),
         clean_before=clean_before,
+        reviewer=reviewer_of(finished),
     )
 
 

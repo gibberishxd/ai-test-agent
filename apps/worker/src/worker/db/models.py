@@ -126,6 +126,12 @@ class Run(Base):
     input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    # The reviewer tier's share of the tokens and cost above (run 5, K2); null model = none.
+    reviewer_provider: Mapped[str | None]
+    reviewer_model: Mapped[str | None]
+    reviewer_input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    reviewer_output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    reviewer_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
     error: Mapped[str | None]
     summary: Mapped[dict | None] = mapped_column(JSONB)
     share_token: Mapped[str | None] = mapped_column(unique=True)

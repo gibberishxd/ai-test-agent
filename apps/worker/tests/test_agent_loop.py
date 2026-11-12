@@ -453,3 +453,20 @@ def test_a_failing_model_call_ends_the_run_cleanly_and_keeps_its_steps(context, 
     result = AgentRun(context.new_page(), llm, guard, config).run()
     assert [s.action for s in result.steps] == ["type"]
     assert result.stop_reason == "the model call failed: TimeoutError: timed out"
+
+
+def test_the_agent_is_reminded_to_open_an_item_of_a_list_until_it_does(agent):
+    """Run 5, K2: list pages get a per-list reminder in the observation (generic, no names)."""
+    run, llm, _ = agent(
+        [
+            ToolCall(
+                "click", {"element_id": 2, "reasoning": "open an order", "expect": "Order 1042"}
+            ),
+            ToolCall("finish", {"reasoning": "done", "summary": "done"}),
+        ],
+        target="/orders.html",
+    )
+    run.run()
+    first, second = llm.calls[0]["observation"], llm.calls[1]["observation"]
+    assert "LISTS WITH NO ITEM OPENED YET" in first and "/orders" in first
+    assert "LISTS WITH NO ITEM OPENED YET" not in second

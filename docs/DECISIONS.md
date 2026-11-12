@@ -962,3 +962,39 @@ numbers are the real test (Needs me).
   values carried every case in the tests).
 - **Reverify signs in only if the run did:** `login_at_the_time` uses the workspace's login setup
   only if it existed when the run was created, so old runs replay as they ran.
+
+## D81. The reviewer tier: a stronger model only where judgement is needed (run 5, K2)
+- **Problem:** the explorer reaches bug states and then explains them away (run 4: Gemma
+  dismissed 19 of 23 flagged contradictions). Running a frontier model for every step costs ~40
+  decisions per run; judging is needed in a handful of them.
+- **Decision:** with `REVIEWER_PROVIDER` / `REVIEWER_MODEL` set, (1) a step flagged by the
+  expected-vs-actual check goes to the reviewer at once (action, expectation, what happened,
+  flags, page text fenced, screenshot); it files the bug itself or dismisses the flag, and the
+  explorer is only told the outcome and keeps exploring (no "resolve first" gate); (2) after the
+  loop, each report the explorer filed is reviewed once as text and is kept (and rewritten more
+  precisely, the old title kept as `explorer_title`) or dropped with `reviewer: <reason>`. Replay
+  still verifies everything that is kept.
+- **Unclear answers:** on a flagged step, "not a bug" (exploration continues; the flag is
+  stored); on a final report, "keep" (replay still checks it). Losing a report on a garbled
+  answer is worse than replaying one more.
+- **Costs:** the reviewer's calls count against the run's cost budget the moment they happen,
+  are logged as `review` steps, and are summed into `runs.reviewer_*` (provider, model, tokens,
+  cost), apart from the explorer's share of `runs.cost_usd`. A benchmark records the reviewer
+  in `details.reviewer`, like the judge. A report the reviewer dropped counts as
+  `reviewer_said_no` in the verification funnel.
+- **Scope:** server-level settings (any provider, including claude-cli locally); a
+  per-workspace reviewer choice can come with K4's plans.
+- **Alternatives:** the reviewer on every step (cost of a frontier model per step, no gain on
+  steps that need none); the reviewer only at the end (by then the flagged state is gone, and a
+  flag is exactly where Gemma failed); a vote between explorer and reviewer (the explorer's
+  judgement is the weak part).
+
+## D82. List pages: open at least one item (run 5, K2)
+- **Problem:** run 4's Gemma reached the order list and never opened an order (bug 13 unreached).
+- **Decision:** charter technique 9 ("Lists and details": open an item, check the detail shows
+  the item you opened) plus a per-list reminder in the observation (`agent/lists.py`). A list is
+  two or more same-site links whose paths share a parent and end in an id (digits, a UUID, a slug
+  with a digit, optionally `.html`); the reminder names the list page and one item link and stays
+  until a URL under that parent is visited. Opening a product doesn't tick off the orders list.
+- **Generic:** nothing names a site, a product or a bug; tests check the charter says nothing
+  site-specific.

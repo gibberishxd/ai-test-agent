@@ -44,6 +44,9 @@ nothing (the result says nothing on the page changed), that itself may be a bug:
 more, then report it with what you expected to happen.
 8. Wrong or nonsensical values anywhere: NaN, undefined, null, negative or missing prices, \
 placeholders shown to the user.
+9. Lists and details. When a page lists items (orders, products, bookings, rows), open at least \
+one item's detail page and check it shows the item you opened: the same name, number, date and \
+amounts as in the list.
 
 Expected vs. actual:
 - click, double_click, select, reload and set_viewport take `expect`: one short line of what you \
