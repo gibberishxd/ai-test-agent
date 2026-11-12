@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlsplit
 from playwright.sync_api import Browser, BrowserContext
 from sqlalchemy.orm import Session
 
+from worker.agent.lists import lists_from_crawl
 from worker.agent.loop import AgentConfig, AgentRun, StepRecord
 from worker.agent.policy import Budget
 from worker.agent.reviewer import review_candidate
@@ -263,6 +264,7 @@ def run_interactive(
             focus=run.focus,
             is_demo_target=is_demo_target(settings, run.target_url),
             login=login,
+            known_lists=lists_from_crawl([(p.url, p.found_on) for p in report.pages]),
         )
         agent = AgentRun(
             context.new_page(),

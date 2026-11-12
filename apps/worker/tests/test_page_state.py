@@ -259,3 +259,13 @@ def test_side_by_side_puts_before_left_and_after_right():
     assert width >= 80 and height >= 30
     assert combined.getpixel((5, height - 5))[0] > 200  # red on the left
     assert combined.getpixel((width - 5, height - 5))[2] > 200  # blue on the right
+
+
+def test_a_submit_the_browser_refuses_for_a_required_field_is_a_response(context, site_url):
+    """Run 5 (K2 benchmark): the browser's own validation shows a popup that isn't in the page
+    and moves focus to the empty required field. Users see it; it isn't "nothing happened"."""
+    before, after = run_action(context, f"{site_url}/state/validation.html")
+    diff = diff_states(before, after)
+    assert diff.meaningful
+    assert any("Guest name" in line for line in diff.validation)
+    assert "browser refused to submit" in diff.summary()

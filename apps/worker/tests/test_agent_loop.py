@@ -470,3 +470,20 @@ def test_the_agent_is_reminded_to_open_an_item_of_a_list_until_it_does(agent):
     first, second = llm.calls[0]["observation"], llm.calls[1]["observation"]
     assert "LISTS WITH NO ITEM OPENED YET" in first and "/orders" in first
     assert "LISTS WITH NO ITEM OPENED YET" not in second
+
+
+def test_lists_the_crawl_found_appear_in_the_first_observation(context, site_url):
+    from worker.agent.loop import AgentConfig, AgentRun
+
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+    llm = FakeClient(decisions=[ToolCall("finish", {"reasoning": "done", "summary": "done"})])
+    config = AgentConfig(
+        target_url=f"{site_url}/form.html",
+        mode="interactive",
+        budget=budget(),
+        known_lists={"/orders": ("/orders.html", "1042")},
+    )
+    AgentRun(context.new_page(), llm, guard, config).run()
+    assert 'on /orders.html: open one item (e.g. "1042")' in llm.calls[0]["observation"]

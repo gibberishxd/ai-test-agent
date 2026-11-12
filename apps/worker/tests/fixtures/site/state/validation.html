@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Booking</title><body><h1>Book a room</h1>
+<form id="f"><label for="guest">Guest name</label><input id="guest" name="guest" required>
+<button type="submit">Book now</button></form><p>Total: $120.00</p><p id="msg"></p>
+<script>document.getElementById('f').addEventListener('submit', e => { e.preventDefault();
+  document.getElementById('msg').textContent = 'Booked'; });</script></body>

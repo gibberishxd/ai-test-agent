@@ -67,6 +67,11 @@ class ListTracker:
         for parent, example in item_lists(page_url, elements).items():
             self._lists.setdefault(parent, (page_path, example))
 
+    def seed(self, lists: dict[str, tuple[str, str]]) -> None:
+        """Lists the crawl found before the agent started (not opened by the agent yet)."""
+        for parent, place in lists.items():
+            self._lists.setdefault(parent, place)
+
     def visit(self, url: str) -> None:
         split = _split(url)
         if split is not None:
@@ -81,3 +86,21 @@ class ListTracker:
             for _, (page, example) in waiting[:MAX_SHOWN]
         ]
         return "LISTS WITH NO ITEM OPENED YET:\n" + "\n".join(lines)
+
+
+def lists_from_crawl(pages: list[tuple[str, str | None]]) -> dict[str, tuple[str, str]]:
+    """Lists among crawled pages: (url, found_on) pairs where two or more pages under one parent
+    path end in an id. Returns {parent: (list page path, an item's id)}."""
+    groups: dict[str, list[tuple[str, str | None]]] = {}
+    for url, found_on in pages:
+        split = _split(url)
+        if split is not None:
+            groups.setdefault(split[1], []).append((split[2], found_on))
+    lists = {}
+    for parent, items in groups.items():
+        if len(items) < MIN_ITEMS:
+            continue
+        first_id, found_on = items[0]
+        page = urlsplit(found_on).path or "/" if found_on else parent
+        lists[parent] = (page, first_id)
+    return lists

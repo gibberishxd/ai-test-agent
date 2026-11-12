@@ -97,8 +97,20 @@ STATE_JS = """() => {
       }
     } catch (e) { /* storage blocked */ }
   }
+  // The browser's own form validation: its message bubble isn't in the page, but the field is
+  // invalid and gets the focus when a submit is refused.
+  const invalid = [];
+  for (const el of document.querySelectorAll('input, select, textarea')) {
+    if (el.willValidate && !el.checkValidity() && visible(el)) {
+      invalid.push((labelOf(el) || 'field') + ': ' + el.validationMessage);
+    }
+  }
+  const active = document.activeElement;
+  const focused = active && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)
+    ? (labelOf(active) || 'field') : null;
   const seen = window.__ataSeen || [];
-  return { url: location.href, title: document.title, lines, fields, storage, seen };
+  const url = location.href;
+  return { url, title: document.title, lines, fields, storage, seen, invalid, focused };
 }"""
 
 # Starts collecting text that is added to the page from now on, so a toast that disappears
@@ -135,6 +147,8 @@ class PageState:
     dialogs: list[str] = field(default_factory=list)
     popups: list[str] = field(default_factory=list)
     seen: list[str] = field(default_factory=list)  # text added to the page meanwhile
+    invalid: list[str] = field(default_factory=list)  # "Guest name: Please fill out this field."
+    focused: str | None = None  # the form field that has the focus, if any
 
 
 def _fingerprint(value: str | None) -> str:
@@ -218,6 +232,8 @@ class StateRecorder:
             dialogs=self._since("dialogs", self._dialogs),
             popups=self._since("popups", self._popups),
             seen=raw["seen"],
+            invalid=raw.get("invalid") or [],
+            focused=raw.get("focused"),
         )
         try:
             self.page.evaluate(WATCH_JS, MAX_SEEN)
@@ -274,6 +290,7 @@ class StateDiff:
     dialogs: list[str]
     popups: list[str]
     console: list[str]
+    validation: list[str]
     totals: tuple[list[str], list[str]]
     ignored: list[str]
 
@@ -293,6 +310,7 @@ class StateDiff:
             or self.requests
             or self.dialogs
             or self.popups
+            or self.validation
         )
 
     def summary(self) -> str:
@@ -308,6 +326,7 @@ class StateDiff:
             ("Requests sent", self.requests),
             ("Dialogs shown", self.dialogs),
             ("New tabs opened", self.popups),
+            ("The browser refused to submit the form (its message bubble)", self.validation),
             ("Console errors and warnings (not visible to users)", self.console),
         ]
         for name, items in sections:
@@ -392,6 +411,10 @@ def diff_states(before: PageState, after: PageState, typed: str | None = None) -
             storage.append(f"{key} changed")
 
     requests = _requests_that_count(before.requests, after.requests, ignored)
+    # A refused submit: the browser moved the focus to a field that is invalid.
+    validation = []
+    if after.focused and after.focused != before.focused:
+        validation = [v for v in after.invalid if v.split(": ", 1)[0] == after.focused]
     url_change = (before.url, after.url) if before.url != after.url else None
     return StateDiff(
         url_change=url_change,
@@ -404,6 +427,7 @@ def diff_states(before: PageState, after: PageState, typed: str | None = None) -
         dialogs=list(after.dialogs),
         popups=list(after.popups),
         console=list(after.console),
+        validation=validation,
         totals=(before.totals, after.totals),
         ignored=ignored,
     )

@@ -58,6 +58,8 @@ class AgentConfig:
     is_demo_target: bool = False
     # Set when the worker signed in with the workspace's test account (run 4, J2).
     login: LoginConfig | None = None
+    # Lists the crawl found before the agent started: {parent path: (list page, an item's id)}.
+    known_lists: dict | None = None
 
 
 @dataclass
@@ -138,6 +140,7 @@ class AgentRun:
         self._viewport = "desktop"
         self._pending: list[Candidate] = []  # mismatches the model hasn't resolved yet
         self._lists = ListTracker()  # list pages and whether an item of each was opened
+        self._lists.seed(config.known_lists or {})
         page.set_viewport_size(VIEWPORTS[self._viewport])
         listen(page, self._console, self._failed)
 

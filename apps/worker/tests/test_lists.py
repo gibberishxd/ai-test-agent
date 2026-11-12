@@ -90,3 +90,25 @@ def test_the_charter_asks_to_open_list_items_without_naming_a_site():
     assert "detail page" in SYSTEM_PROMPT
     lowered = SYSTEM_PROMPT.lower()
     assert "order #" not in lowered and "1042" not in lowered
+
+
+def test_lists_the_crawl_found_are_reminded_until_the_agent_opens_an_item():
+    """Run 5 K2 benchmark: only the free crawl visited the order pages; the agent never went to
+    the list, so it was never reminded. Lists the crawl found seed the reminder."""
+    from worker.agent.lists import lists_from_crawl
+
+    crawled = [
+        (f"{ORIGIN}/", None),
+        (f"{ORIGIN}/orders", f"{ORIGIN}/"),
+        (f"{ORIGIN}/orders/1001", f"{ORIGIN}/orders"),
+        (f"{ORIGIN}/orders/1002", f"{ORIGIN}/orders"),
+        (f"{ORIGIN}/about", f"{ORIGIN}/"),
+    ]
+    found = lists_from_crawl(crawled)
+    assert found == {"/orders": ("/orders", "1001")}
+
+    tracker = ListTracker()
+    tracker.seed(found)
+    assert "on /orders" in tracker.reminder()
+    tracker.visit(f"{ORIGIN}/orders/1002")  # the crawl's own visits don't count; the agent's do
+    assert tracker.reminder() == ""

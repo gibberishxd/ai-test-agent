@@ -397,3 +397,20 @@ def test_a_no_effect_report_about_clicking_into_a_field_is_dismissed_without_a_m
     assert verdict.reproduced is False and verdict.replayed is True
     assert llm.calls == []
     assert "only focuses" in verdict.reason
+
+
+def test_a_no_effect_report_on_a_form_the_browser_blocked_is_not_confirmed_by_measurement(
+    context, site_url
+):
+    llm = FakeClient(texts=['{"reproduced": false, "reason": "the browser asked for the name"}'])
+    verdict = verify_bug(
+        context,
+        llm,
+        f"{site_url}/state/validation.html",
+        [ReplayStep("click", {}, {"role": "button", "name": "Book now"})],
+        "Book now button fails to process booking with missing required fields",
+        None,
+        "Nothing on the page changed",
+    )
+    assert verdict.reproduced is False and len(llm.calls) == 1
+    assert "browser refused to submit" in llm.calls[0]["prompt"]
