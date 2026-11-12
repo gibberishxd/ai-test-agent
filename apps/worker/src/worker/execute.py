@@ -355,10 +355,13 @@ def verify_and_dedupe(
                 else:
                     bug.status = "dismissed"
                     bug.dismiss_reason = f"could not replay: {verdict.reason}"
-                evidence = {k: v for k, v in (bug.evidence or {}).items() if k != "replay_failure"}
+                stale = ("replay_failure", "replay_diff")
+                evidence = {k: v for k, v in (bug.evidence or {}).items() if k not in stale}
                 bug.evidence = {**evidence, "replay": verdict.reason, "replay_start": start_url}
                 if verdict.failure:
                     bug.evidence["replay_failure"] = verdict.failure
+                if verdict.diff:
+                    bug.evidence["replay_diff"] = verdict.diff
                 stats["confirmed" if verdict.reproduced else "dismissed"] += 1
     session.commit()
     return stats

@@ -1137,3 +1137,48 @@ run 3 shop AI-only 8%, run 4 J1 8%, run 4 J7 0% (7% before verification); holdou
    stronger judge can use next.
 3. *What would you change next?* Verify "nothing happened" reports by comparing before and after
    the replayed action, and measure a stronger model (Sonnet reached 38% in run 3).
+
+## Run 5: replay judges a change (`page_state.py`, `verify.py: verify_bug`, `reverify.py`, D80)
+
+**What.** Replay used to end with one screenshot and ask the judge "is the bug visible?". Now it
+records the page twice, just before the last action of the replay and after the page settles,
+and the verdict rests on the difference. `StateRecorder` is attached to the page before it loads,
+so it hears every request, dialog, new tab and console error. `capture()` reads the URL, visible
+text lines, form values, totals, storage and cookie fingerprints, and arms a MutationObserver that
+remembers text added to the page until the next capture (a toast that is gone two seconds later
+still counts). `diff_states(before, after)` returns what appeared, disappeared, changed, was
+sent or was shown, plus what it ignored as harmless.
+
+**How a verdict is reached.**
+1. Replay the steps; `before_last` fires right before the last acting step, once the page is
+   quiet, and captures state + screenshot.
+2. After the step, the page settles (network quiet, DOM quiet) and is captured again.
+3. If the report claims "nothing happens", the action was on a control, and the diff is empty:
+   confirmed, no model call, with a reason that says exactly what was measured.
+4. Otherwise the judge gets the report, the diff summary (fenced as untrusted), the page text, and
+   one picture with before on the left and after on the right.
+
+**Harmless changes.** A line whose only change is a time or date is paired with its twin and
+ignored; spinner words ("Loading…", "Saving...") and "updated 3 seconds ago" stamps are ignored;
+a GET the page was already sending, or sends repeatedly, is polling. Totals are never paired
+away: "Total: $12" → "Total: $24" only changes digits, but it is the change that matters.
+
+**Privacy.** Passwords are never read (the field shows `••••`), storage and cookies are kept as
+12-character SHA-256 fingerprints so the diff can say "changed" without the value, request URLs
+lose their query strings, and the summary goes through the login scrubber and `redact`.
+
+**Weak spots.** "Expected a change" is approximated by "the element is a control"; a button that
+legitimately does nothing visible (a "copy link" button that only writes to the clipboard) would
+be confirmed as dead. The no-effect classifier is a regular expression on the report's wording.
+Changes outside the page (an email sent by the server) are invisible unless a request shows them.
+
+**Interview Q&A**
+1. *Why not just give the model two screenshots?* A picture can't prove absence: a request, a
+   storage write or a toast that vanished in 300 ms are invisible in both. A measured diff is
+   evidence; the picture is context.
+2. *Couldn't this confirm false alarms, e.g. "clicking the logo does nothing"?* Only actions on
+   controls are confirmed by measurement, and only when nothing at all changed; a logo link that
+   navigates changes the URL. Non-controls and anything with a change still go to the judge.
+3. *How do you keep a ticking clock from making every dead button look alive?* Normalise times
+   and dates out of changed lines and pair twins, drop spinner text, and treat repeated or
+   pre-existing GETs as polling; each has a test with a page that does exactly that.

@@ -8,6 +8,7 @@ dependencies = [
     "boto3>=1.40",
     "cryptography>=50.0.2",
     "httpx>=0.28.1",
+    "pillow>=13.0.0",
     "playwright>=1.64.1",
     "psycopg[binary]>=3.3.8",
     "pydantic>=2.14.3",

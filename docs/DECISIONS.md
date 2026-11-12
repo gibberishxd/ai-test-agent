@@ -932,3 +932,33 @@ numbers are the real test (Needs me).
   only the browser binary is installed (from Playwright's CDN, no apt). The database service is
   reached by its name inside a container job. Runners stay pinned to ubuntu-24.04. CI green
   (run 43062066917).
+
+## D80. Replay judges a change, not a screenshot (run 5, K1)
+- **Problem:** "Save changes does nothing" was found 7 times (bug 8) and rejected every time.
+  The judge saw one screenshot of the end state, and a page where Save did nothing looks exactly
+  like a page where nobody clicked Save.
+- **Decision:** replay captures a compact page state just before the last action that acts on
+  the page (click, double-click, type, select, reload, back, navigate) and again once the page
+  has settled after it (`page_state.py`). The state holds the URL, the visible text lines, form
+  values (passwords never read), totals, local/session storage and cookies (fingerprints only,
+  never values) and, for the time in between, requests (no query strings), dialogs, new tabs,
+  console errors and text that appeared and vanished (a toast, caught by a MutationObserver).
+  The diff sets harmless changes aside: spinner text, a line whose only change is a time or
+  date, and GET requests the page was already sending (polling).
+- **What counts as a response:** URL, text, fields, storage, a request, a dialog, a new tab, or
+  text that appeared briefly. A console error alone does not: users don't see it (it is still
+  shown to the judge as evidence of why nothing happened).
+- **When the measurement decides alone:** the report says the action had no effect (a pattern
+  on title + actual), the action was on a control (button, link, checkbox, select, tab, menu
+  item…), and the diff is empty → confirmed with no model call. A control that does nothing at
+  all is a defect a QA tester would file. Everything else (wrong-change reports, no-effect
+  reports on non-controls, any diff with a change) goes to the judge with the diff summary and
+  one picture: before on the left, after on the right (Pillow; one image works with every
+  provider, including claude-cli and Ollama).
+- **Alternatives:** asking the judge in every case (the 12B judge rejected bug 8 four times
+  even with a clear description; a measured "nothing changed" is stronger evidence than its
+  reading of a picture); sending two images (needs a provider change in five clients for no
+  gain); the accessibility tree instead of visible text (larger, and the text plus field
+  values carried every case in the tests).
+- **Reverify signs in only if the run did:** `login_at_the_time` uses the workspace's login setup
+  only if it existed when the run was created, so old runs replay as they ran.

@@ -258,3 +258,142 @@ def test_the_judge_sees_the_page_the_last_step_led_to_not_the_one_before(context
     view_cart = ReplayStep("click", {}, {"role": "link", "name": "View cart"})
     verify_bug(context, llm, f"{site_url}/spa.html", [view_cart], "x", None, None)
     assert "Your cart" in llm.calls[0]["prompt"]
+
+
+# --- K1: judge a change, not one screenshot -----------------------------------------------------
+
+PROFILE_NAME = {"role": "textbox", "name": "Display name"}
+SAVE_CHANGES = {"role": "button", "name": "Save changes"}
+NO_EFFECT_STEPS = [
+    ReplayStep("type", {"text": "New Name"}, PROFILE_NAME),
+    ReplayStep("click", {}, SAVE_CHANGES),
+]
+
+
+def test_a_dead_button_reported_as_doing_nothing_is_confirmed_without_a_model_call(
+    context, site_url
+):
+    llm = FakeClient(texts=['{"reproduced": false, "reason": "the page looks normal"}'])
+    verdict = verify_bug(
+        context,
+        llm,
+        f"{site_url}/state/dead.html",
+        NO_EFFECT_STEPS,
+        "'Save changes' on the profile does nothing",
+        "The name is saved and a confirmation shows",
+        "Nothing happens",
+    )
+    assert verdict.reproduced is True and verdict.replayed is True
+    assert llm.calls == []  # measured, not judged
+    assert "changed nothing" in verdict.reason
+    assert verdict.diff and verdict.diff["meaningful"] is False
+
+
+def test_a_no_effect_report_on_a_button_that_works_goes_to_the_judge_with_the_diff(
+    context, site_url
+):
+    llm = FakeClient(texts=['{"reproduced": false, "reason": "Saved appeared"}'])
+    verdict = verify_bug(
+        context,
+        llm,
+        f"{site_url}/state/works.html",
+        NO_EFFECT_STEPS,
+        "'Save changes' does nothing",
+        None,
+        None,
+    )
+    assert verdict.reproduced is False
+    prompt = llm.calls[0]["prompt"]
+    assert "WHAT CHANGED" in prompt and "Saved" in prompt
+    assert verdict.diff["meaningful"] is True
+
+
+def test_the_judge_gets_before_and_after_in_one_picture(context, site_url):
+    import io
+
+    from PIL import Image
+
+    llm = FakeClient(texts=['{"reproduced": true, "reason": "x"}'])
+    verify_bug(context, llm, f"{site_url}/state/works.html", NO_EFFECT_STEPS, "x", None, None)
+    picture = Image.open(io.BytesIO(llm.calls[0]["image"]))
+    page_width = 1280
+    assert picture.width > page_width  # two screenshots side by side (each scaled to ≤1024)
+
+
+def test_a_wrong_change_report_is_judged_with_the_diff(context, site_url):
+    llm = FakeClient(texts=['{"reproduced": true, "reason": "total stayed $12"}'])
+    plus = {"role": "button", "name": "Increase quantity"}
+    verdict = verify_bug(
+        context,
+        llm,
+        f"{site_url}/state/wrong-total.html",
+        [ReplayStep("click", {}, plus)],
+        "Cart total ignores quantity",
+        "$24.00",
+        "$12.00",
+    )
+    assert verdict.reproduced is True
+    prompt = llm.calls[0]["prompt"]
+    assert "Socks × 2" in prompt and "Totals unchanged: Total: $12.00" in prompt
+
+
+def test_a_spinner_and_a_clock_dont_hide_a_dead_button(context, site_url):
+    verdict = verify_bug(
+        context,
+        FakeClient(),
+        f"{site_url}/state/noisy.html",
+        NO_EFFECT_STEPS,
+        "Save changes does nothing",
+        None,
+        None,
+    )
+    assert verdict.reproduced is True
+
+
+def test_a_dead_click_on_something_that_isnt_a_control_still_goes_to_the_judge(context, site_url):
+    """Clicking a paragraph is expected to do nothing; only the judge can say if that's a bug."""
+    llm = FakeClient(texts=['{"reproduced": false, "reason": "plain text"}'])
+    verdict = verify_bug(
+        context,
+        llm,
+        f"{site_url}/state/dead.html",
+        [ReplayStep("click", {}, {"role": "paragraph", "name": "Hello, Demo User", "css": "#who"})],
+        "Clicking the greeting does nothing",
+        None,
+        None,
+    )
+    assert verdict.reproduced is False and len(llm.calls) == 1
+
+
+def test_password_values_never_reach_the_judge(context, site_url):
+    llm = FakeClient(texts=['{"reproduced": false, "reason": "x"}'])
+    verify_bug(context, llm, f"{site_url}/state/works.html", NO_EFFECT_STEPS, "x", None, None)
+    assert "hunter2" not in llm.calls[0]["prompt"]
+
+
+def test_a_finding_without_steps_is_still_judged_on_one_screenshot(context, site_url):
+    llm = FakeClient(texts=['{"reproduced": true, "reason": "x"}'])
+    verdict = verify_bug(context, llm, f"{site_url}/form.html", [], "Layout broken", None, None)
+    assert verdict.reproduced and verdict.diff is None
+    assert "WHAT CHANGED" not in llm.calls[0]["prompt"]
+
+
+def test_a_no_effect_report_about_clicking_into_a_field_is_dismissed_without_a_model_call(
+    context, site_url
+):
+    """Clicking a number field only focuses it (it doesn't increment): a measured 'nothing
+    changed' there is the expected behaviour, not a bug. Seen in the K1 re-check: Gemma's judge
+    confirmed 'Quantity spinbutton does not increment value'."""
+    llm = FakeClient(texts=['{"reproduced": true, "reason": "no change"}'])
+    verdict = verify_bug(
+        context,
+        llm,
+        f"{site_url}/number.html",
+        [ReplayStep("click", {}, {"role": "spinbutton", "name": "Quantity"})],
+        "Quantity spinbutton does not increment value",
+        "value goes up",
+        "nothing happens",
+    )
+    assert verdict.reproduced is False and verdict.replayed is True
+    assert llm.calls == []
+    assert "only focuses" in verdict.reason

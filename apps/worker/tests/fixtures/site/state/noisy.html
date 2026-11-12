@@ -1,0 +1,10 @@
+<!doctype html><meta charset="utf-8"><title>Noisy page</title><body><h1>Profile</h1><p id="who">Hello, Demo User</p><form id="f"><label for="name">Display name</label><input id="name" name="name" value="Demo User"><label for="pw">Password</label><input id="pw" type="password" value="hunter2-secret"><button type="submit">Save changes</button></form><p id="msg" role="status"></p><p>Order total: $24.00</p><p id="clock"></p><p id="spin"></p>
+<script>
+const pad = n => String(n).padStart(2, '0');
+const tick = () => { const d = new Date(); document.getElementById('clock').textContent =
+  'Last updated ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + ' (' + (d.getSeconds() % 7) + ' seconds ago)'; };
+tick(); setInterval(tick, 200);
+document.getElementById('f').addEventListener('submit', e => { e.preventDefault();
+  const s = document.getElementById('spin'); s.textContent = 'Loading…'; s.setAttribute('aria-busy', 'true');
+  setTimeout(() => { s.textContent = 'Saving...'; }, 100); });
+</script></body>

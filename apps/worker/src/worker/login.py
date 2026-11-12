@@ -146,6 +146,25 @@ def login_for_run(session: Session, settings, run) -> LoginConfig | None:
     return config_from_row(row, server_key(settings.model_keys_secret.get_secret_value()))
 
 
+def login_at_the_time(session: Session, settings, run) -> LoginConfig | None:
+    """The run's login setup, but only if it already existed when the run was created.
+
+    Re-checking an old run (reverify) must replay it the way it ran: a setup added later
+    wasn't used by that run, whose steps signed in by themselves or not at all.
+    """
+    login = login_for_run(session, settings, run)
+    if login is None:
+        return None
+    parts = urlsplit(run.target_url)
+    created = session.scalars(
+        select(LoginSetup.created_at).where(
+            LoginSetup.workspace_id == run.workspace_id,
+            LoginSetup.origin == f"{parts.scheme}://{parts.netloc}",
+        )
+    ).first()
+    return login if created is None or created <= run.created_at else None
+
+
 def sign_in(context: BrowserContext, login: LoginConfig) -> SignInResult:
     """Sign `context` in. Cookies and local storage it gets are shared by its pages."""
     try:

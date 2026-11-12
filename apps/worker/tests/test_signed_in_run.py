@@ -192,3 +192,58 @@ def test_sign_in_setups_only_work_on_the_demo_shops_and_verified_domains(
     with sessions() as session:
         check = session.get(LoginSetup, setup_id).last_check
     assert check["ok"] is False and "verify" in check["detail"]
+
+
+def test_reverify_of_a_signed_in_run_replays_signed_in(
+    sessions, workspace, settings, site_url, tmp_path, browser
+):
+    """Re-checking an old signed-in run must sign in like the run did, or every report on an
+    account page would 'fail to replay' for the wrong reason."""
+    from worker.reverify import reverify_run
+
+    run = queue_signed_in_run(sessions, workspace, site_url)
+    report = ToolCall(
+        "report_bug",
+        {
+            "reasoning": "seen",
+            "title": "Account page shows the email in plain text",
+            "severity": "low",
+            "category": "ux",
+            "expected": "masked",
+            "actual": "shown",
+            "step_ids": [1],
+            "evidence": "shown",
+        },
+    )
+    llm = FakeClient(
+        decisions=[ToolCall("scroll", {"reasoning": "look", "direction": "down"}), report],
+        default_text='{"duplicates": [], "reproduced": true, "reason": "shown"}',
+    )
+    process_next(sessions, llm, make_execute(settings, LocalStorage(tmp_path), browser))
+    judge = FakeClient(default_text='{"reproduced": true, "reason": "shown"}')
+
+    with sessions() as session:
+        [outcome] = reverify_run(session, run.id, settings, browser=browser, judge=judge)
+
+    assert outcome["replayed"] is True and outcome["reproduced"] is True
+    prompt = judge.calls[0]["prompt"]
+    assert "account.html" in prompt and "signin.html" not in prompt
+    assert USERNAME not in prompt and PASSWORD not in prompt
+
+
+def test_reverify_doesnt_sign_in_a_run_from_before_its_login_setup_existed(
+    sessions, workspace, settings, site_url, tmp_path, browser
+):
+    """Old benchmark runs share a workspace with today's login setup; they signed in through
+    their own steps (or not at all), so replaying them signed in would change what they test."""
+    from datetime import timedelta
+
+    from worker.login import login_at_the_time
+
+    run = queue_signed_in_run(sessions, workspace, site_url)
+    with sessions() as session:
+        stored = session.get(Run, run.id)
+        assert login_at_the_time(session, settings, stored) is not None
+        stored.created_at = datetime.now(UTC) - timedelta(days=1)
+        session.commit()
+        assert login_at_the_time(session, settings, session.get(Run, run.id)) is None

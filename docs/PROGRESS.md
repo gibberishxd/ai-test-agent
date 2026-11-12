@@ -155,6 +155,13 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Run 5 (branch `agent-v5`, plan in `docs/RUN_PLAN_5.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| K0 Housekeeping | done | `agent-v5` from `agent-v4`; RUN_PLAN_5.md; demos and worker start; baseline `npm test` + `npm run lint` exit 0. PR question asked; nothing done to PRs yet. |
+| K1 Before/after replay | done | `page_state.py` + `verify_bug` judge the change made by the last replayed action (D80); 50+ new tests incl. clock, spinner, polling, toast, dialog. Offline re-check (MISS_ANALYSIS "Run 5, K1"): all 7 rejected bug-8 reports verify; no clean-build report was ever dismissed, so none can become a new false alarm. |
+
 ## Run 4 (branch `agent-v4`, plan in `docs/RUN_PLAN_4.md`)
 
 | Goal | Status | Check |

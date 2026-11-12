@@ -243,3 +243,34 @@ production), not how many judgement bugs a 12B model finds. Two concrete next st
 replay verification should compare before and after the replayed action for "nothing happened"
 reports (the agent's own Effect from J1 already records "nothing on the page changed"), and a
 stronger model (Sonnet's 38% in run 3 is the reference; not re-run today without the owner's yes).
+
+## Run 5, K1: re-checking rejected reports with before/after replay
+
+Offline, read-only (`reverify_run(..., only_status="dismissed")`, stored verdicts unchanged), judge
+pinned to ollama/gemma4:12b, at the K1 commit. Scope: every dismissed, non-duplicate agent report
+in every valid benchmark result (11 reports, all on buggy shop runs), plus Sonnet's single run
+be495c9f (run 2, 5 dismissed reports). **No clean-build report had ever been dismissed** (every
+clean-build agent report in stored results was already confirmed), so the re-check can't create
+a new confirmed false alarm on a clean build.
+
+| Result · run | Model | Report | Before | After K1 |
+|---|---|---|---|---|
+| 0029d375 · 3f9d8dd0 | Gemma | Save changes does not update display name (bug 8) | could not replay | **confirmed by measurement** |
+| c6c3f95e · d750ccfc | Gemma | Save changes does not update display name (bug 8) | could not replay | **confirmed by measurement** |
+| bea561fa · c8043ec4 | Gemma | Save changes does not update display name (bug 8) | judge said no | **confirmed by measurement** |
+| bd88e166 · 9598b42c | Gemma | Profile update button does not save (bug 8) | judge said no | **confirmed by measurement** |
+| bd88e166 · 67fa30d2 | Gemma | Save changes does not update display name (bug 8) | judge said no | **confirmed by measurement** |
+| f6151b32 · 99bd8afb | Sonnet | Save changes does nothing (bug 8) | judge said no | **confirmed by the judge** (diff) |
+| be495c9f (single run) | Sonnet | Save changes does nothing (bug 8) | could not replay | **confirmed by the judge** (diff) |
+| be495c9f | Sonnet | Cart total doesn't match line price (bug 5) | could not replay | **confirmed by the judge** |
+| 873b1b56, 7db4ddf9 · 6657cffb | Gemma | Profile API returns 500 (bug 2, also found by the checks) | judge said no | confirmed by the judge |
+| bd88e166 · 9598b42c, 0348ce58 | Gemma | Quantity spinbutton does not change value | judge said no | still dismissed, by rule (a click into a field only focuses it) |
+| f6151b32, be495c9f | Sonnet | Quantity 0 / huge / fractional quantity accepted | dismissed | confirmed (unplanted; quantity 0 → 1 is the owner's open decision) |
+
+**Acceptance:** all 7 rejected bug-8 reports verify (5 Gemma, 2 Sonnet); no clean-build report
+becomes a confirmed false alarm. Stored benchmark numbers are unchanged (history isn't
+rewritten); the next benchmark (K6) measures the effect. A first pass of the re-check let Gemma's
+judge confirm "Quantity spinbutton does not increment value" from a "no change" diff; the field
+rule (D80) was added because of it, test first.
+Why the "could not replay" ones replay now: they were older runs, before run 3's replay fixes
+(waiting for routes, fresh contexts, shorter plans), not because of K1.

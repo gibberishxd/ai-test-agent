@@ -34,6 +34,10 @@ export function evidenceLines(evidence: Record<string, unknown>): string[] {
   }
   if (typeof evidence.link === "string") lines.push(`broken link: ${evidence.link}`);
   if (typeof evidence.observed === "string" && evidence.observed) lines.push(evidence.observed);
+  const diff = evidence.replay_diff as { summary?: unknown } | undefined;
+  if (diff && typeof diff.summary === "string" && diff.summary) {
+    lines.push("Replay measured the last action:", ...diff.summary.split("\n"));
+  }
   return lines;
 }
 
