@@ -1225,3 +1225,77 @@ local models on a 16 GB Mac, Ollama swaps them in and out of memory for each rev
 3. *How do you stop the list rule from being a hint for your own demo?* It is derived from link
    structure (a parent path with id-like children), names no site or bug, and a test asserts the
    charter contains no site-specific words.
+
+## Run 5: a database that enforces its own rules (migrations `20261112110000`–`130000`, `lib/tenant-db.ts`, `lib/system-db.ts`, `worker/db/tenant.py`, D83, D84)
+
+**What.** Three login roles, none a superuser: `ata_owner` owns the schema; `ata_web` and
+`ata_worker` are the apps. The apps are members of `app_tenant`, the role the run-4 policies apply
+to, so without `app.workspace_id` set they see no tenant rows at all. The web app's every query
+goes through `tenantDb(ctx)` or `inTenant(ctx, fn)`: a transaction that sets the workspace, the
+acting user and audit context, then `SET LOCAL ROLE app_tenant`. The worker claims a run with a
+database function and from then on its session is tied to the run's workspace (an `after_begin`
+listener does the same two statements). Rules moved into Postgres: the audit log and `updated_at`
+as triggers, triage carry-forward as a trigger on `bugs`, `claim_next_run`, `consume_quota`,
+`apply_retention` as functions, a per-target history view and a materialized leaderboard, and
+CHECK constraints.
+
+**Justified bypasses.** A few things must happen before the workspace is known: sign-in reads a
+user by email (a read-only policy), an API key or share token is looked up by its hash or value,
+an invitation moves a user between workspaces, metrics count everything. Each is a narrow
+SECURITY DEFINER function owned by `ata_owner`, with a fixed `search_path` and EXECUTE for one
+role, returning the minimum (usually an id and a workspace).
+
+**How it's tested.** The worker's database tests switch roles with `SET LOCAL ROLE`; the web tests
+log in as `ata_web` for real; the worker's background jobs are tested logged in as `ata_worker`.
+Each app role is shown to see nothing without a workspace, only its workspace with one, unable
+to write into another, unable to edit the audit log or switch RLS off.
+
+**Weak spots.** RLS trusts the app to set the right workspace: it stops a forgotten WHERE, not a
+compromised app. Operator commands use the admin connection. The materialized view is refreshed
+synchronously, fine at a few writes a day, wrong at thousands.
+
+**Interview Q&A**
+1. *Why move the audit log into a trigger?* So every writer is audited (an operator with psql, a
+   future service, a bug that forgets the call); the app supplies only the context (who, which
+   IP) through transaction settings.
+2. *What does SECURITY DEFINER risk and how do you contain it?* It runs as its owner, past RLS.
+   Each one does one thing, sets `search_path` so a caller can't plant objects, returns the
+   minimum, and only one role may execute it.
+3. *Why does the worker see only one workspace when it's trusted?* Least privilege: a bug in run
+   code (or a prompt-injected agent that somehow reached SQL) can't touch other customers' data.
+
+## Run 5: plans and usage (`20261112140000_plans_usage`, `lib/usage.ts`, `app/settings/usage`, `app/admin/usage`, `worker/admin.py`, D85)
+
+**What.** `plans` (runs per month, steps per run, allowed providers, seats, retention) with every
+workspace on one; `usage_events`, one row per finished run written by a trigger, with the
+explorer's and the reviewer's tokens and cost apart. `consume_quota` enforces runs, providers and
+the step cap; `accept_invitation` enforces seats; `apply_retention` caps retention by plan. A
+usage page per workspace and an admin view across workspaces (platform admins, set from the CLI).
+
+**Why in the database.** A billing record that the app could forget or double-write isn't a
+billing record. The trigger fires once per run at its final status; the unique run id makes a
+second insert impossible; the apps can't change or delete events.
+
+**Interview Q&A**
+1. *How do you stop a burst of API calls from exceeding the plan?* `consume_quota` locks the
+   workspace row; the run is inserted in the same transaction; concurrent starts serialise.
+2. *Why record explorer and reviewer cost apart?* The tiered agent's whole case is "a strong
+   model only where it matters": its price must be visible on its own.
+3. *What's missing for real billing?* A payment provider: ROADMAP.md lists the five pieces.
+
+## Run 5: first-run experience (`lib/onboarding.ts`, `components/getting-started.tsx`, `e2e/first-run.e2e.ts`)
+
+**What.** A new workspace sees "Getting started" on the dashboard: workspace (done at sign-up),
+choose what to test (verify a domain or use the demo shop), pick a model (the server's by
+default), start a run, read the report. Each step's state comes from the database; the card goes
+away once the first report exists. The unverified-domain error says where to verify. A dev-only
+"create a test account" stands in for an email sign-up, so an e2e test covers the whole path as a
+brand-new team.
+
+**Interview Q&A**
+1. *Why compute onboarding from data instead of storing "steps done"?* Nothing to keep in sync:
+   a verified domain or a finished run is the truth.
+2. *Why a dev-only sign-up?* E2E needs a fresh team; email needs SMTP. It's off in production
+   like the demo account.
+3. *What did writing the e2e test find?* Concurrent first sign-ins raced on the unique email;
+   the fake model's script was shared between runs; the dev demo account would hit Free's limits.

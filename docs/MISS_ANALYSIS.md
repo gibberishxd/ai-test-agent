@@ -274,3 +274,33 @@ judge confirm "Quantity spinbutton does not increment value" from a "no change" 
 rule (D80) was added because of it, test first.
 Why the "could not replay" ones replay now: they were older runs, before run 3's replay fixes
 (waiting for routes, fresh contexts, shorter plans), not because of K1.
+
+## Run 5, K2: Gemma explorer + Gemma reviewer (baseline of the tiered setup)
+
+Result `14203d1f` (commit da16f0e, K1 + K2 code before the follow-ups below), gemma4:12b
+explorer and reviewer, judge ollama/gemma4:12b, 1200 s and 40 steps per run, holdout first.
+
+| Set | AI-only | Recall | Precision | False alarms |
+|---|---|---|---|---|
+| Shop (3 buggy + 1 clean) | 0% | 31% | 88% | 0.0 |
+| Holdout (2 buggy + 1 clean) | 0% | 33% | 100% | **1.0** |
+
+What happened, run by run:
+- **The reviewer was asked rarely:** 1–3 flagged steps per run. Gemma writes few checkable
+  expectations, so the expected-vs-actual check flags little, and the reviewer only sees flags.
+- **Bug 8's report didn't come this time** (Gemma didn't test the profile save in these runs);
+  the "Quantity spinbutton does not increment" report appeared three times and replay dismissed
+  it by K1's rule each time (a click into a field only focuses it).
+- **"Price and Total display NaN"** was confirmed twice, on /cart; the per-bug table counts bug 9
+  0/3 because the matcher only offers bugs listed for the report's page (bug 9 is listed on "/"),
+  the open matcher question from run 2.
+- **The holdout false alarm** ("Book now fails with missing required fields") was the browser's
+  own form validation: the browser refused the submit, focused the empty field and showed its
+  bubble, which isn't in the page. Replay measured "no change" and the judge confirmed it.
+  Fixed (D86): a refused submit is a response.
+- **Bug 13 not reached:** only the free crawl opened `/orders/100x`; the agent never went to the
+  order list, so its per-list reminder never fired. Fixed (D86): lists the crawl found seed it.
+
+**Decision for the default:** a Gemma reviewer doesn't qualify (holdout AI-only didn't rise;
+clean-build false alarms rose 0 → 1.0). The next measurement uses the largest local model this
+Mac runs as the reviewer (below).

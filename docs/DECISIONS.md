@@ -1043,3 +1043,19 @@ numbers are the real test (Needs me).
 - **Admin view:** `users.is_platform_admin`, set only by `worker make-admin` (owner's question d2,
   my pick), checked by the database function `platform_usage`.
 - **No payment provider:** ROADMAP.md, "Billing", says what Stripe would add.
+
+## D86. What the first tiered benchmark changed (run 5, K2)
+- **Browser form validation is a response:** replay records invalid fields (with the browser's
+  message) and the focused field; a submit that moves the focus to an invalid field is "the
+  browser refused to submit", a change users see. It was the holdout's one false alarm.
+- **Lists from the crawl seed the reminder:** the deterministic crawl already visits the site;
+  its pages that share a parent and end in an id (found on one list page) are lists the agent is
+  reminded about from step 1. The crawl's own visits don't tick them off: only the agent's do.
+- **The reviewer model:** this Mac has 16 GB. gemma4:12b (7.7 GB) runs the explorer; the largest
+  model that fits next to it and the browser in reasonable time is a ~14B model at 4-bit:
+  qwen3:14b (9.3 GB, free download; the two don't fit in memory together, so Ollama swaps them
+  for each review; reviews are 1–3 per run). It is text-only, so `REVIEWER_VISION=false` wraps it
+  (`TextOnlyClient`): image calls become text calls, with the page text and the measured diff.
+  Larger vision models (27B+) don't fit in 16 GB with the browser.
+- **The e2e fake model** gets a fresh script per run (two e2e tests now run interactive runs).
+- **The dev demo account** is on Business (dev-only; e2e runs it many times a month).
