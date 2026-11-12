@@ -62,6 +62,10 @@ review and merge `demo-v1` into `main`.
 Goals and acceptance checks: [`docs/RUN_PLAN_3.md`](docs/RUN_PLAN_3.md). Same override rules as run 2,
 plus at most one claude-cli benchmark run (H7).
 
+## Run 5 (branch `agent-v5`)
+Goals and acceptance checks: [`docs/RUN_PLAN_5.md`](docs/RUN_PLAN_5.md). Same override rules as run 4;
+the AI core may change in K1 and K2 (explained in `docs/WALKTHROUGH.md`).
+
 ## Run 4 (branch `agent-v4`)
 Goals and acceptance checks: [`docs/RUN_PLAN_4.md`](docs/RUN_PLAN_4.md); the path to a sellable
 product: [`docs/ROADMAP.md`](docs/ROADMAP.md). The owner is around: questions as numbered plain
