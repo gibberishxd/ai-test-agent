@@ -73,7 +73,7 @@ export default async function SettingsPage() {
             </Link>
             {admin && (
               <>
-                {" "}
+                {" · "}
                 <Link href="/settings/audit" className="underline">
                   Full audit log
                 </Link>

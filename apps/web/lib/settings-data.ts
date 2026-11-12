@@ -37,7 +37,7 @@ export async function checkDomain(
 export async function usageThisMonth(workspaceId: string) {
   const since = startOfMonth(new Date());
   const [workspace, runs, byProvider] = await Promise.all([
-    tenantDb(workspaceId).workspace.findUniqueOrThrow({ where: { id: workspaceId } }),
+    tenantDb(workspaceId).workspace.findUniqueOrThrow({ where: { id: workspaceId }, include: { plan: true } }),
     tenantDb(workspaceId).run.aggregate({ where: { workspaceId, createdAt: { gte: since } }, _count: true, _sum: { costUsd: true } }),
     tenantDb(workspaceId).run.groupBy({
       by: ["provider"],
@@ -47,7 +47,8 @@ export async function usageThisMonth(workspaceId: string) {
     }),
   ]);
   return {
-    quota: workspace.monthlyRunQuota,
+    // The limit that applies: the lower of the plan's and the workspace's own (consume_quota).
+    quota: Math.min(workspace.monthlyRunQuota, workspace.plan.runsPerMonth),
     runs: runs._count,
     costUsd: runs._sum.costUsd ?? 0,
     byProvider: byProvider.map((row) => ({

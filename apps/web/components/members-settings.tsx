@@ -58,8 +58,14 @@ export function MembersSettings({
       <ul className="grid gap-2" data-testid="member-list">
         {members.map((m) => (
           <li key={m.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm">
-            <span className="font-medium">{m.name ?? m.email}</span>
-            <span className="text-muted-foreground">{m.email}</span>
+            {m.name ? (
+              <>
+                <span className="font-medium">{m.name}</span>
+                <span className="text-muted-foreground">{m.email}</span>
+              </>
+            ) : (
+              <span className="font-medium">{m.email}</span>
+            )}
             {m.id === me && <Badge variant="outline">you</Badge>}
             <div className="ml-auto flex items-center gap-2">
               {manage && m.role !== "owner" && m.id !== me ? (

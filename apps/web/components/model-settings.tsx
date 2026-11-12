@@ -128,7 +128,7 @@ export function ModelSettings({ models }: { models: ModelConfigView[] }) {
               id="model-provider"
               value={form.provider}
               onChange={set("provider")}
-              className="h-9 rounded-md border bg-transparent px-3 text-sm"
+              className="h-9 w-full min-w-0 truncate rounded-md border bg-transparent px-3 text-sm"
             >
               <option value="openai-compat">OpenAI-compatible (OpenAI, Gemini, OpenRouter, Groq, local…)</option>
               <option value="claude">Anthropic (Claude)</option>
@@ -164,7 +164,7 @@ export function ModelSettings({ models }: { models: ModelConfigView[] }) {
 
 function FormField({ id, label, error, children }: { id: string; label: string; error?: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-1.5">
+    <div className="grid min-w-0 gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       {children}
       {error && <p className="text-sm text-destructive">{error}</p>}

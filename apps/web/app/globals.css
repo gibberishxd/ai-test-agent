@@ -50,6 +50,8 @@
 }
 
 :root {
+  /* Native controls (select lists, scrollbars, date pickers) follow the theme. */
+  color-scheme: light;
     /* Benchmark chart series (validated: light surface #fff, CVD ΔE 24.7). */
     --series-1: #2a78d6;
     --series-2: #eb6834;
@@ -88,6 +90,7 @@
 }
 
 .dark {
+  color-scheme: dark;
     /* Same hues stepped for the dark surface (validated: CVD ΔE 26.8). */
     --series-1: #3987e5;
     --series-2: #d95926;
