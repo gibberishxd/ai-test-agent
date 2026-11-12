@@ -164,6 +164,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | K2 Reviewer tier + list → detail | code done, measuring | `REVIEWER_PROVIDER`/`REVIEWER_MODEL` (any provider) decide on flagged steps and the explorer's reports; reviewer tokens/cost in `runs.reviewer_*`; per-list "open one item" reminder + charter item 9 (D81, D82). Benchmarks: see K6 rows. |
 | K3 Database rules | done | Roles ata_owner/web/worker (none superuser or BYPASSRLS); every web query through the tenant client, worker per-run tenant; justified bypasses as narrow functions; audit/updated_at/triage triggers, claim/quota/retention functions, two views, CHECKs; tested as each role (D83, D84; DATABASE.md). |
 | K4 Plans and usage | done | `plans`, `usage_events` (trigger, explorer/reviewer apart), plan-aware `consume_quota`, seats, retention cap; /settings/usage and /admin/usage (`worker make-admin`, `set-plan`); ROADMAP "Billing" (D85, placeholders). |
+| K5 First-run path | done | Dashboard "Getting started" (workspace → target → model → run → report, from the database); dev-only "create a test account" sign-up standing in for an email link; the unverified-domain error says where to verify; `e2e/first-run.e2e.ts` covers sign-up to report (9/9 e2e locally, with web and worker on their own database roles); fixed on the way: concurrent first sign-ins, the e2e fake model's script shared between runs, Free-plan limits on the dev demo account. Fresh screenshots via `e2e/screenshots.mjs`. |
 
 ## Run 4 (branch `agent-v4`, plan in `docs/RUN_PLAN_4.md`)
 

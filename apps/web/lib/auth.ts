@@ -11,6 +11,7 @@ import EmailProvider from "next-auth/providers/email";
 import GitHubProvider from "next-auth/providers/github";
 import { appAdapter, findOrCreateUser, type AppUser } from "@/lib/auth-adapter";
 import { db } from "@/lib/db";
+import { inTenant } from "@/lib/tenant-db";
 
 export const DEMO_USER_EMAIL = "demo-user@example.com";
 
@@ -52,6 +53,8 @@ function providers(): NextAuthOptions["providers"] {
         credentials: {},
         async authorize() {
           const user = await findOrCreateUser(db, { email: DEMO_USER_EMAIL, name: "Demo User" });
+          // Development's shared account runs the e2e tests over and over: not on Free's 30 runs.
+          await inTenant(user.workspaceId, (tx) => tx.workspace.updateMany({ where: { id: user.workspaceId, planId: "free" }, data: { planId: "business" } }));
           return { ...user, image: user.image ?? undefined };
         },
       }),
