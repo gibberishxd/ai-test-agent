@@ -1,7 +1,7 @@
 /** Run 4, J3: API keys against a real Postgres. */
 import { beforeEach, describe, expect, it } from "vitest";
 import { authenticateApiKey, createApiKey, listApiKeys, rateLimit, revokeApiKey } from "@/lib/api-keys";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import { hasTestDb } from "../test/use-test-db";
 
 async function workspace(slug: string) {
@@ -48,9 +48,9 @@ describe.skipIf(!hasTestDb)("API keys (database)", () => {
     const a = await workspace("a");
     const { view } = await createApiKey(a.id, null, "CI");
     const now = new Date("2026-11-11T10:00:30Z");
-    const results = await Promise.all(Array.from({ length: 8 }, () => rateLimit(view.id, 5, now)));
+    const results = await Promise.all(Array.from({ length: 8 }, () => rateLimit({ workspaceId: a.id, keyId: view.id }, 5, now)));
     expect(results.filter((r) => r.ok)).toHaveLength(5);
     expect(results.find((r) => !r.ok)?.retryAfterS).toBe(30);
-    expect((await rateLimit(view.id, 5, new Date("2026-11-11T10:01:01Z"))).ok).toBe(true); // next minute
+    expect((await rateLimit({ workspaceId: a.id, keyId: view.id }, 5, new Date("2026-11-11T10:01:01Z"))).ok).toBe(true); // next minute
   });
 });

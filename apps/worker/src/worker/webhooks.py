@@ -22,11 +22,12 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from worker.config import Settings
 from worker.db.models import Bug, Run, WebhookDelivery, WebhookEndpoint
+from worker.db.tenant import enter_tenant
 from worker.safety.network import NetworkGuard
 from worker.safety.proxy import GuardProxy
 from worker.secret_box import decrypt_secret, server_key
@@ -118,31 +119,40 @@ def deliver_due(
 ) -> int:
     """Send the deliveries that are due. Returns how many were attempted.
 
+    The database function due_webhook_deliveries lists what is due in every workspace (ids
+    only); each delivery is then locked (FOR UPDATE SKIP LOCKED: two workers never send it
+    twice) and sent inside its own workspace's row-level security (run 5, K3).
+
     `allowed_local`: (host, port) pairs exempt from the private-address rule; only tests (a
     local receiver) pass it. Production sends to public addresses only."""
     with sessions() as session:
-        due = session.scalars(
-            select(WebhookDelivery)
-            .where(
-                WebhookDelivery.status == "pending",
-                WebhookDelivery.next_attempt_at <= datetime.now(UTC),
-            )
-            .order_by(WebhookDelivery.next_attempt_at)
-            .limit(BATCH)
-            .with_for_update(skip_locked=True)
+        due = session.execute(
+            text("SELECT id, workspace_id FROM due_webhook_deliveries(:n)"), {"n": BATCH}
         ).all()
-        if not due:
-            return 0
-        guard = NetworkGuard(allowed_local=set(allowed_local or ()))
-        key = server_key(settings.model_keys_secret.get_secret_value())
-        with (
-            GuardProxy(guard) as proxy,
-            httpx.Client(proxy=proxy.url, timeout=TIMEOUT_S, follow_redirects=False) as http,
-        ):
-            for delivery in due:
-                _attempt(session, http, guard, key, delivery)
         session.commit()
-        return len(due)
+    if not due:
+        return 0
+    guard = NetworkGuard(allowed_local=set(allowed_local or ()))
+    key = server_key(settings.model_keys_secret.get_secret_value())
+    attempted = 0
+    with (
+        GuardProxy(guard) as proxy,
+        httpx.Client(proxy=proxy.url, timeout=TIMEOUT_S, follow_redirects=False) as http,
+    ):
+        for delivery_id, workspace_id in due:
+            with sessions() as session:
+                enter_tenant(session, workspace_id)
+                delivery = session.scalars(
+                    select(WebhookDelivery)
+                    .where(WebhookDelivery.id == delivery_id, WebhookDelivery.status == "pending")
+                    .with_for_update(skip_locked=True)
+                ).first()
+                if delivery is None:
+                    continue  # another worker has it, or it was just sent
+                _attempt(session, http, guard, key, delivery)
+                session.commit()
+                attempted += 1
+    return attempted
 
 
 def _attempt(session, http: httpx.Client, guard: NetworkGuard, key: bytes, delivery) -> None:

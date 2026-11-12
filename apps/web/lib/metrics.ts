@@ -2,7 +2,7 @@
  * Prometheus metrics (run 4, J6), computed from the database: with several web servers and
  * workers, every server reports the same totals, and nothing is lost when a process restarts.
  */
-import { db } from "@/lib/db";
+import { serviceMetrics } from "@/lib/system-db";
 
 export type MetricValues = {
   runsByStatus: Record<string, number>;
@@ -43,26 +43,23 @@ export function formatMetrics(v: MetricValues): string {
   );
 }
 
+/**
+ * Totals across every workspace, from one database function (service_metrics): the web role
+ * can't read other workspaces' rows, but the operator's dashboard needs counts and sums.
+ */
 export async function readMetrics(): Promise<MetricValues> {
-  const [statuses, totals, deliveries] = await Promise.all([
-    db.run.groupBy({ by: ["status"], _count: { _all: true } }),
-    db.$queryRaw<{ seconds: number | null; finished: bigint; input: bigint | null; output: bigint | null; cost: number | null }[]>`
-      SELECT sum(extract(epoch FROM finished_at - started_at)) AS seconds,
-             count(*) FILTER (WHERE finished_at IS NOT NULL AND started_at IS NOT NULL) AS finished,
-             sum(input_tokens) AS input, sum(output_tokens) AS output, sum(cost_usd) AS cost
-      FROM runs`,
-    db.webhookDelivery.groupBy({ by: ["status"], _count: { _all: true } }),
-  ]);
-  const runsByStatus = Object.fromEntries(statuses.map((s) => [s.status, s._count._all]));
-  const t = totals[0];
+  const rows = await serviceMetrics();
+  const by = (metric: string) => Object.fromEntries(rows.filter((r) => r.metric === metric).map((r) => [r.label, Number(r.value)]));
+  const total = (metric: string) => Number(rows.find((r) => r.metric === metric)?.value ?? 0);
+  const runsByStatus = by("runs");
   return {
     runsByStatus,
     queueDepth: runsByStatus.queued ?? 0,
-    runSecondsSum: Number(t?.seconds ?? 0),
-    runSecondsCount: Number(t?.finished ?? 0),
-    inputTokens: Number(t?.input ?? 0),
-    outputTokens: Number(t?.output ?? 0),
-    costUsd: Number(t?.cost ?? 0),
-    webhookDeliveries: Object.fromEntries(deliveries.map((d) => [d.status, d._count._all])),
+    runSecondsSum: total("run_seconds_sum"),
+    runSecondsCount: total("runs_finished"),
+    inputTokens: total("input_tokens"),
+    outputTokens: total("output_tokens"),
+    costUsd: total("cost_usd"),
+    webhookDeliveries: by("webhook_deliveries"),
   };
 }

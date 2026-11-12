@@ -342,13 +342,11 @@ Postgres: if a query forgets its WHERE, the database still returns only the curr
   query. `LOCAL` means both end with the transaction, so a pooled connection never carries one
   tenant's setting into the next request. The run page, run list, API reads and the settings
   lists use it; the WHERE clauses stay (first line of defence).
-- **SQLAlchemy / the worker:** the worker connects as the owning role, which policies don't apply
-  to (policies are `TO app_tenant`; the owner isn't app_tenant). That is deliberate: the worker is
-  the trusted component that claims queued runs from every workspace and writes their results;
-  each of its queries is keyed by a run id it claimed. Migrations run as the same owner role.
-- **Production:** the migration creates `app_tenant` (NOLOGIN, NOBYPASSRLS) and grants it to the
-  migrating role, which therefore needs CREATEROLE once; the app's role must not be a superuser
-  in production, or every role switch is trivially bypassable by whoever controls the session.
+- **The worker (since run 5):** connects as `ata_worker` and works on a run inside that run's
+  workspace (`worker/db/tenant.py`); see "Rules in the database" below. (Run 4 had the worker
+  connect as the owner, outside the policies.)
+- **Production (since run 5):** the app roles `ata_web` and `ata_worker` are neither superusers
+  nor `BYPASSRLS`; only migrations and the role script use the admin connection.
 - **Tests:** `rls.db.test.ts`: a query without WHERE sees only its workspace (runs, bugs, steps,
   workspaces); writing into another workspace fails; updating its rows changes nothing; an unset
   workspace sees nothing; the owner role sees everything.
@@ -365,6 +363,131 @@ Postgres: if a query forgets its WHERE, the database still returns only the curr
 The policies add tens of microseconds because the parent check is a primary-key lookup and the
 plans keep their indexes. The larger cost is two extra statements per query (`set_config`, `SET
 LOCAL ROLE`) in the same round trip batch: about 0.1–0.3 ms locally, per query.
+
+## Rules in the database (run 5, K3)
+
+Run 4 kept most rules in app code: the web app wrote the audit log, the worker claimed runs
+with its own SQL, two places counted the monthly quota. A rule in app code holds only for that
+app; the database is the one place every writer passes through (the web app, the worker, a
+migration, an operator with psql). Run 5 moves the rules that must never be skipped into
+Postgres, each tested by calling the database directly (`apps/worker/tests/test_db_rules.py`,
+`apps/web/lib/rls.db.test.ts`).
+
+**Tables: 18** (plus Prisma's `_prisma_migrations`; K4 adds plans and usage events). No table
+was added for K3: the rules are functions, triggers, views and constraints on the tables that
+exist.
+
+### Roles
+| Role | Login | Used by | Can |
+|---|---|---|---|
+| `ata_owner` | yes | migrations (on a managed database) | owns every table, view, sequence, type and function; the only role (besides a superuser) that can change the schema or switch row-level security off |
+| `ata_web` | yes | the web app (`WEB_DATABASE_URL`) | tenant rows only inside a tenant transaction; read `users` for sign-in; `accounts`/`verification_tokens`; the web functions below |
+| `ata_worker` | yes | the worker (`WORKER_DATABASE_URL`) | tenant rows only inside a run's workspace; the worker functions below; write `benchmark_results` |
+| `app_tenant` | no | `SET LOCAL ROLE` inside a tenant transaction | the tenant policies apply to it (and to its members, `ata_web` and `ata_worker`) |
+
+None is a superuser, none has `BYPASSRLS` or `CREATEROLE` (tested). The admin connection
+(`DATABASE_URL`) is used only by migrations, `npm run db:roles` (`apps/web/scripts/db-roles.mjs`,
+which creates missing roles and sets passwords from `DB_*_PASSWORD`), the test setup, and the
+worker's maintenance commands run by an operator (`bench`, `reverify`, `backfill-fingerprints`).
+The web app and the workers never get it (production compose gives each container only its own
+URL).
+
+### Functions
+| Function | Kind | Who may call | What and why in the database |
+|---|---|---|---|
+| `claim_next_run(worker, only, skip_benchmark)` | SECURITY DEFINER | ata_worker | `FOR UPDATE SKIP LOCKED` on the oldest queued run, status, claim and lease in one statement. The one place that looks across workspaces for the queue; returns only id and workspace. |
+| `renew_lease(run)` | SECURITY DEFINER | ata_worker | heartbeat; only while the run is still running |
+| `recover_runs(lease_s)` | SECURITY DEFINER | ata_worker | fails runs whose lease expired, in one UPDATE (two workers can't both fail a run) |
+| `consume_quota(workspace)` | INVOKER | app_tenant | locks the workspace row for the rest of the transaction, counts this month's runs, returns allowed/used/quota. The caller inserts its run in the same transaction: a burst of starts can't overshoot. Under RLS a tenant can only consume its own quota. |
+| `apply_retention(now, batch)` | SECURITY DEFINER | ata_worker | purges expired runs (steps deleted, screenshots unlinked, `purged_at`), old rate windows; returns run ids so the worker deletes their files |
+| `due_webhook_deliveries(limit)`, `requested_login_checks(limit)` | SECURITY DEFINER | ata_worker | what is due anywhere (ids and workspaces only); each item is then locked and processed inside its workspace |
+| `api_key_by_hash`, `shared_run`, `invitation_by_token`, `accept_invitation`, `demo_workspace`, `service_metrics` | SECURITY DEFINER | ata_web | the justified bypasses, below |
+| `remove_member(user)` | SECURITY DEFINER | app_tenant | moves a member out of the current workspace into a new one of their own (acts only in `app.workspace_id`) |
+| `url_origin(url)`, `app_current_workspace()`, `app_current_user()` | helpers | app_tenant | the origin rule of the worker's `origin_of`; the transaction's workspace and user |
+
+Every SECURITY DEFINER function sets `search_path = public, pg_temp` (so a caller can't plant a
+look-alike table) and has `EXECUTE` revoked from PUBLIC and granted to one role.
+
+### Triggers
+| Trigger | On | Does |
+|---|---|---|
+| `*_updated_at` | `login_setups`, `model_configs`, `finding_triage` | `updated_at = now()` on every update, whoever updates |
+| `bugs_carry_triage` | `bugs` insert / fingerprint change | a finding whose fingerprint the workspace marked a false positive on that target is stored `suppressed`, in every later run (replaces the worker's `apply_triage`) |
+| `*_audit` (`audit_change`) | runs, domains, model_configs, login_setups, api_keys, webhook_endpoints, invitations, users, finding_triage, workspaces | writes the audit log with the actor from `app.user_id` and context from `app.audit_metadata` (the visitor's IP, the API key); only names and ids of what changed, never a secret column's value. The action names are the ones the app used (`run.started`, `model.added`, `api_key.revoked`, `member.role_changed`, …). The app no longer writes audit rows. |
+| `benchmark_results_refresh_leaderboard` | `benchmark_results`, statement level | refreshes `model_leaderboard` |
+
+`audit_log` is append-only for the app roles (`UPDATE`, `DELETE` revoked): what happened can't be
+edited or erased by the apps.
+
+### Views
+- **`target_bug_history`** (`security_invoker`): per workspace, target origin and fingerprint:
+  latest title and status, first and last seen (dated by the runs), in how many runs, last run,
+  triage state. `security_invoker` makes the caller's row-level security apply, so a tenant sees
+  only its own history. The run page shows "N runs since <date>" from it.
+- **`model_leaderboard`** (materialized): one row per (provider, model, judge, reviewer) with its
+  newest valid result (rows with `details.invalid` are left out) and how many results it has.
+  **Refresh strategy:** a statement trigger refreshes it after every insert, update, delete or
+  truncate of `benchmark_results`. Results arrive a few times a day and the table is tiny, so a
+  full refresh costs milliseconds and the view is never stale; the benchmark page reads it on
+  every visit. (`REFRESH ... CONCURRENTLY`, which the unique index allows, would only matter if
+  refreshes took long enough to block readers.)
+
+### Policies
+- `tenant_isolation` on every tenant table, `TO app_tenant` (run 4; unchanged).
+- `sign_in_lookup` on `users`, `FOR SELECT TO ata_web USING (true)`: the one read the web role
+  may do across workspaces (below).
+
+### Justified bypasses
+Things that happen before a workspace is known, or span two. Each is narrow, read-mostly where
+possible, and returns the minimum:
+1. **Sign-in** reads a user by id, email or OAuth account (Auth.js) before any workspace is set:
+   the `sign_in_lookup` policy (SELECT only; every write to `users` goes through a tenant).
+2. **API keys:** the key's hash is the credential; `api_key_by_hash` returns id and workspace.
+3. **Share links:** the token is the credential; `shared_run` returns id and workspace.
+4. **Invitations:** `invitation_by_token` (to show who invites you) and `accept_invitation`, which
+   checks expiry, revocation, single use and the ownership rule and moves the user, in one
+   transaction (a move between workspaces is something no single tenant may do).
+5. **Removing a member** creates their own workspace: `remove_member`, limited to the caller's
+   current workspace.
+6. **Visitors** use the shared demo workspace: `demo_workspace`.
+7. **Metrics:** `/api/metrics` reports totals only: `service_metrics`.
+8. **The worker's queue and background jobs:** `claim_next_run`, `recover_runs`, `renew_lease`,
+   `apply_retention`, `due_webhook_deliveries`, `requested_login_checks`.
+9. **Operator commands** (`bench`, `reverify`, `backfill-fingerprints`) use the admin
+   connection: they are run by hand, never by the service.
+10. **Public tables:** `benchmark_results` and `model_leaderboard` are readable by everyone (the
+    benchmark page is public), writable only by the worker and the owner.
+
+Everything else in the web app goes through `tenantDb(ctx)` / `inTenant(ctx, fn)`
+(`apps/web/lib/tenant-db.ts`), and the worker's run code through `enter_tenant`. A query that
+forgets them sees no tenant rows at all (tested from both apps).
+
+### Check constraints
+| Table | Constraint |
+|---|---|
+| runs | counts, tokens and costs (also the reviewer's) ≥ 0; `max_steps` 1–500, `max_seconds` 1–86400; `finished_at ≥ started_at` |
+| steps | index, tokens, cost ≥ 0 |
+| bugs | category 1–40 characters (the set is open: models name categories); title not empty |
+| workspaces | quota ≥ 0; retention 1–3650 days |
+| login_setups | `kind IN ('form', 'storage_state')` |
+| model_configs | `provider IN ('claude', 'ollama', 'openai-compat', 'claude-cli')`; prices ≥ 0 |
+| domains | `method IN ('dns', 'file')` or null |
+| webhook_deliveries | `status IN ('pending', 'delivered', 'failed')`; attempts ≥ 0 |
+| api_rate_windows | count ≥ 0 |
+| invitations | expires after it was created (plus run 4's "never an owner link") |
+| benchmark_results | every rate between 0 and 1 |
+
+Fixed sets that already were Postgres enums stay enums (`run_status`, `run_mode`, `severity`,
+`bug_source`, `bug_status`, `workspace_role`). The new ones are CHECKs, not enums, because adding a
+value to a CHECK is one migration that can also be rolled back, while enum values can't be
+removed.
+
+### Why these in the database and not the others
+In the database: rules that protect data no matter who writes (isolation, the audit trail,
+quota, triage carry-forward, constraints) and the queue, whose correctness depends on locking.
+In app code: anything that needs the outside world or a model (fingerprints are computed by the
+worker in Python: they normalize URLs and messages; replay, model calls, storage deletes), and
+input validation with good error messages (the CHECKs are the backstop, not the UX).
 
 ## Prisma and SQLAlchemy: one schema, two apps
 
@@ -400,6 +523,10 @@ LOCAL ROLE`) in the same round trip batch: about 0.1–0.3 ms locally, per query
 | `20261111170000_roles_invitations` | `users.role`, `invitations` with a CHECK against owner links (run 4, J5) |
 | `20261111180000_row_level_security` | role `app_tenant`, `app_current_workspace()`, a policy on every tenant table (run 4, J5) |
 | `20261111190000_retention` | `workspaces.retention_days`, `runs.purged_at` (run 4, J6) |
+| `20261112100000_reviewer_usage` | `runs.reviewer_*`: the reviewer tier's provider, model, tokens, cost (run 5, K2) |
+| `20261112110000_database_rules` | roles, ownership, queue/quota/retention functions, audit, updated_at and triage triggers, the two views, check constraints (run 5, K3) |
+| `20261112120000_web_access` | the web app's justified bypasses: sign-in lookup policy and narrow functions (run 5, K3) |
+| `20261112130000_worker_access` | due webhooks and requested sign-in checks for the worker (run 5, K3) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker

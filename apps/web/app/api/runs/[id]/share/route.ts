@@ -1,4 +1,3 @@
-import { db } from "@/lib/db";
 import { createShareLink, revokeShareLink } from "@/lib/share";
 import { authorize } from "@/lib/workspace";
 
@@ -8,11 +7,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!auth.ok) return auth.response;
   const context = auth.context;
   const { id } = await params;
-  const token = await createShareLink(context.workspaceId, id);
+  const token = await createShareLink(context, id);
   if (!token) return Response.json({ error: "Run not found" }, { status: 404 });
-  await db.auditLog.create({
-    data: { workspaceId: context.workspaceId, userId: context.userId, action: "share.created", runId: id },
-  });
   return Response.json({ url: new URL(`/share/${token}`, request.url).toString() });
 }
 
@@ -22,11 +18,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!auth.ok) return auth.response;
   const context = auth.context;
   const { id } = await params;
-  if (!(await revokeShareLink(context.workspaceId, id))) {
+  if (!(await revokeShareLink(context, id))) {
     return Response.json({ error: "Run not found" }, { status: 404 });
   }
-  await db.auditLog.create({
-    data: { workspaceId: context.workspaceId, userId: context.userId, action: "share.revoked", runId: id },
-  });
   return Response.json({ ok: true });
 }

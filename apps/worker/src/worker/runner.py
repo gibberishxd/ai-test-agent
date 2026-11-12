@@ -12,6 +12,7 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session, sessionmaker
 
 from worker.db.models import Run, RunStatus
+from worker.db.tenant import enter_tenant
 from worker.llm import LLMClient
 from worker.logs import log_context
 from worker.queue import Heartbeat, claim_next_run, transition
@@ -53,6 +54,8 @@ def process_next(
         run = claim_next_run(session, worker_id(), only=only, skip_benchmark=skip_benchmark)
         if run is None:
             return False
+        # From here on the session sees only the run's workspace (row-level security).
+        enter_tenant(session, run.workspace_id)
         with log_context(run_id=str(run.id), workspace_id=str(run.workspace_id)):
             return _process(sessions, session, run, llm, execute, client_for)
 

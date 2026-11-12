@@ -1,16 +1,16 @@
 /** Data for the settings page: domains, usage and the audit log, always scoped to a workspace. */
-import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { normalizeHostname, realDeps, verifyDomain, type VerifyDeps } from "@/lib/domains";
 import { startOfMonth } from "@/lib/limits";
 
 export async function listDomains(workspaceId: string) {
-  return db.domain.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
+  return tenantDb(workspaceId).domain.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
 }
 
 export async function addDomain(workspaceId: string, input: string) {
   const hostname = normalizeHostname(input);
   if (!hostname) return { ok: false as const, error: "Enter a domain like shop.example.com." };
-  const domain = await db.domain.upsert({
+  const domain = await tenantDb(workspaceId).domain.upsert({
     where: { workspaceId_hostname: { workspaceId, hostname } },
     update: {},
     create: { workspaceId, hostname },
@@ -24,24 +24,22 @@ export async function checkDomain(
   domainId: string,
   deps: VerifyDeps = realDeps,
 ) {
-  const domain = await db.domain.findFirst({ where: { id: domainId, workspaceId } });
+  const domain = await tenantDb(workspaceId).domain.findFirst({ where: { id: domainId, workspaceId } });
   if (!domain) return { ok: false as const, reason: "Domain not found." };
-  const workspace = await db.workspace.findUniqueOrThrow({ where: { id: workspaceId } });
+  const workspace = await tenantDb(workspaceId).workspace.findUniqueOrThrow({ where: { id: workspaceId } });
   const result = await verifyDomain(domain.hostname, workspace.verificationToken, deps);
   if (!result.ok) return result;
-  await db.domain.update({ where: { id: domain.id }, data: { verifiedAt: new Date(), method: result.method } });
-  await db.auditLog.create({
-    data: { workspaceId, userId, action: "domain.verified", targetUrl: `https://${domain.hostname}`, metadata: { method: result.method } },
-  });
+  // The database logs "domain.verified" (trigger domains_audit) with this user as the actor.
+  await tenantDb({ workspaceId, userId }).domain.update({ where: { id: domain.id }, data: { verifiedAt: new Date(), method: result.method } });
   return result;
 }
 
 export async function usageThisMonth(workspaceId: string) {
   const since = startOfMonth(new Date());
   const [workspace, runs, byProvider] = await Promise.all([
-    db.workspace.findUniqueOrThrow({ where: { id: workspaceId } }),
-    db.run.aggregate({ where: { workspaceId, createdAt: { gte: since } }, _count: true, _sum: { costUsd: true } }),
-    db.run.groupBy({
+    tenantDb(workspaceId).workspace.findUniqueOrThrow({ where: { id: workspaceId } }),
+    tenantDb(workspaceId).run.aggregate({ where: { workspaceId, createdAt: { gte: since } }, _count: true, _sum: { costUsd: true } }),
+    tenantDb(workspaceId).run.groupBy({
       by: ["provider"],
       where: { workspaceId, createdAt: { gte: since } },
       _count: true,
@@ -61,7 +59,7 @@ export async function usageThisMonth(workspaceId: string) {
 }
 
 export async function auditLog(workspaceId: string, take = 50) {
-  return db.auditLog.findMany({
+  return tenantDb(workspaceId).auditLog.findMany({
     where: { workspaceId },
     orderBy: { createdAt: "desc" },
     take,

@@ -1,7 +1,7 @@
 /** Run 4, J2: sign-in setups against a real Postgres (test/global-setup.ts). */
 import { randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import { deleteLoginSetup, listLoginSetups, requestLoginCheck, saveLoginSetup } from "@/lib/login-setups";
 import { decryptSecret } from "@/lib/secret-box";
 import { hasTestDb } from "../test/use-test-db";

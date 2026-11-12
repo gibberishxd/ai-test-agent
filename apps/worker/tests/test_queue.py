@@ -190,3 +190,39 @@ def test_regular_workers_leave_benchmark_runs_to_the_benchmark(sessions, workspa
             claim_next_run(session, "worker-2", skip_benchmark=True).target_url
             == "http://customer/"
         )
+
+
+def test_a_claimed_run_is_processed_inside_its_own_workspace(sessions, workspace):
+    """Run 5, K3: the worker sees only the run's workspace while it works on it (row-level
+    security as app_tenant), so a bug in run code can't touch another workspace's rows."""
+    from sqlalchemy import text
+
+    from worker.db.models import Workspace
+
+    with sessions() as session:
+        other = Workspace(name="Other", slug="other")
+        session.add(other)
+        session.flush()
+        session.add(Run(workspace_id=other.id, target_url="http://x", status="done"))
+        session.commit()
+    run = add_run(sessions, workspace)
+    seen = {}
+
+    def execute(session, claimed, llm):
+        row = session.execute(
+            text("SELECT current_user AS who, current_setting('app.workspace_id', true) AS ws")
+        ).one()
+        seen["who"], seen["ws"] = row.who, row.ws
+        seen["workspaces"] = session.execute(text("SELECT count(*) FROM workspaces")).scalar()
+        seen["runs"] = session.execute(text("SELECT count(*) FROM runs")).scalar()
+
+    process_next(sessions, FakeClient(), execute)
+    assert seen == {"who": "app_tenant", "ws": str(workspace.id), "workspaces": 1, "runs": 1}
+    assert load(sessions, run.id).status == RunStatus.DONE
+
+
+def test_the_worker_role_claims_and_finishes_a_run(worker_sessions, sessions, workspace):
+    """End to end as ata_worker: claim (a database function), work inside the workspace."""
+    run = add_run(sessions, workspace)
+    assert process_next(worker_sessions, FakeClient()) is True
+    assert load(sessions, run.id).status == RunStatus.DONE

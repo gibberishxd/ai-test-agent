@@ -16,7 +16,8 @@
     "verify-bugs": "npm run verify-bugs -w apps/demo && npm run verify-bugs -w apps/demo2",
     "db:migrate": "npm run db:deploy -w apps/web",
     "test:e2e": "npm run e2e -w apps/web",
-    "bench": "cd apps/worker && uv run worker bench"
+    "bench": "cd apps/worker && uv run worker bench",
+    "db:roles": "npm run db:roles -w apps/web"
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

@@ -2,14 +2,13 @@
  * Reading and writing runs. The web app's only link to the worker is these rows: it inserts a
  * "queued" run, the worker claims it and writes steps, bugs, cost and status back.
  *
- * Every function takes the workspaceId and filters by it, so one workspace can never read or
- * change another's runs.
+ * Every function takes the workspaceId and filters by it, and runs inside that workspace
+ * (lib/tenant-db.ts), so Postgres itself keeps one workspace from another's runs.
  */
-import { db } from "@/lib/db";
-import { tenantDb } from "@/lib/tenant-db";
+import { inTenant, tenantDb, type Tx } from "@/lib/tenant-db";
 import { can } from "@/lib/roles";
 import { usableModel } from "@/lib/model-configs";
-import { quotaError, startOfMonth, visitorRateLimitError, visitorTargetError } from "@/lib/limits";
+import { quotaError, visitorRateLimitError, visitorTargetError } from "@/lib/limits";
 import { isDemoTarget, parseRunInput, type FieldErrors, type RunInput } from "@/lib/targets";
 import type { RequestContext } from "@/lib/workspace";
 
@@ -19,21 +18,22 @@ export function isUuid(value: string): boolean {
   return UUID.test(value);
 }
 
-type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
-
 /** Set by the public API: the key that started the run, and budgets that lower the worker's. */
 export type RunExtras = { apiKeyId?: string | null; maxSteps?: number | null; maxSeconds?: number | null };
 
+/**
+ * Insert a queued run. The database writes its "run.started" audit row (trigger runs_audit),
+ * with the actor and metadata the transaction set (inTenant's userId and audit).
+ */
 export async function createRun(
+  tx: Tx,
   workspaceId: string,
   userId: string | null,
   input: RunInput,
-  meta: Record<string, string> = {},
-  client: Tx | typeof db = db,
   modelConfigId: string | null = null,
   extras: RunExtras = {},
 ) {
-  const run = await client.run.create({
+  return tx.run.create({
     data: {
       workspaceId,
       createdById: userId,
@@ -46,18 +46,6 @@ export async function createRun(
       maxSeconds: extras.maxSeconds ?? null,
     },
   });
-  await client.auditLog.create({
-    data: {
-      workspaceId,
-      userId,
-      action: "run.started",
-      targetUrl: input.targetUrl,
-      mode: input.mode,
-      runId: run.id,
-      metadata: meta,
-    },
-  });
-  return run;
 }
 
 export type StartResult =
@@ -68,9 +56,9 @@ export type StartResult =
  * Every check in front of a new run, in one place: input, visitor rules, quota. The worker
  * repeats the safety-relevant ones (it's the security boundary); these give clear messages.
  *
- * The limits are counted and the run is inserted in one transaction that first locks the
- * workspace row (SELECT ... FOR UPDATE). Two requests for the same workspace therefore run one
- * after the other: the second counts the first one's run. Without the lock, a burst of
+ * The quota is checked and the run inserted in one transaction: consume_quota (a database
+ * function) locks the workspace row first, so two requests for the same workspace run one
+ * after the other and the second counts the first one's run. Without the lock, a burst of
  * requests would each see "one run left" and all get through.
  */
 export async function startRun(
@@ -102,10 +90,10 @@ export async function startRun(
     if (targetError) return { ok: false, status: 403, errors: { targetUrl: targetError } };
   }
 
-  return db.$transaction(async (tx): Promise<StartResult> => {
-    const locked = await tx.$queryRaw<{ monthly_run_quota: number }[]>`
-      SELECT monthly_run_quota FROM workspaces WHERE id = ${context.workspaceId}::uuid FOR UPDATE`;
-    if (locked.length === 0) throw new Error(`workspace ${context.workspaceId} not found`);
+  const audit: Record<string, string> = extras.apiKeyId ? { ip, apiKeyId: extras.apiKeyId } : { ip };
+  return inTenant({ workspaceId: context.workspaceId, userId: context.userId, audit }, async (tx): Promise<StartResult> => {
+    const [quota] = await tx.$queryRaw<{ allowed: boolean; used: number; quota: number }[]>`
+      SELECT * FROM consume_quota(${context.workspaceId}::uuid)`;
 
     if (!context.signedIn) {
       const recent = await tx.auditLog.count({
@@ -120,21 +108,17 @@ export async function startRun(
       if (limitError) return { ok: false, status: 429, errors: { targetUrl: limitError } };
     }
 
-    const used = await tx.run.count({
-      where: { workspaceId: context.workspaceId, createdAt: { gte: startOfMonth(new Date()) } },
-    });
-    const overQuota = quotaError(used, locked[0].monthly_run_quota);
+    const overQuota = quota.allowed ? null : quotaError(quota.used, quota.quota);
     if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
 
-    const meta: Record<string, string> = extras.apiKeyId ? { ip, apiKeyId: extras.apiKeyId } : { ip };
-    const run = await createRun(context.workspaceId, context.userId, input, meta, tx, modelConfigId, extras);
+    const run = await createRun(tx, context.workspaceId, context.userId, input, modelConfigId, extras);
     return { ok: true, id: run.id };
   });
 }
 
 /** Origins (https://host) of this workspace's verified domains. */
 export async function verifiedOrigins(workspaceId: string): Promise<string[]> {
-  const domains = await db.domain.findMany({
+  const domains = await tenantDb(workspaceId).domain.findMany({
     where: { workspaceId, verifiedAt: { not: null } },
   });
   return domains.flatMap((d) => [`https://${d.hostname}`, `http://${d.hostname}`]);
@@ -163,12 +147,12 @@ export async function listRuns(workspaceId: string, take = 50) {
 /** Ask the worker to stop. It checks the flag between steps; a queued run just never starts. */
 export async function requestStop(workspaceId: string, id: string): Promise<boolean> {
   if (!isUuid(id)) return false;
-  const queued = await db.run.updateMany({
+  const queued = await tenantDb(workspaceId).run.updateMany({
     where: { id, workspaceId, status: "queued" },
     data: { status: "stopped", stopRequested: true, finishedAt: new Date() },
   });
   if (queued.count > 0) return true;
-  const running = await db.run.updateMany({
+  const running = await tenantDb(workspaceId).run.updateMany({
     where: { id, workspaceId, status: "running" },
     data: { stopRequested: true },
   });

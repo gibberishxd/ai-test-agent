@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { formatDate } from "@/lib/format";
 import { can } from "@/lib/roles";
 import { currentContext } from "@/lib/workspace";
@@ -22,7 +22,7 @@ export default async function AuditPage() {
       </main>
     );
   }
-  const rows = await db.auditLog.findMany({
+  const rows = await tenantDb(context.workspaceId).auditLog.findMany({
     where: { workspaceId: context.workspaceId },
     orderBy: { createdAt: "desc" },
     take: LIMIT,

@@ -1,5 +1,5 @@
 import { apiErrorNames, apiStatus, baseUrlOf, parseApiRunInput, withApiKey } from "@/lib/api-v1";
-import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { clientIp } from "@/lib/limits";
 import { startRun } from "@/lib/runs";
 
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const context = { workspaceId: caller.workspaceId, userId: null, signedIn: true, role: "member" as const };
     const started = await startRun(context, body, clientIp(request.headers), { apiKeyId: caller.keyId, maxSteps, maxSeconds });
     if (!started.ok) return Response.json({ errors: apiErrorNames(started.errors) }, { status: started.status });
-    const run = await db.run.findUniqueOrThrow({ where: { id: started.id }, include: { bugs: true } });
+    const run = await tenantDb(caller.workspaceId).run.findUniqueOrThrow({ where: { id: started.id }, include: { bugs: true } });
     const status = apiStatus(run, baseUrlOf(request));
     return Response.json(status, { status: 201, headers: { Location: status.links.self } });
   });

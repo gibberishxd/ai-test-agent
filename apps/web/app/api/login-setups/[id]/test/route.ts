@@ -11,7 +11,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!auth.ok) return auth.response;
   const context = auth.context;
   const { id } = await params;
-  const setup = isUuid(id) ? await requestLoginCheck(context.workspaceId, id) : null;
+  const setup = isUuid(id) ? await requestLoginCheck(context, id) : null;
   if (!setup) return Response.json({ error: "Sign-in setup not found." }, { status: 404 });
   return Response.json({ setup }, { status: 202 });
 }

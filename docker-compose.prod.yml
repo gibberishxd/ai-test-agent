@@ -4,6 +4,25 @@
 # Postgres, an S3-compatible object store (screenshots), a one-off migration, the web app and N
 # workers. Secrets come from the environment (.env.prod, never committed), never from this file.
 name: ata-prod
+
+# Settings the web app and the workers share. Database credentials are per service, below.
+x-app-env: &app-env
+  NEXTAUTH_URL: ${PUBLIC_BASE_URL:-http://localhost:3100}
+  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3100}
+  MODEL_KEYS_SECRET: ${MODEL_KEYS_SECRET:?set MODEL_KEYS_SECRET}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  STORAGE: s3
+  S3_BUCKET: screenshots
+  S3_ENDPOINT: http://objectstore:9000
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY}
+  DEV_MODE: ${DEV_MODE:-false}
+  DEMO_URL: ${DEMO_URL:-}
+  CLEAN_DEMO_URL: ${CLEAN_DEMO_URL:-}
+  LOG_FORMAT: json
+
 services:
   postgres:
     image: postgres:17
@@ -38,32 +57,24 @@ services:
     volumes:
       - prod-objects:/data
 
+  # The one place that uses the admin account: migrations (objects are owned by ata_owner) and
+  # the app roles' passwords. The web app and the workers never get the admin URL (run 5, K3).
   migrate:
     build: { context: ., dockerfile: Dockerfile.web, target: migrate }
     environment:
       DATABASE_URL: postgresql://${PROD_DB_USER:-ata}:${PROD_DB_PASSWORD}@postgres:5432/ata
+      DB_WEB_PASSWORD: ${DB_WEB_PASSWORD:?set DB_WEB_PASSWORD}
+      DB_WORKER_PASSWORD: ${DB_WORKER_PASSWORD:?set DB_WORKER_PASSWORD}
     depends_on:
       postgres: { condition: service_healthy }
 
   web:
     build: { context: ., dockerfile: Dockerfile.web, target: runtime }
-    environment: &app-env
-      DATABASE_URL: postgresql://${PROD_DB_USER:-ata}:${PROD_DB_PASSWORD}@postgres:5432/ata
-      NEXTAUTH_URL: ${PUBLIC_BASE_URL:-http://localhost:3100}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3100}
-      MODEL_KEYS_SECRET: ${MODEL_KEYS_SECRET:?set MODEL_KEYS_SECRET}
-      METRICS_TOKEN: ${METRICS_TOKEN:-}
-      STORAGE: s3
-      S3_BUCKET: screenshots
-      S3_ENDPOINT: http://objectstore:9000
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-      S3_SECRET_KEY: ${S3_SECRET_KEY}
-      DEV_MODE: ${DEV_MODE:-false}
-      DEMO_URL: ${DEMO_URL:-}
-      CLEAN_DEMO_URL: ${CLEAN_DEMO_URL:-}
-      LOG_FORMAT: json
+    environment:
+      <<: *app-env
+      # Each app connects as its own role (not a superuser, no row-level-security bypass) and
+      # gets only its own credentials.
+      WEB_DATABASE_URL: postgresql://ata_web:${DB_WEB_PASSWORD}@postgres:5432/ata
     ports:
       - "3100:3000"
     depends_on:
@@ -74,6 +85,7 @@ services:
     build: { context: ., dockerfile: Dockerfile.worker }
     environment:
       <<: *app-env
+      WORKER_DATABASE_URL: postgresql://ata_worker:${DB_WORKER_PASSWORD}@postgres:5432/ata
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:12b}

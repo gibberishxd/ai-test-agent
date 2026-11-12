@@ -1,5 +1,6 @@
 import { currentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { demoWorkspaceId } from "@/lib/system-db";
 import { can, forbidden, type Action, type Role } from "@/lib/roles";
 
 export const PUBLIC_WORKSPACE_SLUG = "demo";
@@ -14,12 +15,7 @@ export type RequestContext = {
 
 /** The shared workspace visitors use; they may only test the hosted demo shop. */
 export async function publicWorkspaceId(): Promise<string> {
-  const workspace = await db.workspace.upsert({
-    where: { slug: PUBLIC_WORKSPACE_SLUG },
-    update: {},
-    create: { name: "Public demo", slug: PUBLIC_WORKSPACE_SLUG },
-  });
-  return workspace.id;
+  return demoWorkspaceId(); // a database function: visitors have no workspace of their own
 }
 
 /**
@@ -29,7 +25,8 @@ export async function publicWorkspaceId(): Promise<string> {
 export async function currentContext(): Promise<RequestContext> {
   const user = await currentUser();
   // The workspace and role come from the database on every request, not from the session: a
-  // changed role or an accepted invitation applies at once.
+  // changed role or an accepted invitation applies at once. (Reading a user before the
+  // workspace is known is the one read the web role may do across workspaces: sign-in.)
   const member = user ? await db.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, role: true } }) : null;
   if (user && member) return { workspaceId: member.workspaceId, userId: user.id, signedIn: true, role: member.role };
   return { workspaceId: await publicWorkspaceId(), userId: null, signedIn: false, role: null };

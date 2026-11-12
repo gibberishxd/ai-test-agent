@@ -3,7 +3,8 @@
  * or write another workspace's rows, because the database filters them for app_tenant.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
+import { db as appDb } from "@/lib/db";
 import { tenantDb } from "@/lib/tenant-db";
 import { hasTestDb } from "../test/use-test-db";
 
@@ -28,6 +29,16 @@ describe.skipIf(!hasTestDb)("row-level security", () => {
     expect((await asA.bug.findMany()).map((b) => b.title)).toEqual(["a bug"]);
     expect(await asA.step.count()).toBe(1);
     expect((await asA.workspace.findMany()).map((w) => w.slug)).toEqual(["a"]);
+  });
+
+  it("the web role's plain client sees no tenant rows at all: forgetting tenantDb fails closed (run 5)", async () => {
+    await workspaceWithRun("a");
+    const [role] = await appDb.$queryRaw<{ name: string; superuser: boolean; bypass: boolean }[]>`
+      SELECT current_user AS name, rolsuper AS superuser, rolbypassrls AS bypass FROM pg_roles WHERE rolname = current_user`;
+    expect(role).toEqual({ name: "ata_web", superuser: false, bypass: false });
+    expect(await appDb.run.count()).toBe(0);
+    expect(await appDb.workspace.count()).toBe(0);
+    await expect(appDb.$executeRawUnsafe("ALTER TABLE runs DISABLE ROW LEVEL SECURITY")).rejects.toThrow();
   });
 
   it("can't write into another workspace or change its rows", async () => {

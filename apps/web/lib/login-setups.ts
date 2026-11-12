@@ -11,7 +11,7 @@
  * associated data) and nothing here ever returns them: views say only whether one is saved.
  */
 import { db } from "@/lib/db";
-import { tenantDb } from "@/lib/tenant-db";
+import { inTenant, tenantDb, workspaceOf, type TenantContext } from "@/lib/tenant-db";
 import { encryptSecret } from "@/lib/secret-box";
 
 export const LOGIN_KINDS = ["form", "storage_state"] as const;
@@ -144,15 +144,17 @@ export function toView(row: Row): LoginSetupView {
   };
 }
 
-export async function listLoginSetups(workspaceId: string): Promise<LoginSetupView[]> {
+export async function listLoginSetups(scope: string | TenantContext): Promise<LoginSetupView[]> {
+  const workspaceId = workspaceOf(scope);
   const rows = await tenantDb(workspaceId).loginSetup.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
   return rows.map(toView);
 }
 
 /** Create or replace the setup for the target's origin. A new secret clears the last check. */
-export async function saveLoginSetup(workspaceId: string, body: Record<string, unknown>, serverKey: Buffer) {
+export async function saveLoginSetup(scope: string | TenantContext, body: Record<string, unknown>, serverKey: Buffer) {
+  const workspaceId = workspaceOf(scope);
   const origin = originOf(text(body.targetUrl));
-  const existing = origin ? await db.loginSetup.findUnique({ where: { workspaceId_origin: { workspaceId, origin } } }) : null;
+  const existing = origin ? await tenantDb(scope).loginSetup.findUnique({ where: { workspaceId_origin: { workspaceId, origin } } }) : null;
   const parsed = parseLoginSetupInput(body, { passwordSaved: Boolean(existing?.passwordCiphertext) && existing?.kind === "form" });
   if (!parsed.ok) return parsed;
   const { password, storageState, ...fields } = parsed.value;
@@ -161,23 +163,28 @@ export async function saveLoginSetup(workspaceId: string, body: Record<string, u
       fields.kind !== "form" ? null : password ? encryptSecret(password, workspaceId, serverKey) : (existing?.passwordCiphertext ?? null),
     storageStateCiphertext: storageState ? encryptSecret(storageState, workspaceId, serverKey) : null,
   };
-  const row = await db.loginSetup.upsert({
-    where: { workspaceId_origin: { workspaceId, origin: fields.origin } },
-    create: { workspaceId, ...fields, ...secrets },
-    update: { ...fields, ...secrets, checkRequestedAt: null },
+  const row = await inTenant(scope, async (tx) => {
+    const saved = await tx.loginSetup.upsert({
+      where: { workspaceId_origin: { workspaceId, origin: fields.origin } },
+      create: { workspaceId, ...fields, ...secrets },
+      update: { ...fields, ...secrets, checkRequestedAt: null },
+    });
+    // The old result was for the old settings; Prisma can't set JSON to SQL NULL in an update.
+    await tx.$executeRaw`UPDATE login_setups SET last_check = NULL WHERE id = ${saved.id}::uuid`;
+    return saved;
   });
-  // The old result was for the old settings; Prisma can't set JSON to SQL NULL in an update.
-  await db.$executeRaw`UPDATE login_setups SET last_check = NULL WHERE id = ${row.id}::uuid AND workspace_id = ${workspaceId}::uuid`;
   return { ok: true as const, setup: toView({ ...row, lastCheck: null, checkRequestedAt: null }) };
 }
 
-export async function deleteLoginSetup(workspaceId: string, id: string): Promise<boolean> {
-  return (await db.loginSetup.deleteMany({ where: { id, workspaceId } })).count > 0;
+export async function deleteLoginSetup(scope: string | TenantContext, id: string): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  return (await tenantDb(scope).loginSetup.deleteMany({ where: { id, workspaceId } })).count > 0;
 }
 
 /** "Test sign-in": the worker picks it up, signs in once and stores ok/failed. */
-export async function requestLoginCheck(workspaceId: string, id: string): Promise<LoginSetupView | null> {
-  const updated = await db.loginSetup.updateMany({ where: { id, workspaceId }, data: { checkRequestedAt: new Date() } });
+export async function requestLoginCheck(scope: string | TenantContext, id: string): Promise<LoginSetupView | null> {
+  const workspaceId = workspaceOf(scope);
+  const updated = await tenantDb(scope).loginSetup.updateMany({ where: { id, workspaceId }, data: { checkRequestedAt: new Date() } });
   if (updated.count === 0) return null;
-  return toView(await db.loginSetup.findFirstOrThrow({ where: { id, workspaceId } }));
+  return toView(await tenantDb(scope).loginSetup.findFirstOrThrow({ where: { id, workspaceId } }));
 }

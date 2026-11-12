@@ -1,4 +1,3 @@
-import { db } from "@/lib/db";
 import { isUuid } from "@/lib/runs";
 import { deleteWebhook, setWebhookEnabled } from "@/lib/webhooks";
 import { authorize } from "@/lib/workspace";
@@ -11,7 +10,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = (await request.json().catch(() => ({}))) as { enabled?: unknown };
   if (typeof body.enabled !== "boolean") return Response.json({ error: "Send { enabled: true | false }." }, { status: 400 });
-  if (!isUuid(id) || !(await setWebhookEnabled(context.workspaceId, id, body.enabled))) {
+  if (!isUuid(id) || !(await setWebhookEnabled(context, id, body.enabled))) {
     return Response.json({ error: "Webhook not found." }, { status: 404 });
   }
   return Response.json({ ok: true });
@@ -22,7 +21,6 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!auth.ok) return auth.response;
   const context = auth.context;
   const { id } = await params;
-  if (!isUuid(id) || !(await deleteWebhook(context.workspaceId, id))) return Response.json({ error: "Webhook not found." }, { status: 404 });
-  await db.auditLog.create({ data: { workspaceId: context.workspaceId, userId: context.userId, action: "webhook.deleted", metadata: { id } } });
+  if (!isUuid(id) || !(await deleteWebhook(context, id))) return Response.json({ error: "Webhook not found." }, { status: 404 });
   return Response.json({ ok: true });
 }

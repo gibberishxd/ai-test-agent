@@ -113,10 +113,10 @@ def finished_run_with_endpoint(sessions, workspace, url) -> str:
 
 
 def test_a_finished_run_is_posted_signed_to_the_workspace_endpoint(
-    sessions, workspace, settings, receiver
+    sessions, worker_sessions, workspace, settings, receiver
 ):
     run_id = finished_run_with_endpoint(sessions, workspace, receiver.url)
-    assert deliver_due(sessions, settings, allowed_local=receiver.allowed) == 1
+    assert deliver_due(worker_sessions, settings, allowed_local=receiver.allowed) == 1
 
     [request] = receiver.requests
     payload = json.loads(request["body"])
@@ -136,13 +136,17 @@ def test_a_finished_run_is_posted_signed_to_the_workspace_endpoint(
             1,
             200,
         )
-    assert deliver_due(sessions, settings, allowed_local=receiver.allowed) == 0  # nothing left
+    assert (
+        deliver_due(worker_sessions, settings, allowed_local=receiver.allowed) == 0
+    )  # nothing left
 
 
-def test_a_failing_receiver_is_retried_later_then_given_up(sessions, workspace, settings, receiver):
+def test_a_failing_receiver_is_retried_later_then_given_up(
+    sessions, worker_sessions, workspace, settings, receiver
+):
     receiver.status = 500
     finished_run_with_endpoint(sessions, workspace, receiver.url)
-    deliver_due(sessions, settings, allowed_local=receiver.allowed)
+    deliver_due(worker_sessions, settings, allowed_local=receiver.allowed)
     with sessions() as session:
         delivery = session.query(WebhookDelivery).one()
         assert (delivery.status, delivery.attempts, delivery.last_status_code) == (
@@ -155,7 +159,7 @@ def test_a_failing_receiver_is_retried_later_then_given_up(sessions, workspace, 
         delivery.attempts = MAX_ATTEMPTS - 1
         delivery.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
         session.commit()
-    deliver_due(sessions, settings, allowed_local=receiver.allowed)
+    deliver_due(worker_sessions, settings, allowed_local=receiver.allowed)
     with sessions() as session:
         assert session.query(WebhookDelivery).one().status == "failed"
 
@@ -169,15 +173,17 @@ def test_a_failing_receiver_is_retried_later_then_given_up(sessions, workspace, 
         "ftp://example.com/",
     ],
 )
-def test_internal_addresses_are_refused_without_retrying(sessions, workspace, settings, url):
+def test_internal_addresses_are_refused_without_retrying(
+    sessions, worker_sessions, workspace, settings, url
+):
     finished_run_with_endpoint(sessions, workspace, url)
-    deliver_due(sessions, settings)
+    deliver_due(worker_sessions, settings)
     with sessions() as session:
         delivery = session.query(WebhookDelivery).one()
         assert delivery.status == "failed" and "blocked" in delivery.last_error
 
 
-def test_disabled_endpoints_get_nothing(sessions, workspace, settings, receiver):
+def test_disabled_endpoints_get_nothing(sessions, worker_sessions, workspace, settings, receiver):
     with sessions() as session:
         session.add(
             WebhookEndpoint(
@@ -190,4 +196,4 @@ def test_disabled_endpoints_get_nothing(sessions, workspace, settings, receiver)
         session.add(Run(workspace_id=workspace.id, target_url="http://x/", mode="passive"))
         session.commit()
     process_next(sessions, FakeClient())
-    assert deliver_due(sessions, settings, allowed_local=receiver.allowed) == 0
+    assert deliver_due(worker_sessions, settings, allowed_local=receiver.allowed) == 0

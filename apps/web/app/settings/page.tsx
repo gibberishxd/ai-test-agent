@@ -12,6 +12,7 @@ import { listInvitations, listMembers } from "@/lib/members";
 import { can } from "@/lib/roles";
 import { currentContext } from "@/lib/workspace";
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { formatCost, formatDate, hostOf } from "@/lib/format";
 import { listApiKeys } from "@/lib/api-keys";
 import { listLoginSetups } from "@/lib/login-setups";
@@ -42,7 +43,7 @@ export default async function SettingsPage() {
   if (!user) redirect("/signin");
 
   const [workspace, domains, usage, log, models, loginSetups, apiKeys, webhooks, members, invitations] = await Promise.all([
-    db.workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
+    tenantDb(user.workspaceId).workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
     listDomains(user.workspaceId),
     usageThisMonth(user.workspaceId),
     auditLog(user.workspaceId),

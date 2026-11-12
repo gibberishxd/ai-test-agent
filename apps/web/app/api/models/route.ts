@@ -1,4 +1,3 @@
-import { db } from "@/lib/db";
 import { createModelConfig, listModelConfigs } from "@/lib/model-configs";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
 import { authorize, currentContext } from "@/lib/workspace";
@@ -22,15 +21,7 @@ export async function POST(request: Request) {
     if (error instanceof SecretBoxError) return Response.json({ error: error.message }, { status: 500 });
     throw error;
   }
-  const result = await createModelConfig(context.workspaceId, body, key);
+  const result = await createModelConfig(context, body, key);
   if (!result.ok) return Response.json({ errors: result.errors }, { status: 400 });
-  await db.auditLog.create({
-    data: {
-      workspaceId: context.workspaceId,
-      userId: context.userId,
-      action: "model.added",
-      metadata: { model: result.model.model, provider: result.model.provider },
-    },
-  });
   return Response.json({ model: result.model }, { status: 201 });
 }

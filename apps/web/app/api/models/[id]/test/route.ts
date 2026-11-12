@@ -27,9 +27,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     { provider: row.provider, baseUrl: row.baseUrl, model: row.model, apiKey },
     realProbeDeps(),
   );
-  await storeProbe(context.workspaceId, id, probe);
-  await db.auditLog.create({
-    data: { workspaceId: context.workspaceId, userId: context.userId, action: "model.tested", metadata: { ok: probe.ok } },
-  });
+  await storeProbe(context, id, probe);
   return Response.json({ model: toView({ ...row, probe }) });
 }

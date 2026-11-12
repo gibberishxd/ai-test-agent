@@ -98,7 +98,7 @@ def db_engine():
 
     from worker.config import Settings
 
-    admin_url = Settings().sqlalchemy_url()
+    admin_url = Settings().admin_sqlalchemy_url()
     try:
         admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as conn:
@@ -139,3 +139,26 @@ def workspace(sessions):
         session.add(ws)
         session.commit()
         return ws
+
+
+@pytest.fixture(scope="session")
+def worker_engine(db_engine):
+    """The test database as ata_worker, the role production's worker uses (run 5, K3): not a
+    superuser, no row-level-security bypass. Dev-only password."""
+    from sqlalchemy import create_engine, text
+
+    password = os.environ.get("DB_WORKER_PASSWORD", "ata_worker_dev")
+    with db_engine.begin() as conn:
+        conn.execute(text(f"ALTER ROLE ata_worker WITH LOGIN PASSWORD '{password}'"))
+    url = db_engine.url.set(username="ata_worker", password=password)
+    engine = create_engine(url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def worker_sessions(sessions, worker_engine):
+    """Sessions as ata_worker on the emptied test database (fixtures still use `sessions`)."""
+    from worker.db.session import make_session_factory
+
+    return make_session_factory(worker_engine)

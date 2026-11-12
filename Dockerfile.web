@@ -1,7 +1,7 @@
 # The web app (Next.js) for production. Build from the repo root:
 #   docker build -f Dockerfile.web -t ata-web .
 # Stages: deps (npm ci) → build (next build, standalone) → runtime (node, non-root, no source,
-# no dev dependencies) and migrate (prisma migrate deploy, run once per release).
+# no dev dependencies) and migrate (prisma migrate deploy + role passwords, once per release).
 
 FROM node:24-bookworm-slim AS deps
 WORKDIR /repo
@@ -18,8 +18,10 @@ COPY apps/web apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build -w apps/web
 
+# Migrations, then the app roles' passwords (run 5, K3). Runs on the admin connection.
 FROM deps AS migrate
-CMD ["npx", "--workspace", "apps/web", "prisma", "migrate", "deploy"]
+COPY apps/web/scripts apps/web/scripts
+CMD ["sh", "-c", "npx --workspace apps/web prisma migrate deploy && node apps/web/scripts/db-roles.mjs"]
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0

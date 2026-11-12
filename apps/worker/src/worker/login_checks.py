@@ -8,11 +8,12 @@ Sign-in setups only work on our demo shops and on domains the workspace has veri
 that submits credentials to any site a workspace names would be an abuse tool.
 """
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from worker.config import Settings
 from worker.db.models import LoginSetup
+from worker.db.tenant import enter_tenant
 from worker.login import SignInResult, check_result, config_from_row, sign_in
 from worker.scan import guarded_browser, is_demo_target
 from worker.secret_box import server_key
@@ -29,25 +30,34 @@ def setup_allowed(session: Session, settings: Settings, workspace_id, url: str) 
 
 
 def process_login_check(sessions: sessionmaker[Session], settings: Settings, browser=None) -> bool:
-    """Run one requested check. Returns False when none is waiting."""
+    """Run one requested check. Returns False when none is waiting.
+
+    requested_login_checks (a database function) lists the waiting checks in every workspace;
+    the chosen one is locked and checked inside its own workspace (run 5, K3)."""
     with sessions() as session:
-        row = session.scalars(
-            select(LoginSetup)
-            .where(LoginSetup.check_requested_at.is_not(None))
-            .order_by(LoginSetup.check_requested_at)
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        ).first()
-        if row is None:
-            return False
-        try:
-            result = _check(session, settings, row, browser)
-        except Exception as error:  # a broken setup must not stop the worker
-            result = SignInResult(False, f"the check failed ({type(error).__name__})")
-        row.last_check = check_result(result)
-        row.check_requested_at = None
+        waiting = session.execute(
+            text("SELECT id, workspace_id FROM requested_login_checks(5)")
+        ).all()
         session.commit()
-        return True
+    for setup_id, workspace_id in waiting:
+        with sessions() as session:
+            enter_tenant(session, workspace_id)
+            row = session.scalars(
+                select(LoginSetup)
+                .where(LoginSetup.id == setup_id, LoginSetup.check_requested_at.is_not(None))
+                .with_for_update(skip_locked=True)
+            ).first()
+            if row is None:
+                continue  # another worker is checking it
+            try:
+                result = _check(session, settings, row, browser)
+            except Exception as error:  # a broken setup must not stop the worker
+                result = SignInResult(False, f"the check failed ({type(error).__name__})")
+            row.last_check = check_result(result)
+            row.check_requested_at = None
+            session.commit()
+            return True
+    return False
 
 
 def _check(session: Session, settings: Settings, row: LoginSetup, browser) -> SignInResult:

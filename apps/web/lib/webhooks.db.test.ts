@@ -1,7 +1,7 @@
 /** Run 4, J3: webhook endpoints against a real Postgres. */
 import { randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import { decryptSecret } from "@/lib/secret-box";
 import { createWebhook, deleteWebhook, listWebhooks } from "@/lib/webhooks";
 import { hasTestDb } from "../test/use-test-db";

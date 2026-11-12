@@ -89,6 +89,23 @@ export function leaderboard(rows: BenchmarkRow[]): BenchmarkRow[] {
   return latestPerProvider(rows).sort((a, b) => rank(b) - rank(a) || b.recall - a.recall);
 }
 
+/**
+ * The leaderboard as the database keeps it (materialized view model_leaderboard, refreshed by a
+ * trigger whenever a result is saved): one row per model, judge and reviewer, so a model with a
+ * reviewer tier is ranked apart from the same model alone. Ranked like `leaderboard`.
+ */
+export function leaderboardFromView(rows: BenchmarkRow[], latestIds: string[]): BenchmarkRow[] {
+  const keep = new Set(latestIds);
+  const rank = (row: BenchmarkRow) => row.aiRecall ?? -1;
+  return rows.filter((row) => keep.has(row.id)).sort((a, b) => rank(b) - rank(a) || b.recall - a.recall);
+}
+
+/** "provider/model" of the reviewer tier a result was measured with, or null. */
+export function reviewerLabel(row: BenchmarkRow): string | null {
+  const reviewer = (row.details as { reviewer?: unknown } | null)?.reviewer;
+  return typeof reviewer === "string" && reviewer ? reviewer : null;
+}
+
 export function perBug(row: BenchmarkRow): PerBug[] {
   return toPerBug((row.details as { per_bug?: StoredPerBug } | null)?.per_bug);
 }

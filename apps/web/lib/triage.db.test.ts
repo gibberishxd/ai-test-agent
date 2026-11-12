@@ -1,6 +1,6 @@
 /** Run 4, J4: triage and run comparison against a real Postgres. */
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import { modelPrecision, previousRun, runHistory, setTriage, triageFor } from "@/lib/triage";
 import { hasTestDb } from "../test/use-test-db";
 
@@ -68,5 +68,8 @@ describe.skipIf(!hasTestDb)("triage (database)", () => {
     expect(history.fixed).toEqual([{ title: "Old 404", severity: "low", pageUrl: SHOP }]);
     expect(history.triage.kept).toMatchObject({ state: "wont_fix" });
     expect(history.suppressed).toBe(1);
+    // From the database view target_bug_history (run 5): how long each finding has been around.
+    expect(history.seen.kept).toEqual({ runs: 2, since: new Date("2026-11-01").toISOString() });
+    expect(history.seen.fresh).toEqual({ runs: 1, since: new Date("2026-11-02").toISOString() });
   });
 });

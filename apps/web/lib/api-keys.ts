@@ -1,3 +1,4 @@
+import { apiKeyByHash } from "@/lib/system-db";
 /**
  * Workspace API keys for the public API (/api/v1), run 4, J3.
  *
@@ -12,7 +13,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { db } from "@/lib/db";
-import { tenantDb } from "@/lib/tenant-db";
+import { inTenant, tenantDb, workspaceOf, type TenantContext } from "@/lib/tenant-db";
 
 export const KEY_PREFIX = "ata_";
 const PREFIX_LENGTH = 12;
@@ -58,21 +59,24 @@ function toView(row: Row): ApiKeyView {
 }
 
 /** Returns the key itself once; afterwards only its view (name, prefix, dates) exists. */
-export async function createApiKey(workspaceId: string, userId: string | null, name: string) {
+export async function createApiKey(scope: string | TenantContext, userId: string | null, name: string) {
+  const workspaceId = workspaceOf(scope);
   const { key, prefix } = generateApiKey();
-  const row = await db.apiKey.create({
+  const row = await tenantDb({ workspaceId, userId }).apiKey.create({
     data: { workspaceId, createdById: userId, name: name.trim().slice(0, 80) || "API key", prefix, keyHash: hashApiKey(key) },
   });
   return { key, view: toView(row) };
 }
 
-export async function listApiKeys(workspaceId: string): Promise<ApiKeyView[]> {
+export async function listApiKeys(scope: string | TenantContext): Promise<ApiKeyView[]> {
+  const workspaceId = workspaceOf(scope);
   const rows = await tenantDb(workspaceId).apiKey.findMany({ where: { workspaceId }, orderBy: { createdAt: "desc" } });
   return rows.map(toView);
 }
 
-export async function revokeApiKey(workspaceId: string, id: string): Promise<boolean> {
-  const updated = await db.apiKey.updateMany({ where: { id, workspaceId, revokedAt: null }, data: { revokedAt: new Date() } });
+export async function revokeApiKey(scope: string | TenantContext, id: string): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  const updated = await tenantDb(scope).apiKey.updateMany({ where: { id, workspaceId, revokedAt: null }, data: { revokedAt: new Date() } });
   return updated.count > 0;
 }
 
@@ -80,26 +84,29 @@ export async function revokeApiKey(workspaceId: string, id: string): Promise<boo
 export async function authenticateApiKey(headers: Headers): Promise<ApiCaller | null> {
   const token = bearerToken(headers);
   if (!token || !token.startsWith(KEY_PREFIX)) return null;
-  const row = await db.apiKey.findUnique({ where: { keyHash: hashApiKey(token) } });
-  if (!row || row.revokedAt) return null;
+  // The hash is the credential: a database function finds its workspace (lib/system-db.ts).
+  const found = await apiKeyByHash(hashApiKey(token));
+  if (!found || found.revokedAt) return null;
+  const keys = tenantDb(found.workspaceId);
+  const row = await keys.apiKey.findUniqueOrThrow({ where: { id: found.id } });
   if (!row.lastUsedAt || Date.now() - row.lastUsedAt.getTime() > LAST_USED_EVERY_MS) {
-    await db.apiKey.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } });
+    await keys.apiKey.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } });
   }
   return { workspaceId: row.workspaceId, keyId: row.id };
 }
 
 /** Count this request in the key's current minute; refuse past `limit`. */
 export async function rateLimit(
-  keyId: string,
+  caller: ApiCaller,
   limit = REQUESTS_PER_MINUTE,
   now = new Date(),
 ): Promise<{ ok: true } | { ok: false; retryAfterS: number }> {
   const windowStart = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
-  const [{ count }] = await db.$queryRaw<{ count: number }[]>`
+  const [{ count }] = await inTenant(caller.workspaceId, (tx) => tx.$queryRaw<{ count: number }[]>`
     INSERT INTO api_rate_windows (api_key_id, window_start, count)
-    VALUES (${keyId}::uuid, ${windowStart}, 1)
+    VALUES (${caller.keyId}::uuid, ${windowStart}, 1)
     ON CONFLICT (api_key_id, window_start) DO UPDATE SET count = api_rate_windows.count + 1
-    RETURNING count`;
+    RETURNING count`);
   if (count <= limit) return { ok: true };
   return { ok: false, retryAfterS: Math.ceil((windowStart.getTime() + 60_000 - now.getTime()) / 1000) };
 }

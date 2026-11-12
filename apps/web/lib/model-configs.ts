@@ -6,7 +6,7 @@
  * "Test connection" result, because the new key has to pass it again.
  */
 import { db } from "@/lib/db";
-import { tenantDb } from "@/lib/tenant-db";
+import { inTenant, tenantDb, workspaceOf, type TenantContext } from "@/lib/tenant-db";
 import type { ProbeResult } from "@/lib/model-probe";
 import { encryptSecret, lastFour } from "@/lib/secret-box";
 
@@ -113,16 +113,18 @@ export function toView(row: Row): ModelConfigView {
   };
 }
 
-export async function listModelConfigs(workspaceId: string): Promise<ModelConfigView[]> {
+export async function listModelConfigs(scope: string | TenantContext): Promise<ModelConfigView[]> {
+  const workspaceId = workspaceOf(scope);
   const rows = await tenantDb(workspaceId).modelConfig.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" } });
   return rows.map(toView);
 }
 
-export async function createModelConfig(workspaceId: string, body: Record<string, unknown>, serverKey: Buffer) {
+export async function createModelConfig(scope: string | TenantContext, body: Record<string, unknown>, serverKey: Buffer) {
+  const workspaceId = workspaceOf(scope);
   const parsed = parseModelInput(body);
   if (!parsed.ok) return parsed;
   const { apiKey, ...fields } = parsed.value;
-  const row = await db.modelConfig.create({
+  const row = await tenantDb(scope).modelConfig.create({
     data: {
       workspaceId,
       ...fields,
@@ -133,25 +135,31 @@ export async function createModelConfig(workspaceId: string, body: Record<string
   return { ok: true as const, model: toView(row) };
 }
 
-export async function replaceModelKey(workspaceId: string, id: string, apiKey: string, serverKey: Buffer) {
+export async function replaceModelKey(scope: string | TenantContext, id: string, apiKey: string, serverKey: Buffer) {
+  const workspaceId = workspaceOf(scope);
   const key = apiKey.trim();
   if (!key) return null;
-  const updated = await db.modelConfig.updateMany({
-    where: { id, workspaceId },
-    data: { apiKeyCiphertext: encryptSecret(key, workspaceId, serverKey), apiKeyLast4: lastFour(key), probe: undefined },
+  const row = await inTenant(scope, async (tx) => {
+    const updated = await tx.modelConfig.updateMany({
+      where: { id, workspaceId },
+      data: { apiKeyCiphertext: encryptSecret(key, workspaceId, serverKey), apiKeyLast4: lastFour(key), probe: undefined },
+    });
+    if (updated.count === 0) return null;
+    // Prisma can't set JSON to SQL NULL in updateMany; clear the old test result separately.
+    await tx.$executeRaw`UPDATE model_configs SET probe = NULL WHERE id = ${id}::uuid`;
+    return tx.modelConfig.findFirstOrThrow({ where: { id, workspaceId } });
   });
-  if (updated.count === 0) return null;
-  // Prisma can't set JSON to SQL NULL in updateMany; clear the old test result separately.
-  await db.$executeRaw`UPDATE model_configs SET probe = NULL WHERE id = ${id}::uuid AND workspace_id = ${workspaceId}::uuid`;
-  return toView(await db.modelConfig.findFirstOrThrow({ where: { id, workspaceId } }));
+  return row ? toView(row) : null;
 }
 
-export async function deleteModelConfig(workspaceId: string, id: string): Promise<boolean> {
-  return (await db.modelConfig.deleteMany({ where: { id, workspaceId } })).count > 0;
+export async function deleteModelConfig(scope: string | TenantContext, id: string): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  return (await tenantDb(scope).modelConfig.deleteMany({ where: { id, workspaceId } })).count > 0;
 }
 
-export async function setDefaultModel(workspaceId: string, id: string): Promise<boolean> {
-  return db.$transaction(async (tx) => {
+export async function setDefaultModel(scope: string | TenantContext, id: string): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  return inTenant(scope, async (tx) => {
     const found = await tx.modelConfig.count({ where: { id, workspaceId } });
     if (found === 0) return false;
     await tx.modelConfig.updateMany({ where: { workspaceId }, data: { isDefault: false } });
@@ -160,14 +168,16 @@ export async function setDefaultModel(workspaceId: string, id: string): Promise<
   });
 }
 
-export async function storeProbe(workspaceId: string, id: string, probe: ProbeResult): Promise<boolean> {
-  const updated = await db.modelConfig.updateMany({ where: { id, workspaceId }, data: { probe } });
+export async function storeProbe(scope: string | TenantContext, id: string, probe: ProbeResult): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  const updated = await tenantDb(scope).modelConfig.updateMany({ where: { id, workspaceId }, data: { probe } });
   return updated.count > 0;
 }
 
 /** For starting a run: the model, if it is this workspace's and passed Test connection. */
-export async function usableModel(workspaceId: string, id: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const row = await db.modelConfig.findFirst({ where: { id, workspaceId } });
+export async function usableModel(scope: string | TenantContext, id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const workspaceId = workspaceOf(scope);
+  const row = await tenantDb(scope).modelConfig.findFirst({ where: { id, workspaceId } });
   if (!row) return { ok: false, error: "Choose one of your workspace's models." };
   const probe = row.probe as ProbeResult | null;
   if (!probe) return { ok: false, error: `“${row.label}” hasn't passed Test connection yet (Settings → Models).` };

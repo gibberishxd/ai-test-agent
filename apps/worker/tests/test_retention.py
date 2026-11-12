@@ -58,12 +58,8 @@ def test_old_runs_lose_screenshots_and_steps_but_keep_findings(sessions, tmp_pat
         for run in (old, recent):
             storage.save(f"{run.id}/page-001.png", b"png")
 
-        assert apply_retention(session, storage, now=NOW) == {
-            "runs": 1,
-            "files": 1,
-            "steps": 1,
-            "rate_windows": 0,
-        }
+        # The database purges (apply_retention, run 5); the worker deletes the files.
+        assert apply_retention(session, storage, now=NOW) == {"runs": 1, "files": 1}
         session.refresh(old)
         assert old.purged_at is not None
         assert session.query(Step).filter_by(run_id=old.id).count() == 0
@@ -88,4 +84,5 @@ def test_running_runs_and_old_rate_windows(sessions, workspace, tmp_path):
         )
         session.commit()
         result = apply_retention(session, LocalStorage(tmp_path), now=NOW)
-        assert result["runs"] == 0 and result["rate_windows"] == 1
+        assert result["runs"] == 0
+        assert session.query(ApiRateWindow).count() == 1  # the old window is gone

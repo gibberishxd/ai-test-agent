@@ -1,7 +1,7 @@
 /** Run 4, J5: members, roles and invitation links against a real Postgres. */
 import { beforeEach, describe, expect, it } from "vitest";
 import { createUserWithWorkspace } from "@/lib/auth-adapter";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import {
   acceptInvitation,
   changeRole,

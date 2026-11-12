@@ -151,6 +151,7 @@ export function RunView({
                 filesToken={filesToken}
                 change={history?.previousRunId ? history.change[bug.id] : undefined}
                 triage={bug.fingerprint ? history?.triage[bug.fingerprint] : undefined}
+                seen={bug.fingerprint ? history?.seen?.[bug.fingerprint] : undefined}
                 canTriage={canTriage && !readOnly && Boolean(bug.fingerprint)}
               />
             ))}

@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createUserWithWorkspace } from "@/lib/auth-adapter";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import type { VerifyDeps } from "@/lib/domains";
 import { getRun, listRuns, requestStop, startRun } from "@/lib/runs";
 import { addDomain, checkDomain } from "@/lib/settings-data";

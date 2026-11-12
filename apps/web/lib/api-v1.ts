@@ -174,7 +174,7 @@ export async function withApiKey(request: Request, handle: (caller: ApiCaller) =
       { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
     );
   }
-  const limited = await rateLimit(caller.keyId);
+  const limited = await rateLimit(caller);
   if (!limited.ok) {
     return Response.json(
       { error: "Too many requests for this API key. Slow down and retry." },

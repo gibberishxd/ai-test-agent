@@ -9,10 +9,10 @@ how often each model is wrong on real sites.
 
 from urllib.parse import urlsplit
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from worker.db.models import Bug, FindingTriage, Run
+from worker.db.models import Bug, Run
 from worker.fingerprint import fingerprint
 
 
@@ -21,20 +21,14 @@ def origin_of(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def apply_triage(session: Session, run: Run) -> int:
-    """Suppress the run's findings the workspace triaged as false positives; returns how many."""
-    false_positives = select(FindingTriage.fingerprint).where(
-        FindingTriage.workspace_id == run.workspace_id,
-        FindingTriage.origin == origin_of(run.target_url),
-        FindingTriage.state == "false_positive",
+def suppressed_count(session: Session, run: Run) -> int:
+    """How many of the run's findings are suppressed: the workspace marked their fingerprint a
+    false positive on this target earlier. The database does the suppressing when a finding is
+    stored (trigger bugs_carry_triage, run 5); this only counts for the run's summary."""
+    session.flush()
+    return session.scalar(
+        select(func.count()).select_from(Bug).where(Bug.run_id == run.id, Bug.suppressed)
     )
-    result = session.execute(
-        update(Bug)
-        .where(Bug.run_id == run.id, Bug.fingerprint.in_(false_positives))
-        .values(suppressed=True)
-    )
-    session.commit()
-    return result.rowcount
 
 
 def backfill_fingerprints(session: Session, batch: int = 500) -> int:

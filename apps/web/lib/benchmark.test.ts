@@ -5,7 +5,9 @@ import {
   holdout,
   judgeLabel,
   leaderboard,
+  leaderboardFromView,
   latestPerProvider,
+  reviewerLabel,
   perBug,
   percent,
   percentOrDash,
@@ -128,6 +130,21 @@ describe("leaderboard", () => {
     const old = row({ id: "old", provider: "ollama", model: "qwen", aiRecall: null, recall: 0.33 });
     const superseded = row({ id: "older-strong", provider: "claude", model: "sonnet", aiRecall: 0.9, createdAt: new Date("2026-11-01") });
     expect(leaderboard([weak, old, superseded, strong, tie]).map((r) => r.id)).toEqual(["strong", "tie", "weak", "old"]);
+  });
+});
+
+describe("leaderboard from the materialized view (run 5, K3)", () => {
+  it("keeps the rows the view chose (one per model, judge and reviewer), best first", () => {
+    const alone = row({ id: "alone", provider: "ollama", model: "gemma", aiRecall: 0.08, recall: 0.3 });
+    const tiered = row({ id: "tiered", provider: "ollama", model: "gemma", aiRecall: 0.2, recall: 0.4, details: { reviewer: "ollama/qwen3:14b" } });
+    const stale = row({ id: "stale", provider: "ollama", model: "gemma", aiRecall: 0.5 });
+    const board = leaderboardFromView([alone, tiered, stale], ["alone", "tiered"]);
+    expect(board.map((r) => r.id)).toEqual(["tiered", "alone"]);
+  });
+
+  it("names the reviewer of a tiered setup", () => {
+    expect(reviewerLabel(row({ details: { reviewer: "ollama/qwen3:14b" } }))).toBe("ollama/qwen3:14b");
+    expect(reviewerLabel(row({ details: {} }))).toBeNull();
   });
 });
 

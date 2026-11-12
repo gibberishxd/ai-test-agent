@@ -27,7 +27,7 @@ from worker.runner import ExecuteFn
 from worker.safety.network import BlockedError
 from worker.scan import guarded_browser, guarded_context, is_demo_target, passive_scan
 from worker.storage import Storage
-from worker.triage import apply_triage
+from worker.triage import suppressed_count
 from worker.urls import normalize
 from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
 
@@ -97,7 +97,7 @@ def run_passive(
     run.summary = {
         **summarize(report.pages, all_bugs),
         "verification": verification,
-        "suppressed": apply_triage(session, run),  # triaged as false positives earlier
+        "suppressed": suppressed_count(session, run),  # triaged as false positives earlier
     }
     session.commit()
 
@@ -294,7 +294,7 @@ def run_interactive(
         "stop_reason": result.stop_reason,
         "agent_summary": result.summary,
         "verification": verification,
-        "suppressed": apply_triage(session, run),  # triaged as false positives earlier
+        "suppressed": suppressed_count(session, run),  # triaged as false positives earlier
         "expectation_checks": {"dismissed": result.dismissed, "ignored": result.ignored},
     }
     session.commit()

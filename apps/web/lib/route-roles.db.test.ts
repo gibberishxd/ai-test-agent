@@ -4,7 +4,7 @@
  * Only `currentUser` is stubbed: the role is read from the database like in production.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import { can, ROLES, type Action, type Role } from "@/lib/roles";
 import { hasTestDb } from "../test/use-test-db";
 

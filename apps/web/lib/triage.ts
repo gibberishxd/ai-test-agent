@@ -10,6 +10,7 @@
  *   runs; the worker suppresses false positives there (and they are counted per model).
  */
 import { db } from "@/lib/db";
+import { inTenant, tenantDb, workspaceOf, type TenantContext } from "@/lib/tenant-db";
 
 export const TRIAGE_STATES = ["confirmed", "false_positive", "wont_fix"] as const;
 export type TriageState = (typeof TRIAGE_STATES)[number];
@@ -50,8 +51,9 @@ export function originOf(url: string): string {
 }
 
 /** The target's previous finished run in this workspace (null for its first run). */
-export async function previousRun(workspaceId: string, run: { id: string; targetUrl: string; createdAt: Date }) {
-  return db.run.findFirst({
+export async function previousRun(scope: string | TenantContext, run: { id: string; targetUrl: string; createdAt: Date }) {
+  const workspaceId = workspaceOf(scope);
+  return tenantDb(scope).run.findFirst({
     where: { workspaceId, targetUrl: run.targetUrl, status: "done", createdAt: { lt: run.createdAt }, NOT: { id: run.id } },
     orderBy: { createdAt: "desc" },
     include: { bugs: true },
@@ -61,30 +63,29 @@ export async function previousRun(workspaceId: string, run: { id: string; target
 export type TriageView = { state: TriageState; comment: string | null; updatedAt: string };
 
 /** The workspace's decisions for these fingerprints on this site. */
-export async function triageFor(workspaceId: string, origin: string, fingerprints: string[]): Promise<Record<string, TriageView>> {
+export async function triageFor(scope: string | TenantContext, origin: string, fingerprints: string[]): Promise<Record<string, TriageView>> {
+  const workspaceId = workspaceOf(scope);
   if (fingerprints.length === 0) return {};
-  const rows = await db.findingTriage.findMany({ where: { workspaceId, origin, fingerprint: { in: fingerprints } } });
+  const rows = await tenantDb(scope).findingTriage.findMany({ where: { workspaceId, origin, fingerprint: { in: fingerprints } } });
   return Object.fromEntries(
     rows.map((row) => [row.fingerprint, { state: row.state as TriageState, comment: row.comment, updatedAt: row.updatedAt.toISOString() }]),
   );
 }
 
 /** Record a decision on a finding (by its fingerprint) for this workspace and site. */
-export async function setTriage(workspaceId: string, userId: string | null, bugId: string, body: Record<string, unknown>) {
+export async function setTriage(scope: string | TenantContext, userId: string | null, bugId: string, body: Record<string, unknown>) {
+  const workspaceId = workspaceOf(scope);
   const parsed = parseTriageInput(body);
   if (!parsed.ok) return { ok: false as const, status: 400, error: parsed.error };
-  const bug = await db.bug.findFirst({ where: { id: bugId, run: { workspaceId } }, include: { run: true } });
+  const bug = await tenantDb({ workspaceId, userId }).bug.findFirst({ where: { id: bugId, run: { workspaceId } }, include: { run: true } });
   if (!bug) return { ok: false as const, status: 404, error: "Finding not found." };
   if (!bug.fingerprint) return { ok: false as const, status: 409, error: "This finding is from before fingerprints and can't be triaged." };
   const origin = originOf(bug.run.targetUrl);
   const { state, comment } = parsed.value;
-  const row = await db.findingTriage.upsert({
+  const row = await tenantDb({ workspaceId, userId }).findingTriage.upsert({
     where: { workspaceId_origin_fingerprint: { workspaceId, origin, fingerprint: bug.fingerprint } },
     create: { workspaceId, origin, fingerprint: bug.fingerprint, state, comment, title: bug.title, updatedById: userId },
     update: { state, comment, title: bug.title, updatedById: userId },
-  });
-  await db.auditLog.create({
-    data: { workspaceId, userId, action: "triage.changed", runId: bug.runId, metadata: { fingerprint: bug.fingerprint, state, title: bug.title } },
   });
   return { ok: true as const, triage: { state: row.state as TriageState, comment: row.comment, updatedAt: row.updatedAt.toISOString() } };
 }
@@ -95,8 +96,9 @@ export type ModelPrecision = { provider: string; model: string; reported: number
  * How often each model was wrong on this workspace's own sites: agent findings it reported, and how
  * many of those the workspace marked false positive (including later suppressed repeats).
  */
-export async function modelPrecision(workspaceId: string): Promise<ModelPrecision[]> {
-  const rows = await db.$queryRaw<{ provider: string; model: string; reported: bigint; false_positives: bigint }[]>`
+export async function modelPrecision(scope: string | TenantContext): Promise<ModelPrecision[]> {
+  const workspaceId = workspaceOf(scope);
+  const rows = await inTenant(scope, (tx) => tx.$queryRaw<{ provider: string; model: string; reported: bigint; false_positives: bigint }[]>`
     SELECT r.provider, r.model,
            count(*) AS reported,
            count(*) FILTER (WHERE t.state = 'false_positive') AS false_positives
@@ -104,11 +106,11 @@ export async function modelPrecision(workspaceId: string): Promise<ModelPrecisio
     JOIN runs r ON r.id = b.run_id
     LEFT JOIN finding_triage t
       ON t.workspace_id = r.workspace_id AND t.fingerprint = b.fingerprint
-     AND t.origin = substring(r.target_url from '^[a-z]+://[^/]+')
+     AND t.origin = url_origin(r.target_url)
     WHERE r.workspace_id = ${workspaceId}::uuid AND b.source = 'agent' AND b.status <> 'dismissed'
       AND r.provider IS NOT NULL
     GROUP BY r.provider, r.model
-    ORDER BY r.provider, r.model`;
+    ORDER BY r.provider, r.model`);
   return rows.map((row) => {
     const reported = Number(row.reported);
     const falsePositives = Number(row.false_positives);
@@ -117,6 +119,8 @@ export async function modelPrecision(workspaceId: string): Promise<ModelPrecisio
 }
 
 export type RunHistory = {
+  /** Per fingerprint: in how many runs of this target the finding appeared, and since when. */
+  seen: Record<string, { runs: number; since: string }>;
   previousRunId: string | null;
   /** bug id → whether the previous run of the target reported it too */
   change: Record<string, "new" | "still_present">;
@@ -143,5 +147,18 @@ export async function runHistory(
     fixed: run.status === "done" ? comparison.fixed.map((b) => ({ title: b.title, severity: b.severity, pageUrl: b.pageUrl })) : [],
     triage: await triageFor(workspaceId, originOf(run.targetUrl), fingerprints),
     suppressed: run.bugs.filter((b) => b.suppressed).length,
+    seen: await seenSince(workspaceId, run.targetUrl, fingerprints),
   };
+}
+
+/**
+ * How many runs of this target have had each finding, and since when: the database view
+ * target_bug_history (run 5), read inside the workspace so row-level security applies.
+ */
+async function seenSince(workspaceId: string, targetUrl: string, fingerprints: string[]): Promise<RunHistory["seen"]> {
+  if (fingerprints.length === 0) return {};
+  const rows = await inTenant(workspaceId, (tx) => tx.$queryRaw<{ fingerprint: string; runs_seen: number; first_seen_at: Date }[]>`
+    SELECT fingerprint, runs_seen, first_seen_at FROM target_bug_history
+     WHERE origin = url_origin(${targetUrl}) AND fingerprint = ANY(${fingerprints})`);
+  return Object.fromEntries(rows.map((r) => [r.fingerprint, { runs: Number(r.runs_seen), since: new Date(r.first_seen_at).toISOString() }]));
 }

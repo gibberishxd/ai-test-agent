@@ -10,7 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { isIP } from "node:net";
 import { db } from "@/lib/db";
-import { tenantDb } from "@/lib/tenant-db";
+import { inTenant, tenantDb, workspaceOf, type TenantContext } from "@/lib/tenant-db";
 import { encryptSecret } from "@/lib/secret-box";
 
 export type DeliveryView = {
@@ -80,7 +80,8 @@ function toView(row: Row): WebhookView {
   };
 }
 
-export async function listWebhooks(workspaceId: string): Promise<WebhookView[]> {
+export async function listWebhooks(scope: string | TenantContext): Promise<WebhookView[]> {
+  const workspaceId = workspaceOf(scope);
   const rows = await tenantDb(workspaceId).webhookEndpoint.findMany({
     where: { workspaceId },
     orderBy: { createdAt: "asc" },
@@ -90,21 +91,24 @@ export async function listWebhooks(workspaceId: string): Promise<WebhookView[]> 
 }
 
 /** Returns the signing secret once. */
-export async function createWebhook(workspaceId: string, url: string, serverKey: Buffer) {
+export async function createWebhook(scope: string | TenantContext, url: string, serverKey: Buffer) {
+  const workspaceId = workspaceOf(scope);
   const trimmed = url.trim();
   const error = webhookUrlError(trimmed);
   if (error) return { ok: false as const, error };
   const secret = generateWebhookSecret();
-  const row = await db.webhookEndpoint.create({
+  const row = await tenantDb(scope).webhookEndpoint.create({
     data: { workspaceId, url: trimmed, secretCiphertext: encryptSecret(secret, workspaceId, serverKey) },
   });
   return { ok: true as const, secret, webhook: toView(row) };
 }
 
-export async function setWebhookEnabled(workspaceId: string, id: string, enabled: boolean): Promise<boolean> {
-  return (await db.webhookEndpoint.updateMany({ where: { id, workspaceId }, data: { enabled } })).count > 0;
+export async function setWebhookEnabled(scope: string | TenantContext, id: string, enabled: boolean): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  return (await tenantDb(scope).webhookEndpoint.updateMany({ where: { id, workspaceId }, data: { enabled } })).count > 0;
 }
 
-export async function deleteWebhook(workspaceId: string, id: string): Promise<boolean> {
-  return (await db.webhookEndpoint.deleteMany({ where: { id, workspaceId } })).count > 0;
+export async function deleteWebhook(scope: string | TenantContext, id: string): Promise<boolean> {
+  const workspaceId = workspaceOf(scope);
+  return (await tenantDb(scope).webhookEndpoint.deleteMany({ where: { id, workspaceId } })).count > 0;
 }

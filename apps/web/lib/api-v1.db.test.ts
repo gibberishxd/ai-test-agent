@@ -4,7 +4,7 @@ import { POST as startRunRoute } from "@/app/api/v1/runs/route";
 import { GET as getRunRoute } from "@/app/api/v1/runs/[id]/route";
 import { GET as getReportRoute } from "@/app/api/v1/runs/[id]/report/route";
 import { createApiKey, revokeApiKey } from "@/lib/api-keys";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import { hasTestDb } from "../test/use-test-db";
 
 const DEMO = "http://localhost:5173";

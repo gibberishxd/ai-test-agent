@@ -14,7 +14,8 @@ import {
   judgeLabel,
   latestPerProvider,
   validResults,
-  leaderboard,
+  leaderboardFromView,
+  reviewerLabel,
   perBug,
   percent,
   percentOrDash,
@@ -46,7 +47,8 @@ export default async function BenchmarkPage() {
   }
 
   const latest = latestPerProvider(rows);
-  const board = leaderboard(rows);
+  const fromView = await db.$queryRaw<{ id: string }[]>`SELECT latest_result_id AS id FROM model_leaderboard`;
+  const board = leaderboardFromView(rows, fromView.map((r) => r.id));
   const newest = rows[0];
   const bugs = perBug(newest);
   const holdoutBugs = holdoutPerBug(newest);
@@ -144,7 +146,10 @@ export default async function BenchmarkPage() {
                 <Tile label="Cost / run" value={formatCost(row.avgCostUsd)} hint={`${Math.round(row.avgDurationS)} s avg`} />
               </dl>
               <VerificationSummary funnel={verification(row)} />
-              <p className="text-xs text-muted-foreground">Judge: {judgeLabel(row)}</p>
+              <p className="text-xs text-muted-foreground">
+                Judge: {judgeLabel(row)}
+                {reviewerLabel(row) && <> · Reviewer: {reviewerLabel(row)}</>}
+              </p>
             </div>
           ))}
         </div>
@@ -227,6 +232,7 @@ export default async function BenchmarkPage() {
                   <TableCell className="whitespace-nowrap">{formatDate(row.createdAt)}</TableCell>
                   <TableCell>
                     {row.provider} · {row.model}
+                    {reviewerLabel(row) && <span className="block text-xs text-muted-foreground">+ reviewer {reviewerLabel(row)}</span>}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{commitLabel(row)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>

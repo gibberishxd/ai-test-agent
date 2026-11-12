@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { evidenceLines, toGitHubIssue, toJira } from "@/lib/export";
 import { fileUrl } from "@/lib/file-url";
+import { formatDate } from "@/lib/format";
 import type { BugView } from "@/lib/serialize";
 import type { TriageView } from "@/lib/triage";
 
@@ -21,11 +22,13 @@ type Props = {
   change?: "new" | "still_present";
   triage?: TriageView;
   canTriage?: boolean;
+  /** In how many runs of this target the finding appeared, and since when (run 5). */
+  seen?: { runs: number; since: string };
 };
 
 const TRIAGE_LABELS = { confirmed: "Confirmed", false_positive: "False positive", wont_fix: "Won't fix" } as const;
 
-export function BugCard({ bug, runUrl, targetUrl, filesToken = null, change, triage, canTriage = false }: Props) {
+export function BugCard({ bug, runUrl, targetUrl, filesToken = null, change, triage, canTriage = false, seen }: Props) {
   const evidence = evidenceLines(bug.evidence);
   const replay = typeof bug.evidence.replay === "string" ? bug.evidence.replay : null;
   const context = { runUrl, targetUrl };
@@ -53,6 +56,7 @@ export function BugCard({ bug, runUrl, targetUrl, filesToken = null, change, tri
           {change === "still_present" && (
             <Badge variant="outline" className="gap-1">
               <History className="size-3" /> Still present
+              {seen && seen.runs > 1 && <span className="text-muted-foreground">· {seen.runs} runs since {formatDate(new Date(seen.since))}</span>}
             </Badge>
           )}
           {triage && <Badge variant="outline">{TRIAGE_LABELS[triage.state]}</Badge>}

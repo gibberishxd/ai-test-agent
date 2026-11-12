@@ -1,4 +1,3 @@
-import { db } from "@/lib/db";
 import { listLoginSetups, saveLoginSetup } from "@/lib/login-setups";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
 import { authorize, currentContext } from "@/lib/workspace";
@@ -23,15 +22,7 @@ export async function POST(request: Request) {
     if (error instanceof SecretBoxError) return Response.json({ error: error.message }, { status: 500 });
     throw error;
   }
-  const result = await saveLoginSetup(context.workspaceId, body, key);
+  const result = await saveLoginSetup(context, body, key);
   if (!result.ok) return Response.json({ errors: result.errors }, { status: 400 });
-  await db.auditLog.create({
-    data: {
-      workspaceId: context.workspaceId,
-      userId: context.userId,
-      action: "login_setup.saved",
-      metadata: { origin: result.setup.origin, kind: result.setup.kind },
-    },
-  });
   return Response.json({ setup: result.setup }, { status: 201 });
 }

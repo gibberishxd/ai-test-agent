@@ -1,4 +1,3 @@
-import { db } from "@/lib/db";
 import { SecretBoxError, serverKey } from "@/lib/secret-box";
 import { createWebhook, listWebhooks } from "@/lib/webhooks";
 import { authorize, currentContext } from "@/lib/workspace";
@@ -22,10 +21,7 @@ export async function POST(request: Request) {
     if (error instanceof SecretBoxError) return Response.json({ error: error.message }, { status: 500 });
     throw error;
   }
-  const created = await createWebhook(context.workspaceId, typeof body.url === "string" ? body.url : "", key);
+  const created = await createWebhook(context, typeof body.url === "string" ? body.url : "", key);
   if (!created.ok) return Response.json({ errors: { url: created.error } }, { status: 400 });
-  await db.auditLog.create({
-    data: { workspaceId: context.workspaceId, userId: context.userId, action: "webhook.created", metadata: { url: created.webhook.url } },
-  });
   return Response.json({ secret: created.secret, webhook: created.webhook }, { status: 201, headers: { "Cache-Control": "no-store" } });
 }

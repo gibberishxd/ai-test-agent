@@ -2,7 +2,7 @@
 fingerprint triaged as a false positive is suppressed in the target's later runs (and counted)."""
 
 from worker.db.models import Bug, FindingTriage, Run, Workspace
-from worker.triage import apply_triage
+from worker.triage import suppressed_count
 from worker.webhooks import run_payload
 
 URL = "https://shop.test/"
@@ -59,7 +59,7 @@ def test_a_false_positive_is_suppressed_in_later_runs_of_the_target_and_not_coun
         later = add_run(session, workspace.id)
         same = add_bug(session, later)
         other = add_bug(session, later, page_url=f"{URL}checkout")  # same message, other page
-        assert apply_triage(session, later) == 1
+        assert suppressed_count(session, later) == 1
         session.refresh(same)
         session.refresh(other)
         assert same.suppressed and not other.suppressed
@@ -93,7 +93,7 @@ def test_triage_stays_in_its_workspace_and_its_site(sessions, workspace):
         session.commit()
         later = add_run(session, workspace.id)
         add_bug(session, later)
-        assert apply_triage(session, later) == 0
+        assert suppressed_count(session, later) == 0
 
 
 def test_won_t_fix_and_confirmed_are_not_suppressed(sessions, workspace):
@@ -111,7 +111,7 @@ def test_won_t_fix_and_confirmed_are_not_suppressed(sessions, workspace):
         session.commit()
         later = add_run(session, workspace.id)
         add_bug(session, later)
-        assert apply_triage(session, later) == 0
+        assert suppressed_count(session, later) == 0
 
 
 def test_old_findings_get_their_fingerprint_once(sessions, workspace):

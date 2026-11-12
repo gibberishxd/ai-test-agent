@@ -152,12 +152,12 @@ def request_check(sessions, workspace, site_url, password=PASSWORD):
 
 
 def test_test_sign_in_stores_ok_or_the_safe_reason(
-    sessions, workspace, settings, site_url, browser
+    sessions, worker_sessions, workspace, settings, site_url, browser
 ):
     from worker.login_checks import process_login_check
 
     good = request_check(sessions, workspace, site_url)
-    assert process_login_check(sessions, settings, browser) is True
+    assert process_login_check(worker_sessions, settings, browser) is True
     with sessions() as session:
         row = session.get(LoginSetup, good)
         assert row.check_requested_at is None and row.last_check["ok"] is True
@@ -165,16 +165,16 @@ def test_test_sign_in_stores_ok_or_the_safe_reason(
         session.commit()
 
     bad = request_check(sessions, workspace, site_url, password="wrong-Pass-123")
-    assert process_login_check(sessions, settings, browser) is True
+    assert process_login_check(worker_sessions, settings, browser) is True
     with sessions() as session:
         check = session.get(LoginSetup, bad).last_check
     assert check["ok"] is False and "Wrong email or password." in check["detail"]
     assert "wrong-Pass-123" not in json.dumps(check) and USERNAME not in json.dumps(check)
-    assert process_login_check(sessions, settings, browser) is False  # nothing left to do
+    assert process_login_check(worker_sessions, settings, browser) is False  # nothing left to do
 
 
 def test_sign_in_setups_only_work_on_the_demo_shops_and_verified_domains(
-    sessions, workspace, site_url, tmp_path, browser
+    sessions, worker_sessions, workspace, site_url, tmp_path, browser
 ):
     # A worker that submits credentials to any site a workspace names would be an abuse tool.
     from worker.login_checks import process_login_check
@@ -188,7 +188,7 @@ def test_sign_in_setups_only_work_on_the_demo_shops_and_verified_domains(
         model_keys_secret=base64.b64encode(KEY).decode(),
     )
     setup_id = request_check(sessions, workspace, site_url)
-    process_login_check(sessions, not_demo, browser)
+    process_login_check(worker_sessions, not_demo, browser)
     with sessions() as session:
         check = session.get(LoginSetup, setup_id).last_check
     assert check["ok"] is False and "verify" in check["detail"]

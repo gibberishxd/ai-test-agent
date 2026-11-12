@@ -118,12 +118,15 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "backfill-fingerprints":
-        with make_session_factory(make_engine(settings))() as session:
+        # Maintenance across every workspace: the admin connection, run by an operator.
+        with make_session_factory(make_engine(settings, admin=True))() as session:
             log.info("fingerprinted %d older finding(s)", backfill_fingerprints(session))
         return
 
     llm = make_client(settings)
-    sessions = make_session_factory(make_engine(settings))
+    # The benchmark queues and scores runs in its own workspace and reads them all back: an
+    # operator's command on the admin connection. The worker loop uses its own role.
+    sessions = make_session_factory(make_engine(settings, admin=args.command == "bench"))
     reviewer = make_reviewer(settings)
     execute = make_execute(settings, make_storage(settings), reviewer=reviewer)
     with sessions() as session:
@@ -192,7 +195,7 @@ def reverify(settings: Settings, run_prefix: str, use_judge: bool) -> None:
 
     from worker.reverify import reverify_run
 
-    sessions = make_session_factory(make_engine(settings))
+    sessions = make_session_factory(make_engine(settings, admin=True))  # an operator's tool
     judge = make_judge(settings, make_client(settings)) if use_judge else None
     with sessions() as session:
         [run_id] = session.query(Run.id).filter(cast(Run.id, String).like(f"{run_prefix}%")).all()
