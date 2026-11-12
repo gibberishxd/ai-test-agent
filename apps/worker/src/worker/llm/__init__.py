@@ -15,12 +15,14 @@ from worker.llm.base import (
     Usage,
 )
 from worker.llm.fake import FakeClient
+from worker.llm.text_only import TextOnlyClient
 
 __all__ = [
     "Decision",
     "FakeClient",
     "LLMClient",
     "ModelTimeout",
+    "TextOnlyClient",
     "TextResult",
     "ToolCall",
     "ToolSpec",
@@ -124,4 +126,4 @@ def make_reviewer(settings: Settings) -> LLMClient | None:
     client = make_client(settings.model_copy(update=pinned))
     if settings.reviewer_model:
         client.agent_model = settings.reviewer_model  # claude-cli takes no model setting
-    return client
+    return client if settings.reviewer_vision else TextOnlyClient(client)

@@ -360,3 +360,28 @@ def test_reviewer_works_with_every_provider(provider, extra):
     )
     reviewer = make_reviewer(settings)
     assert (reviewer.provider, reviewer.agent_model) == (provider, "big-model")
+
+
+def test_a_text_only_reviewer_gets_text_instead_of_a_screenshot():
+    """qwen3:14b and other text models refuse images (Ollama answers 400). REVIEWER_VISION=false
+    sends the same prompt as text, saying there is no screenshot."""
+    from worker.llm import TextOnlyClient
+
+    inner = FakeClient(texts=['{"bug": false, "reason": "r"}'])
+    client = TextOnlyClient(inner)
+    result = client.review_screenshot("Is this a bug?", b"\x89PNG", system="sys")
+    assert result.text.startswith("{")
+    [call] = inner.calls
+    assert call["method"] == "complete" and call["cheap"] is False
+    assert "Is this a bug?" in call["prompt"] and "no screenshot" in call["prompt"].lower()
+    assert (client.provider, client.agent_model) == (inner.provider, inner.agent_model)
+
+
+def test_reviewer_vision_off_wraps_the_reviewer():
+    from worker.llm import TextOnlyClient
+
+    settings = Settings(
+        _env_file=None, llm_provider="ollama", reviewer_model="qwen3:14b", reviewer_vision=False
+    )
+    reviewer = make_reviewer(settings)
+    assert isinstance(reviewer, TextOnlyClient) and reviewer.agent_model == "qwen3:14b"

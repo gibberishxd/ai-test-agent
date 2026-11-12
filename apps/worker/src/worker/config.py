@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     # reviewer; only REVIEWER_MODEL = the explorer's provider with that model.
     reviewer_provider: str = ""
     reviewer_model: str = ""
+    # False for a reviewer model that can't read images (qwen3:14b): it gets text only.
+    reviewer_vision: bool = True
 
     # Run budgets, enforced by the worker
     max_steps: int = 40
