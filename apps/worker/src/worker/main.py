@@ -164,6 +164,10 @@ def main(argv: list[str] | None = None) -> None:
         log.info("reviewer tier: provider=%s model=%s", reviewer.provider, reviewer.agent_model)
 
     def client_for(session, run, default):
+        if default.provider == "fake" and run.model_config_id is None:
+            # The scripted model of the e2e tests: every run starts its script from the top,
+            # instead of the next run getting what the previous one left (run 5, K5).
+            return make_client(settings)
         return client_for_run(session, run, default, settings)
 
     if args.command == "bench":
