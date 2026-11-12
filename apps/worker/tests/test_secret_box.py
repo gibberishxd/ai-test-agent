@@ -25,3 +25,18 @@ def test_refuses_a_missing_or_short_server_key():
         server_key("")
     with pytest.raises(SecretBoxError, match="MODEL_KEYS_SECRET"):
         server_key("c2hvcnQ=")
+
+
+def test_encrypts_in_the_web_apps_format():
+    # Run 4, J7: the benchmark saves its own sign-in setup for the demo shop (a demo account).
+    from worker.secret_box import encrypt_secret
+
+    nonce = bytes(12)
+    stored = encrypt_secret(VECTOR["plaintext"], VECTOR["workspace_id"], KEY, nonce=nonce)
+    assert stored.startswith("v1:")
+    assert decrypt_secret(stored, VECTOR["workspace_id"], KEY) == VECTOR["plaintext"]
+    assert encrypt_secret("x", VECTOR["workspace_id"], KEY) != encrypt_secret(
+        "x", VECTOR["workspace_id"], KEY
+    )
+    if VECTOR.get("nonce_base64"):
+        assert stored == VECTOR["stored"]

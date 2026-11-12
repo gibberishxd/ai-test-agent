@@ -19,7 +19,11 @@ PROVIDERS = ("claude", "ollama", "openai-compat", "claude-cli", "fake")
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
+    # DATABASE_URL: the admin connection (migrations, tests, maintenance commands like bench).
+    # WORKER_DATABASE_URL: the worker's own role, ata_worker (run 5, K3); falls back to
+    # DATABASE_URL until the roles exist.
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
+    worker_database_url: str = ""
 
     # AI provider (see .env.example)
     llm_provider: str = ""
@@ -46,6 +50,13 @@ class Settings(BaseSettings):
     # Lets the end-to-end test run a real worker whose agent acts, without a model.
     fake_script: str = ""
     judge_model: str = ""
+    # Reviewer (run 5, K2): a stronger model that decides on flagged steps and on the final list
+    # of candidate bugs, while the explorer (LLM_PROVIDER) drives the browser. Both empty = no
+    # reviewer; only REVIEWER_MODEL = the explorer's provider with that model.
+    reviewer_provider: str = ""
+    reviewer_model: str = ""
+    # False for a reviewer model that can't read images (qwen3:14b): it gets text only.
+    reviewer_vision: bool = True
 
     # Run budgets, enforced by the worker
     max_steps: int = 40
@@ -73,6 +84,13 @@ class Settings(BaseSettings):
     # not let the browser reach localhost (fail safe).
     dev_mode: bool = False
     data_dir: str = "apps/worker/data"
+    # Run 4, J6: STORAGE=s3 stores screenshots in an S3-compatible bucket (MinIO, S3, R2).
+    storage: str = "local"
+    s3_bucket: str = "screenshots"
+    s3_region: str = "us-east-1"
+    s3_endpoint: str = ""
+    s3_access_key: SecretStr = SecretStr("")
+    s3_secret_key: SecretStr = SecretStr("")
 
     def provider(self) -> str:
         """The LLM provider to use: LLM_PROVIDER if set, else claude with a key, else fake."""
@@ -85,11 +103,12 @@ class Settings(BaseSettings):
         return "claude" if self.anthropic_api_key.get_secret_value() else "fake"
 
     def sqlalchemy_url(self) -> str:
-        """DATABASE_URL in the form SQLAlchemy needs: it has to name the driver (psycopg 3)."""
-        for prefix in ("postgresql://", "postgres://"):
-            if self.database_url.startswith(prefix):
-                return "postgresql+psycopg://" + self.database_url[len(prefix) :]
-        return self.database_url
+        """The worker's connection (WORKER_DATABASE_URL, else DATABASE_URL) for SQLAlchemy."""
+        return _with_driver(self.worker_database_url or self.database_url)
+
+    def admin_sqlalchemy_url(self) -> str:
+        """The admin connection (DATABASE_URL): test databases and maintenance commands."""
+        return _with_driver(self.database_url)
 
     def data_path(self) -> Path:
         """Absolute path for screenshots (a relative DATA_DIR is resolved from the repo root)."""
@@ -100,3 +119,11 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def _with_driver(url: str) -> str:
+    """A Postgres URL in the form SQLAlchemy needs: it has to name the driver (psycopg 3)."""
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url

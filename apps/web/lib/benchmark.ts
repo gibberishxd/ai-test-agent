@@ -47,6 +47,15 @@ export type MatchDecision = {
   reason: string;
 };
 
+/**
+ * Results that count. A result marked `details.invalid` (with the reason) stays in the database,
+ * since results are never deleted, but isn't shown: run 4's first J1 benchmark was processed by
+ * a stray worker with the fake model, so its numbers say nothing about any model.
+ */
+export function validResults<T extends { details: unknown }>(rows: T[]): T[] {
+  return rows.filter((row) => !(row.details as { invalid?: string } | null)?.invalid);
+}
+
 /** The newest result for each provider/model pair, newest first. */
 export function latestPerProvider(rows: BenchmarkRow[]): BenchmarkRow[] {
   const seen = new Map<string, BenchmarkRow>();
@@ -78,6 +87,23 @@ function toPerBug(stored: StoredPerBug | undefined): PerBug[] {
 export function leaderboard(rows: BenchmarkRow[]): BenchmarkRow[] {
   const rank = (row: BenchmarkRow) => row.aiRecall ?? -1;
   return latestPerProvider(rows).sort((a, b) => rank(b) - rank(a) || b.recall - a.recall);
+}
+
+/**
+ * The leaderboard as the database keeps it (materialized view model_leaderboard, refreshed by a
+ * trigger whenever a result is saved): one row per model, judge and reviewer, so a model with a
+ * reviewer tier is ranked apart from the same model alone. Ranked like `leaderboard`.
+ */
+export function leaderboardFromView(rows: BenchmarkRow[], latestIds: string[]): BenchmarkRow[] {
+  const keep = new Set(latestIds);
+  const rank = (row: BenchmarkRow) => row.aiRecall ?? -1;
+  return rows.filter((row) => keep.has(row.id)).sort((a, b) => rank(b) - rank(a) || b.recall - a.recall);
+}
+
+/** "provider/model" of the reviewer tier a result was measured with, or null. */
+export function reviewerLabel(row: BenchmarkRow): string | null {
+  const reviewer = (row.details as { reviewer?: unknown } | null)?.reviewer;
+  return typeof reviewer === "string" && reviewer ? reviewer : null;
 }
 
 export function perBug(row: BenchmarkRow): PerBug[] {

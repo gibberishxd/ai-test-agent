@@ -20,7 +20,7 @@ browser pane, and compare models on a public benchmark with planted bugs and a h
   images before any run uses it. The [leaderboard](#benchmark) shows how each model scores.
 - **Watch it work.** The run page has a live browser pane: the screen the agent is looking at,
   the element it is about to act on outlined, and why, with a filmstrip of every step.
-- **It measures itself.** A demo shop with 12 planted bugs (and a clean copy with none) gives
+- **It measures itself.** A demo shop with 13 planted bugs (one behind a login) (and a clean copy with none) gives
   recall, precision, false alarms and cost per run. Results are stored per provider and version
   and shown on the [benchmark page](#benchmark).
 - **It's safe to point at real sites.** Passive mode by default; interactive mode only on
@@ -29,6 +29,25 @@ browser pane, and compare models on a public benchmark with planted bugs and a h
   networks. All enforced in code, not in prompts.
 - **It's cheap by design.** Free deterministic checks first; the model reads a compact text
   view of the page and gets screenshots only when needed; prompt caching; cost tracked per step.
+
+## Use it in your pipeline (run 4)
+
+- **From CI:** create an API key (Settings → CI integration), start a run with `POST /api/v1/runs`,
+  and get the findings as JSON or **JUnit XML**. `examples/ci/ata-run.mjs` and a GitHub Actions
+  workflow fail the build on a chosen severity. Contract: `apps/web/openapi.json`; guide:
+  [`docs/API.md`](docs/API.md).
+- **Apps behind a login:** save a sign-in for a test account (or a recorded Playwright sign-in).
+  The worker signs in before the agent starts; the agent never sees the password, can't log out or
+  change the account, and is signed in again if the session drops. Passwords are encrypted at rest.
+- **Releases, not runs:** every finding has a fingerprint, so a run shows what is **new**, **still
+  present** and **fixed** since the last run of that site. Mark a finding confirmed, false
+  positive or won't fix; false positives stay hidden in later runs and count against the model.
+- **Signed webhooks:** a `run.finished` event with an HMAC-SHA256 signature over timestamp and
+  body, retried with backoff, logged per delivery.
+- **Teams:** owner, admin, member and viewer roles; invitation links; an audit log; Postgres
+  row-level security behind the app's own workspace checks.
+- **Run it yourself:** Docker images and a production compose stack (Postgres, S3-compatible
+  storage, N workers), health, readiness and Prometheus metrics. See [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## How it works
 
@@ -174,6 +193,9 @@ Results so far (shop: 3 buggy runs + 1 clean run each):
 | ollama · gemma4:12b, run 3, **holdout** (local) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 984755e |
 | claude-cli · Sonnet, run 3, shop (owner's Pro login) | **38%** | **58%** | 96% | 3.0 (real unplanted bugs) | $0.00 | 222 s | gemma4:12b (pinned) | a8a6d13 |
 | claude-cli · Sonnet, run 3, **holdout** | **25%** | **50%** | 100% | 1.0 | $0.00 | | gemma4:12b (pinned) | a8a6d13 |
+| ollama · gemma4:12b, run 4 (expected vs. actual), shop (local) | 8% | 39% | 100% | 0.0 | $0.00 | 1156 s | gemma4:12b (pinned) | a0af21e |
+| ollama · gemma4:12b, run 4 (everything; shop signed in, 13 bugs) | 0% | 31% | 94% | 0.0 | $0.00 | 1277 s | gemma4:12b (pinned) | b114b43 |
+| ollama · gemma4:12b, run 4, **holdout** | 0% | 33% | 89% | 0.0 | $0.00 | | gemma4:12b (pinned) | b114b43 |
 | claude · claude-sonnet-5-5 (API) | not run: needs an API key | | | | | | | |
 
 What the run-2 rows show: with the new agent, Gemma 4 12B lost its one AI bug (it wrote the

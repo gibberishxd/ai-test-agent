@@ -5,11 +5,14 @@ import {
   holdout,
   judgeLabel,
   leaderboard,
+  leaderboardFromView,
   latestPerProvider,
+  reviewerLabel,
   perBug,
   percent,
   percentOrDash,
   trend,
+  validResults,
   verification,
   type BenchmarkRow,
 } from "./benchmark";
@@ -130,6 +133,21 @@ describe("leaderboard", () => {
   });
 });
 
+describe("leaderboard from the materialized view (run 5, K3)", () => {
+  it("keeps the rows the view chose (one per model, judge and reviewer), best first", () => {
+    const alone = row({ id: "alone", provider: "ollama", model: "gemma", aiRecall: 0.08, recall: 0.3 });
+    const tiered = row({ id: "tiered", provider: "ollama", model: "gemma", aiRecall: 0.2, recall: 0.4, details: { reviewer: "ollama/qwen3:14b" } });
+    const stale = row({ id: "stale", provider: "ollama", model: "gemma", aiRecall: 0.5 });
+    const board = leaderboardFromView([alone, tiered, stale], ["alone", "tiered"]);
+    expect(board.map((r) => r.id)).toEqual(["tiered", "alone"]);
+  });
+
+  it("names the reviewer of a tiered setup", () => {
+    expect(reviewerLabel(row({ details: { reviewer: "ollama/qwen3:14b" } }))).toBe("ollama/qwen3:14b");
+    expect(reviewerLabel(row({ details: {} }))).toBeNull();
+  });
+});
+
 describe("verification", () => {
   const stored = {
     reported: 9,
@@ -170,5 +188,13 @@ describe("verification", () => {
   it("is null for results saved before it was recorded", () => {
     expect(verification(row({ details: {} }))).toBeNull();
     expect(verification(row({ details: null }))).toBeNull();
+  });
+});
+
+describe("validResults", () => {
+  it("leaves out a result marked invalid (kept in the database, with the reason)", () => {
+    const good = row({ provider: "ollama", model: "gemma4:12b" });
+    const bad = row({ provider: "fake", model: "fake-agent", details: { invalid: "runs taken by another worker" } });
+    expect(validResults([good, bad])).toEqual([good]);
   });
 });

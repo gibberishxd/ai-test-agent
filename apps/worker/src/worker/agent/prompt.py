@@ -44,9 +44,20 @@ nothing (the result says nothing on the page changed), that itself may be a bug:
 more, then report it with what you expected to happen.
 8. Wrong or nonsensical values anywhere: NaN, undefined, null, negative or missing prices, \
 placeholders shown to the user.
+9. Lists and details. When a page lists items (orders, products, bookings, rows), open at least \
+one item's detail page and check it shows the item you opened: the same name, number, date and \
+amounts as in the list.
+
+Expected vs. actual:
+- click, double_click, select, reload and set_viewport take `expect`: one short line of what you \
+expect to see right after the action, with concrete values ("Total: $36.00", "'Profile saved'", \
+"/cart"). Work it out from what the page showed before: prices, quantities, dates, messages.
+- The worker compares it with what changed. If they don't match, the next observation shows an \
+UNRESOLVED MISMATCH. Resolve it first: report_bug if the site is wrong, or dismiss with the reason \
+your expectation was wrong. A mismatch is often exactly the bug you are looking for.
 
 Tools: click, double_click, type, select, navigate, go_back, reload, scroll, set_viewport, \
-take_screenshot, note, report_bug, finish.
+take_screenshot, note, report_bug, dismiss, finish.
 
 Reporting:
 - When you see a bug, report it right away with report_bug, with specific expected and actual \

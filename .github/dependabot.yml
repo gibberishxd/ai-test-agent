@@ -1,0 +1,8 @@
+# Keeps the SHA-pinned GitHub Actions current: Dependabot opens a PR with the new SHA and
+# version comment when an action releases (run 4, J6).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -11,6 +11,7 @@ type Props = { github: boolean; email: boolean; demo: boolean };
 
 export function SignInOptions({ github, email, demo }: Props) {
   const [address, setAddress] = useState("");
+  const [testEmail, setTestEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const sendLink = async (event: FormEvent) => {
@@ -49,6 +50,22 @@ export function SignInOptions({ github, email, demo }: Props) {
           <Button size="lg" variant="secondary" onClick={() => { setBusy("demo"); signIn("demo", { callbackUrl: "/dashboard" }); }} disabled={busy !== null}>
             {busy === "demo" ? <Loader2 className="animate-spin" /> : <UserRound />} Sign in as demo user
           </Button>
+          <form
+            className="grid gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setBusy("dev-signup");
+              signIn("dev-signup", { email: testEmail, callbackUrl: "/dashboard" });
+            }}
+          >
+            <Label htmlFor="test-email">Or create a test account</Label>
+            <div className="flex gap-2">
+              <Input id="test-email" type="email" required placeholder="team@company.test" value={testEmail} onChange={(e) => setTestEmail(e.target.value)} />
+              <Button type="submit" variant="secondary" disabled={busy !== null}>
+                {busy === "dev-signup" ? <Loader2 className="animate-spin" /> : null} Create test account
+              </Button>
+            </div>
+          </form>
           <p className="text-xs text-muted-foreground">Development only. Not available in production.</p>
         </div>
       )}

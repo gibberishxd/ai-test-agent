@@ -8,6 +8,12 @@ from worker.llm import ToolSpec
 
 REASONING = {"type": "string", "description": "One short sentence: why this action, now."}
 ELEMENT_ID = {"type": "integer", "description": "The [id] of an element in the observation."}
+EXPECT = {
+    "type": "string",
+    "description": "One short line: what you expect to see right after this action, with the "
+    "concrete values (an amount, a message in quotes, a page path). The worker compares it with "
+    "what happens.",
+}
 
 
 def _tool(name: str, description: str, **properties) -> ToolSpec:
@@ -20,7 +26,12 @@ def _tool(name: str, description: str, **properties) -> ToolSpec:
 
 
 TOOLS = [
-    _tool("click", "Click an element (link, button, checkbox...).", element_id=ELEMENT_ID),
+    _tool(
+        "click",
+        "Click an element (link, button, checkbox...).",
+        element_id=ELEMENT_ID,
+        expect=EXPECT,
+    ),
     _tool(
         "type",
         "Replace the text in an input field.",
@@ -32,6 +43,7 @@ TOOLS = [
         "Choose an option in a dropdown.",
         element_id=ELEMENT_ID,
         option={"type": "string", "description": "The option's visible label."},
+        expect=EXPECT,
     ),
     _tool(
         "navigate",
@@ -44,18 +56,21 @@ TOOLS = [
         "Double-click an element: two clicks in quick succession, as an impatient user does. "
         "Use it to check that nothing is submitted or applied twice.",
         element_id=ELEMENT_ID,
+        expect=EXPECT,
     ),
     _tool("go_back", "Go back to the previous page."),
     _tool(
         "reload",
         "Reload the current page, like pressing the browser's refresh button. Use it to check "
         "what survives a refresh (a session, a cart, a saved change).",
+        expect=EXPECT,
     ),
     _tool(
         "set_viewport",
         "Switch the browser between a desktop screen (1280×800) and a phone screen (375×812) "
         "to check the layout at both sizes. You get a screenshot with the next observation.",
         size={"type": "string", "enum": ["desktop", "mobile"]},
+        expect=EXPECT,
     ),
     _tool(
         "note",
@@ -82,6 +97,13 @@ TOOLS = [
             "description": "The #step numbers that reproduce the bug, in order.",
         },
         evidence={"type": "string", "description": "What you saw: values, messages, errors."},
+    ),
+    _tool(
+        "dismiss",
+        "Close an UNRESOLVED MISMATCH that is not a bug, saying why (for example: your "
+        "expectation was wrong because the page explains the behaviour).",
+        step_id={"type": "integer", "description": "The #step of the mismatch."},
+        reason={"type": "string", "description": "Why what happened is correct after all."},
     ),
     _tool(
         "finish",

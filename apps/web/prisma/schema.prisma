@@ -8,12 +8,24 @@
 // - timestamps default to now() in the database for the same reason
 
 generator client {
-  provider = "prisma-client"
-  output   = "../lib/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../lib/generated/prisma"
+  // Partial unique indexes: "one default model per workspace" (run 4, J5, D73).
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+/// Run 4, J5: what a member may do in their workspace (lib/roles.ts has the full table).
+enum WorkspaceRole {
+  owner
+  admin
+  member
+  viewer
+
+  @@map("workspace_role")
 }
 
 enum RunMode {
@@ -64,25 +76,40 @@ model Workspace {
   monthlyRunQuota   Int      @default(50) @map("monthly_run_quota")
   /// Proves domain ownership: put it in a DNS TXT record or /.well-known/ai-test-agent.txt.
   verificationToken String   @unique @default(dbgenerated("replace(gen_random_uuid()::text, '-', '')")) @map("verification_token")
+  /// Run 4, J6: screenshots and step timelines of runs older than this are deleted.
+  retentionDays     Int      @default(30) @map("retention_days")
+  /// Run 5, K4: the plan whose limits apply (consume_quota, retention, seats).
+  planId            String   @default("free") @map("plan_id")
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  plan         Plan              @relation(fields: [planId], references: [id])
+  usageEvents  UsageEvent[]
   users        User[]
   runs         Run[]
   auditLog     AuditLog[]
   domains      Domain[]
   modelConfigs ModelConfig[]
+  loginSetups  LoginSetup[]
+  apiKeys      ApiKey[]
+  webhooks     WebhookEndpoint[]
+  triage       FindingTriage[]
+  invitations  Invitation[]
 
   @@map("workspaces")
 }
 
 model User {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email         String    @unique
-  name          String?
-  image         String?
-  emailVerified DateTime? @map("email_verified") @db.Timestamptz(3)
-  workspaceId   String    @map("workspace_id") @db.Uuid
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String        @unique
+  name            String?
+  image           String?
+  emailVerified   DateTime?     @map("email_verified") @db.Timestamptz(3)
+  workspaceId     String        @map("workspace_id") @db.Uuid
+  /// Whoever creates a workspace (signs up) is its owner; invited people get the invitation's role.
+  role            WorkspaceRole @default(member)
+  /// Run 5, K4: an operator of the service (usage across workspaces). Set from the CLI only.
+  isPlatformAdmin Boolean       @default(false) @map("is_platform_admin")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      Run[]
@@ -96,47 +123,63 @@ model User {
 /// One test run. The web app inserts it as "queued"; the worker claims it with
 /// SELECT ... FOR UPDATE SKIP LOCKED and writes progress, cost and the result back.
 model Run {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId   String    @map("workspace_id") @db.Uuid
-  createdById   String?   @map("created_by_id") @db.Uuid
-  targetUrl     String    @map("target_url")
-  mode          RunMode   @default(passive)
-  focus         String?
-  status        RunStatus @default(queued)
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  createdById          String?   @map("created_by_id") @db.Uuid
+  targetUrl            String    @map("target_url")
+  mode                 RunMode   @default(passive)
+  focus                String?
+  status               RunStatus @default(queued)
   /// Set by the Stop button; the worker checks it between steps.
-  stopRequested Boolean   @default(false) @map("stop_requested")
+  stopRequested        Boolean   @default(false) @map("stop_requested")
   /// Which worker process claimed the run (hostname:pid).
-  claimedBy     String?   @map("claimed_by")
-  provider      String?
-  model         String?
-  pagesVisited  Int       @default(0) @map("pages_visited")
-  stepCount     Int       @default(0) @map("step_count")
-  inputTokens   Int       @default(0) @map("input_tokens")
-  outputTokens  Int       @default(0) @map("output_tokens")
-  costUsd       Float     @default(0) @map("cost_usd")
-  error         String?
+  claimedBy            String?   @map("claimed_by")
+  provider             String?
+  model                String?
+  pagesVisited         Int       @default(0) @map("pages_visited")
+  stepCount            Int       @default(0) @map("step_count")
+  inputTokens          Int       @default(0) @map("input_tokens")
+  outputTokens         Int       @default(0) @map("output_tokens")
+  costUsd              Float     @default(0) @map("cost_usd")
+  /// The reviewer tier's share of the tokens and cost above (run 5, K2).
+  reviewerProvider     String?   @map("reviewer_provider")
+  reviewerModel        String?   @map("reviewer_model")
+  reviewerInputTokens  Int       @default(0) @map("reviewer_input_tokens")
+  reviewerOutputTokens Int       @default(0) @map("reviewer_output_tokens")
+  reviewerCostUsd      Float     @default(0) @map("reviewer_cost_usd")
+  error                String?
   /// Summary written when the run finishes (Report model in the worker).
-  summary       Json?
+  summary              Json?
   /// Unguessable token for a read-only share link; null = not shared (or revoked).
-  shareToken    String?   @unique @map("share_token")
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  startedAt     DateTime? @map("started_at") @db.Timestamptz(3)
-  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(3)
+  shareToken           String?   @unique @map("share_token")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  startedAt            DateTime? @map("started_at") @db.Timestamptz(3)
+  finishedAt           DateTime? @map("finished_at") @db.Timestamptz(3)
   /// The worker's lease: renewed every few seconds while it works (database clock). A running
   /// run whose heartbeat is older than the lease belongs to a dead worker and is failed.
-  heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(3)
+  heartbeatAt          DateTime? @map("heartbeat_at") @db.Timestamptz(3)
+  /// Run 4, J3: budgets a CI caller can lower (never above the worker's limits).
+  /// When retention deleted this run's screenshots and steps (its findings stay).
+  purgedAt             DateTime? @map("purged_at") @db.Timestamptz(3)
+  maxSteps             Int?      @map("max_steps")
+  maxSeconds           Int?      @map("max_seconds")
+  /// The API key that started the run (null: started from the dashboard).
+  apiKeyId             String?   @map("api_key_id") @db.Uuid
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  steps     Step[]
-  bugs      Bug[]
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy         User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  steps             Step[]
+  bugs              Bug[]
+  /// The workspace model this run uses; null = the worker's own (server default) model.
+  modelConfigId     String?           @map("model_config_id") @db.Uuid
+  modelConfig       ModelConfig?      @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
+  apiKey            ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  webhookDeliveries WebhookDelivery[]
+  usageEvent        UsageEvent?
 
   @@index([status, createdAt])
   @@index([workspaceId, createdAt])
   @@map("runs")
-  /// The workspace model this run uses; null = the worker's own (server default) model.
-  modelConfigId String?      @map("model_config_id") @db.Uuid
-  modelConfig   ModelConfig? @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
 }
 
 /// One thing the worker did during a run: visit a page, click, type, report a bug...
@@ -185,6 +228,11 @@ model Bug {
   status        BugStatus @default(candidate)
   dismissReason String?   @map("dismiss_reason")
   duplicateOfId String?   @map("duplicate_of_id") @db.Uuid
+  /// Run 4, J4: the same bug in later runs of a target has the same fingerprint (route with ids
+  /// normalised + category + the element or message; apps/worker/src/worker/fingerprint.py).
+  fingerprint   String?
+  /// Hidden from the report because the workspace triaged this fingerprint as a false positive.
+  suppressed    Boolean   @default(false)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -194,31 +242,31 @@ model Bug {
 }
 
 model BenchmarkResult {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider     String
-  model        String
-  gitCommit    String   @map("git_commit")
-  runsBuggy    Int      @map("runs_buggy")
-  recall       Float
-  precision    Float
-  falseAlarms  Float    @map("false_alarms")
-  avgCostUsd   Float    @map("avg_cost_usd")
-  avgDurationS Float    @map("avg_duration_s")
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider           String
+  model              String
+  gitCommit          String   @map("git_commit")
+  runsBuggy          Int      @map("runs_buggy")
+  recall             Float
+  precision          Float
+  falseAlarms        Float    @map("false_alarms")
+  avgCostUsd         Float    @map("avg_cost_usd")
+  avgDurationS       Float    @map("avg_duration_s")
   /// Recall over the planted bugs that need judgement (not findable by deterministic checks).
-  aiRecall           Float?  @map("ai_recall")
+  aiRecall           Float?   @map("ai_recall")
   /// The same scores on the holdout app (apps/demo2), which prompts are never tuned against.
-  holdoutRunsBuggy   Int?    @map("holdout_runs_buggy")
-  holdoutRecall      Float?  @map("holdout_recall")
-  holdoutAiRecall    Float?  @map("holdout_ai_recall")
-  holdoutPrecision   Float?  @map("holdout_precision")
-  holdoutFalseAlarms Float?  @map("holdout_false_alarms")
+  holdoutRunsBuggy   Int?     @map("holdout_runs_buggy")
+  holdoutRecall      Float?   @map("holdout_recall")
+  holdoutAiRecall    Float?   @map("holdout_ai_recall")
+  holdoutPrecision   Float?   @map("holdout_precision")
+  holdoutFalseAlarms Float?   @map("holdout_false_alarms")
   /// "provider/model" that matched reports to planted bugs.
   judge              String?
   /// Set when the row came from `bench --rescore`: the commit the rescore ran on.
-  rescoreCommit      String? @map("rescore_commit")
+  rescoreCommit      String?  @map("rescore_commit")
   /// Per-bug found/missed and every match decision, for spot checks.
-  details      Json     @default("{}")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  details            Json     @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([provider, createdAt])
   /// Newest results first: benchmark page, leaderboard, home page (docs/DATABASE.md).
@@ -316,6 +364,205 @@ model ModelConfig {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      Run[]
 
+  @@unique([workspaceId], map: "model_configs_one_default_per_workspace", where: raw("is_default"))
   @@index([workspaceId])
   @@map("model_configs")
+}
+
+/// How the worker signs in to a target before the agent starts. A TEST account only. The
+/// password and a recorded storage state (cookies + local storage) are encrypted like model
+/// keys (AES-256-GCM, workspace id as associated data) and never sent back to the browser, to
+/// the model, to logs or to reports. One setup per workspace and target origin.
+model LoginSetup {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId            String    @map("workspace_id") @db.Uuid
+  /// scheme://host[:port] of the target, e.g. https://staging.example.com
+  origin                 String
+  /// "form" (the worker fills the login form) or "storage_state" (a recorded sign-in)
+  kind                   String
+  loginUrl               String?   @map("login_url")
+  /// The test account's username or email: shown in settings so you know which account it is.
+  username               String?
+  passwordCiphertext     String?   @map("password_ciphertext")
+  usernameSelector       String?   @map("username_selector")
+  passwordSelector       String?   @map("password_selector")
+  submitSelector         String?   @map("submit_selector")
+  /// An element only shown when signed in (optional): the strongest proof the sign-in worked.
+  successSelector        String?   @map("success_selector")
+  storageStateCiphertext String?   @map("storage_state_ciphertext")
+  /// Set by "Test sign-in"; the worker claims it, signs in once and clears it.
+  checkRequestedAt       DateTime? @map("check_requested_at") @db.Timestamptz(3)
+  /// The last Test sign-in result: { ok, detail, checkedAt }. Never contains a secret.
+  lastCheck              Json?     @map("last_check")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, origin])
+  @@map("login_setups")
+}
+
+/// A workspace's key for the public API (/api/v1). Only a SHA-256 hash of the key is stored: a
+/// key is 32 random bytes, so a fast hash is enough (no brute force can reach it) and lookups are
+/// one indexed equality. The key itself is shown once, when it's created.
+model ApiKey {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  name        String
+  /// The first characters, so people can tell keys apart ("ata_k8Fz…"). Not secret.
+  prefix      String
+  keyHash     String    @unique @map("key_hash")
+  createdById String?   @map("created_by_id") @db.Uuid
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(3)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs        Run[]
+  rateWindows ApiRateWindow[]
+
+  @@index([workspaceId, createdAt])
+  @@map("api_keys")
+}
+
+/// Requests per API key per minute: a fixed-window rate limit kept in the database, so it holds
+/// across several web servers. Incremented with one INSERT ... ON CONFLICT DO UPDATE.
+model ApiRateWindow {
+  apiKeyId    String   @map("api_key_id") @db.Uuid
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  count       Int      @default(0)
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@id([apiKeyId, windowStart])
+  @@map("api_rate_windows")
+}
+
+/// Where a workspace wants run results POSTed (run 4, J3). The signing secret is encrypted with
+/// the model-key scheme (the worker must read it to sign), shown once when created.
+model WebhookEndpoint {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  url              String
+  secretCiphertext String   @map("secret_ciphertext")
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+  @@map("webhook_endpoints")
+}
+
+/// One event for one endpoint: sent, or waiting for its next retry. The delivery log.
+model WebhookDelivery {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  endpointId     String    @map("endpoint_id") @db.Uuid
+  runId          String?   @map("run_id") @db.Uuid
+  event          String
+  payload        Json
+  /// "pending" (waiting for a first or next attempt), "delivered" or "failed" (gave up)
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  lastStatusCode Int?      @map("last_status_code")
+  lastError      String?   @map("last_error")
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  run      Run?            @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([endpointId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+/// A workspace's decision about a finding, by fingerprint and target origin (run 4, J4). It
+/// follows the finding into later runs: a false positive is suppressed there (and counted).
+/// Who changed it and when is in the audit log.
+model FindingTriage {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  origin      String
+  fingerprint String
+  /// "confirmed", "false_positive" or "wont_fix"
+  state       String
+  comment     String?
+  /// The finding's title when it was triaged, for lists.
+  title       String
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, origin, fingerprint])
+  @@map("finding_triage")
+}
+
+/// A link that adds someone to a workspace with a role (run 4, J5). No email is sent: an admin
+/// copies the link. Only a SHA-256 hash of its token is stored; it expires and can be revoked.
+model Invitation {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String        @map("workspace_id") @db.Uuid
+  tokenHash    String        @unique @map("token_hash")
+  role         WorkspaceRole
+  createdById  String?       @map("created_by_id") @db.Uuid
+  expiresAt    DateTime      @map("expires_at") @db.Timestamptz(3)
+  acceptedAt   DateTime?     @map("accepted_at") @db.Timestamptz(3)
+  acceptedById String?       @map("accepted_by_id") @db.Uuid
+  revokedAt    DateTime?     @map("revoked_at") @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("invitations")
+}
+
+/// Run 5, K4: what a workspace may do. Seeded by its migration; prices are placeholders.
+model Plan {
+  id               String   @id
+  name             String
+  runsPerMonth     Int      @map("runs_per_month")
+  maxStepsPerRun   Int      @map("max_steps_per_run")
+  /// Model providers a run may use; empty = every provider.
+  allowedProviders String[] @default([]) @map("allowed_providers")
+  seats            Int
+  retentionDays    Int      @map("retention_days")
+  priceUsdMonth    Float?   @map("price_usd_month")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspaces Workspace[]
+
+  @@map("plans")
+}
+
+/// Run 5, K4: one finished run's usage, written by the database (trigger runs_record_usage),
+/// with the explorer's and the reviewer's tokens and cost apart.
+model UsageEvent {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String   @map("workspace_id") @db.Uuid
+  runId                String?  @unique @map("run_id") @db.Uuid
+  kind                 String   @default("run")
+  explorerProvider     String?  @map("explorer_provider")
+  explorerModel        String?  @map("explorer_model")
+  explorerInputTokens  Int      @default(0) @map("explorer_input_tokens")
+  explorerOutputTokens Int      @default(0) @map("explorer_output_tokens")
+  explorerCostUsd      Float    @default(0) @map("explorer_cost_usd")
+  reviewerProvider     String?  @map("reviewer_provider")
+  reviewerModel        String?  @map("reviewer_model")
+  reviewerInputTokens  Int      @default(0) @map("reviewer_input_tokens")
+  reviewerOutputTokens Int      @default(0) @map("reviewer_output_tokens")
+  reviewerCostUsd      Float    @default(0) @map("reviewer_cost_usd")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       Run?      @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@map("usage_events")
 }

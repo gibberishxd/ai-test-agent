@@ -1,0 +1,21 @@
+# The worker (Playwright + Python) for production. Build from the repo root:
+#   docker build -f Dockerfile.worker -t ata-worker .
+# The base image has Chromium and its system libraries for this Playwright version; dependencies
+# are installed from the lock file without dev tools; it runs as the image's non-root user.
+
+FROM ghcr.io/astral-sh/uv:0.9.7 AS uv
+
+FROM mcr.microsoft.com/playwright/python:v1.64.0-noble AS runtime
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never PYTHONUNBUFFERED=1 LOG_FORMAT=json
+# Same layout as the repo: the worker finds the repo root from its own path.
+WORKDIR /repo/apps/worker
+COPY apps/worker/pyproject.toml apps/worker/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY apps/worker/src ./src
+COPY apps/worker/README.md* ./
+RUN uv sync --frozen --no-dev && chown -R pwuser:pwuser /repo
+COPY --chown=pwuser:pwuser apps/demo/bugs.json /repo/apps/demo/bugs.json
+COPY --chown=pwuser:pwuser apps/demo2/bugs.json /repo/apps/demo2/bugs.json
+USER pwuser
+CMD ["uv", "run", "--no-sync", "worker"]

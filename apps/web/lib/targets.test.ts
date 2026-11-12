@@ -29,7 +29,7 @@ describe("parseRunInput", () => {
   it("refuses interactive mode on an unverified domain", () => {
     const result = parseRunInput({ targetUrl: "https://example.com", mode: "interactive" });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.errors.mode).toMatch(/verified/);
+    if (!result.ok) expect(result.errors.mode).toMatch(/verified.*Settings → Domains/);
   });
 
   it("allows interactive mode on a verified domain", () => {

@@ -2,12 +2,21 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DomainList } from "@/components/domain-list";
+import { IntegrationSettings } from "@/components/integration-settings";
+import { LoginSettings } from "@/components/login-settings";
 import { ModelSettings } from "@/components/model-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { currentUser } from "@/lib/auth";
+import { MembersSettings } from "@/components/members-settings";
+import { listInvitations, listMembers } from "@/lib/members";
+import { can } from "@/lib/roles";
+import { currentContext } from "@/lib/workspace";
 import { db } from "@/lib/db";
+import { tenantDb } from "@/lib/tenant-db";
 import { formatCost, formatDate, hostOf } from "@/lib/format";
+import { listApiKeys } from "@/lib/api-keys";
+import { listLoginSetups } from "@/lib/login-setups";
+import { listWebhooks } from "@/lib/webhooks";
 import { listModelConfigs } from "@/lib/model-configs";
 import { auditLog, listDomains, usageThisMonth } from "@/lib/settings-data";
 
@@ -25,15 +34,25 @@ const ACTIONS: Record<string, string> = {
 };
 
 export default async function SettingsPage() {
-  const user = await currentUser();
+  const context = await currentContext();
+  const userEmail = context.userId ? (await db.user.findUnique({ where: { id: context.userId } }))?.email : null;
+  const user = context.signedIn && context.userId ? { id: context.userId, workspaceId: context.workspaceId, email: userEmail ?? "" } : null;
+  const role = context.role ?? "viewer";
+  const admin = can(role, "members.manage");
+  const readOnly = <p className="text-sm text-muted-foreground">Only owners and admins can change this.</p>;
   if (!user) redirect("/signin");
 
-  const [workspace, domains, usage, log, models] = await Promise.all([
-    db.workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
+  const [workspace, domains, usage, log, models, loginSetups, apiKeys, webhooks, members, invitations] = await Promise.all([
+    tenantDb(user.workspaceId).workspace.findUniqueOrThrow({ where: { id: user.workspaceId } }),
     listDomains(user.workspaceId),
     usageThisMonth(user.workspaceId),
     auditLog(user.workspaceId),
     listModelConfigs(user.workspaceId),
+    listLoginSetups(user.workspaceId),
+    listApiKeys(user.workspaceId),
+    listWebhooks(user.workspaceId),
+    listMembers(user.workspaceId),
+    admin ? listInvitations(user.workspaceId) : Promise.resolve([]),
   ]);
   const used = Math.min(usage.runs / usage.quota, 1);
 
@@ -43,6 +62,29 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">{workspace.name}</h1>
         <p className="text-muted-foreground">Signed in as {user.email}</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Members</CardTitle>
+          <CardDescription>
+            You are {role === "owner" ? "the owner" : `a${role === "admin" ? "n" : ""} ${role}`} of this workspace.{" "}
+            <Link href="/settings/usage" className="underline">
+              Plan and usage
+            </Link>
+            {admin && (
+              <>
+                {" "}
+                <Link href="/settings/audit" className="underline">
+                  Full audit log
+                </Link>
+              </>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MembersSettings members={members} invitations={invitations} me={user.id} myRole={role} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -85,7 +127,7 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="models" className="scroll-mt-20">
         <CardHeader>
           <CardTitle>Models</CardTitle>
           <CardDescription>
@@ -96,11 +138,11 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ModelSettings models={models} />
+          {admin ? <ModelSettings models={models} /> : readOnly}
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="domains" className="scroll-mt-20">
         <CardHeader>
           <CardTitle>Domains for interactive tests</CardTitle>
           <CardDescription>
@@ -109,6 +151,7 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {admin ? (
           <DomainList
             token={workspace.verificationToken}
             domains={domains.map((d) => ({
@@ -118,6 +161,36 @@ export default async function SettingsPage() {
               method: d.method,
             }))}
           />
+          ) : (
+            readOnly
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Sign-in for apps behind a login</CardTitle>
+          <CardDescription>
+            For a verified domain, the worker can sign in with a test account before the agent starts, so the
+            agent tests what signed-in users see. The password is stored encrypted and never reaches the AI model.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {admin ? <LoginSettings setups={loginSetups} /> : readOnly}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>CI integration</CardTitle>
+          <CardDescription>
+            Start runs from your pipeline with an API key, get the report as JSON or JUnit XML, and receive a signed
+            webhook when a run finishes. Examples for GitHub Actions are in <code>examples/ci</code>; the API contract
+            is at <a className="underline" href="/api/v1/openapi.json">/api/v1/openapi.json</a>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {admin ? <IntegrationSettings keys={apiKeys} webhooks={webhooks} /> : readOnly}
         </CardContent>
       </Card>
 

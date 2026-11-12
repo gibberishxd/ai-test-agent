@@ -717,3 +717,345 @@ numbers are the real test (Needs me).
   builds have real unplanted bugs that count as false alarms, and one run finished early after
   a native tool-call attempt in `claude -p`. All three are under "Needs me": each changes the
   benchmark or needs another Sonnet run to verify, which this run doesn't allow.
+
+## D63. A mislabelled benchmark row is corrected in place, with a note (run 4, J0)
+- **What:** result rows `a4d5781c` (R3a) and `1eccde57` (its rescore) said commit 984755e;
+  their runs were made on f1bf08a (the old bench read the commit after the runs, fixed by D58).
+- **Decision:** set `git_commit` to f1bf08a and add `details.correction` saying what changed,
+  when and why. The rows' scores are untouched; `rescore_commit` (984755e) stays, since that
+  is where the rescore ran.
+- **Alternatives:** leave it and explain in PROGRESS (the leaderboard would keep showing the
+  wrong commit); add a new row (a duplicate result would count twice).
+
+## D64. Expected vs. actual is checked by the worker, not by a second model call (run 4, J1)
+- **Decision:** the model states `expect` with each state-changing action; the worker compares
+  it with the page's changes (expected change missing, predicted value absent). Mismatches must
+  be reported or dismissed with a reason; other actions are refused once, then the candidate
+  expires as ignored.
+- **Alternatives:** a second "did it match?" model call per action (doubles cost and latency;
+  weak models agree with themselves); a structured expectation object with fields per value
+  (small models fill nested JSON badly); no enforcement (a weak model ignores the reminder,
+  as it ignored its own notes in run 3).
+- **Kept only if** holdout AI-only recall doesn't drop and clean-build false alarms don't rise.
+
+## D65. A timed-out model call gets one retry with a trimmed observation (run 4, J1)
+- **Decision:** clients raise `ModelTimeout`; the loop retries once with a shorter observation
+  and no image, then ends the run cleanly (D61).
+- **Alternatives:** a longer timeout (hides a stuck model); retrying with the same observation
+  (a long prompt is the usual reason a local model is slow).
+
+## D66. claude-cli: an answer that came with native tool-call denials is retried with a correction
+- **Decision:** `permission_denials` in the CLI's JSON mean the model tried a native tool call;
+  the answer is discarded and one corrective message is sent. Within the existing limit of two
+  attempts per decision.
+- **Why:** in run 3 such an answer was a valid `finish` ("no tools available"), so parsing alone
+  couldn't catch it.
+
+## D67. A benchmark and regular workers keep to their own runs (run 4, J1)
+- **What happened:** the first J1 Gemma benchmark was ruined. The e2e tests start a worker with
+  the fake model on the same database; on startup it failed a 16-minute benchmark run that was
+  alive (startup recovery looked only at the start time, against its own 480 s limit), then
+  claimed every queued benchmark run and ran it with the fake model. Result `6a0d7e24` is kept,
+  marked `details.invalid`, and hidden by `validResults` on the benchmark and home pages.
+- **Decision:** `claim_next_run(only=…)`: a benchmark processes exactly the runs it queued;
+  `skip_benchmark=True`: regular workers never claim runs in the benchmark workspace. Startup
+  recovery (`recover_stale_runs`) never fails a run whose heartbeat is fresh.
+- **Alternatives:** a separate database for e2e (fixes this trigger only; two production
+  workers with different models would still mix); a "pinned worker" column (a schema change for
+  what a workspace filter already expresses).
+- **Process rule:** no e2e tests while a benchmark is running.
+
+## D68. Testing apps behind a login: the worker signs in, the agent never knows how (run 4, J2)
+- **Decision:** `login_setups` per workspace and target origin: a login form (URL, username,
+  password encrypted with the model-key scheme, optional selectors) or a recorded Playwright
+  storage state (encrypted). `guarded_browser(login=…)` signs in every context it opens, so the
+  crawl, the agent and every replay are signed in. In the loop: the password and username are
+  scrubbed from observations, steps, bug reports and replay prompts; password fields are masked
+  in every screenshot; logout, change/reset password and delete/close account are denied on
+  every target (the demo shops too); landing on the login page without going there means the
+  session ended, so the worker signs in again (at most 3 times).
+- **Only on demo shops and verified domains**, for runs and for Test sign-in: a worker that
+  submits credentials wherever a workspace says would be an abuse tool.
+- **Test sign-in** needs a browser, so the web app sets `check_requested_at` and a worker claims
+  it with `FOR UPDATE SKIP LOCKED` and stores `{ok, detail, checkedAt}`; the detail is scrubbed.
+- **The username is stored in plain text** (shown in settings so you know which account it is);
+  only the password and the storage state are secrets. It is still scrubbed from everything the
+  model or a report sees.
+- **Alternatives:** let the agent sign in with credentials in the prompt (the model and its
+  provider would see them, and the agent could type them anywhere); a separate check-jobs table
+  (one nullable timestamp on the setup does the same for a quick, idempotent job).
+- **Untested glue:** the worker loop calls `process_login_check` before each run (one line).
+
+## D69. Public API: hashed keys, a database rate limit, the dashboard's own rules (run 4, J3)
+- **Decision:** `/api/v1` with workspace API keys (`ata_` + 32 random bytes, SHA-256 hash with a
+  unique index, shown once, revocable, `last_used_at`). Starting a run calls the same `startRun`
+  as the dashboard, so quota, domain verification and model checks can't drift apart. Budgets
+  (`max_steps`, `max_minutes`) can only lower the worker's limits. Rate limit: 60 requests per
+  key per minute, a fixed window counted with one upsert in `api_rate_windows`. Reports as JSON
+  or JUnit XML (one failing test case per reported bug). `openapi.json` is the contract; tests
+  check every route and method against it and validate responses with ajv.
+- **Alternatives:** bcrypt for keys (slow on every request, no benefit for random 256-bit keys);
+  JWTs (can't be revoked without a deny list); an in-memory rate limiter (wrong with two web
+  servers); a sliding-window or token-bucket limiter (smoother, more state; a fixed window is
+  enough at 60/min); generating routes from the spec (more tooling for three routes).
+
+## D70. Webhooks: HMAC over timestamp and body, retries in the database, the egress guard (J3)
+- **Decision:** `X-ATA-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, "t.body")>` (the scheme
+  Stripe made common); receivers refuse timestamps older than 5 minutes (replays). Deliveries are
+  rows (`webhook_deliveries`) claimed with SKIP LOCKED; backoff 30 s, 2 min, 8 min, 32 min, ~2 h,
+  then failed. URLs are refused at save time for obvious internal hosts, and at send time by the
+  worker's `NetworkGuard` (after DNS); the POST goes through `GuardProxy`, which connects to the
+  checked address (no DNS rebinding). A blocked URL fails without retries. No redirects followed.
+- **Alternatives:** signing the body only (a captured request could be replayed forever); a
+  message broker for retries (one more system; the database already is the queue); sending from
+  the web app (it would need the egress guard too, and runs finish in the worker).
+- **Tested against a local receiver only;** the `allowed_local` exemption exists for tests and is
+  never set in production.
+
+## D71. Two incidents during run 4, and the rules that follow
+- An e2e run during a benchmark let a fake-model worker take over the benchmark (fixed in code,
+  D67). Rule: no e2e tests while a benchmark runs.
+- `pkill -f "worker$"` to stop a test worker also killed a Docker Desktop process: Postgres went
+  down and the second J1 benchmark crashed. Docker Desktop was force-restarted, the data volume was
+  intact (84 runs, 11 results), and the 7 aborted runs were marked failed with the reason. Rule:
+  stop processes by PID only, never by a name pattern.
+- The third J1 benchmark is labelled a0af21e but also loaded the uncommitted J3 code (API,
+  webhooks, run budgets): none of it changes the agent (no budgets or webhooks on benchmark runs).
+
+## D72. Fingerprints and triage that follows them (run 4, J4)
+- **Fingerprint** = SHA-256(route with ids normalised | category | key), first 16 hex. The key is
+  the most stable thing that names the problem: the failing request (method, path, status), the
+  console message without numbers or hashes, the axe rule, the broken link, the element an agent
+  report acted on, else the title's words (sorted, no numbers or stopwords). Same message on two
+  pages → two bugs; a reworded report on the same element → one bug. Set by a `before_insert`
+  hook; older rows backfilled.
+- **Comparison** with the target's previous finished run, computed when the page is read (new,
+  still present, fixed). A run in progress shows nothing as fixed.
+- **Triage** per workspace, origin and fingerprint (current state in `finding_triage`, history in
+  the audit log). False positives are suppressed in later runs by the worker (`bugs.suppressed`),
+  left out of the report, the API, JUnit and webhooks, and counted per model
+  (`modelPrecision`, per workspace). Whether counts also go into an anonymous global number is
+  the owner's open question 4.
+- **Alternatives:** an embedding similarity between titles (costs a model call per finding and is
+  hard to explain); storing comparisons (they change when triage changes; computing them from two
+  runs is cheap); a `bug_status` enum value for suppressed (it would mix with verification's
+  dismissals and the benchmark funnel).
+
+## D73. Roles in one table, checked per route, read from the database per request (run 4, J5)
+- **Decision:** owner / admin / member / viewer (the owner's question-5 default, decided without
+  owner, revisit). `lib/roles.ts` holds the whole table; `authorize(action)` answers 401/403 for
+  every management route; starting and stopping runs keep the visitor path (demo only). The role
+  and workspace come from the database on each request, so a role change or an accepted
+  invitation applies at once (one extra indexed lookup per request).
+- **Invitations:** links only (no email), token hashed, 7 days, one use (conditional UPDATE),
+  never "owner" (CHECK constraint); ownership moves by transfer. A removed member keeps an account
+  in a new workspace of their own. Every change goes to the audit log, shown on /settings/audit.
+- **One default model:** a partial unique index via Prisma's `partialIndexes` preview feature, so
+  Prisma knows the index and won't propose dropping it (the alternative, raw SQL, would drift).
+
+## D74. Row-level security with a tenant role and a per-transaction workspace (run 4, J5)
+- **Decision:** `app_tenant` (NOLOGIN, NOBYPASSRLS) with a policy per tenant table; children check
+  through their parent; `app_current_workspace()` fails closed. The web's `tenantDb()` extension
+  sets the workspace and the role per transaction (`LOCAL`, safe with pooling). The worker and
+  migrations use the owner role, unaffected.
+- **Alternatives:** a separate database or schema per tenant (strong isolation, heavy operations
+  and migrations ×N); RLS on the connection's own login role (needs a login per tenant or one
+  shared role with session variables that leak across pooled connections); FORCE RLS on the owner
+  (the worker would need tenant context everywhere, including the queue claim across tenants).
+- **Not yet:** every web query through `tenantDb` (the run page, lists and the API reads are; some
+  writes and settings queries still use the plain client with their WHERE). Listed under Needs me.
+- **Cost:** +0.004–0.03 ms per query from the policies, +~0.1–0.3 ms from the extra statements.
+
+## D75. The login-only demo bug and a signed-in shop benchmark (run 4, J2) — decided without owner, revisit
+- **Owner's question 2 (unanswered), option a:** "My orders" (`/orders`, `/orders/:id`) only for a
+  signed-in user; planted bug 13: opening an order shows the next order's number, items and total.
+  Reachable by clicking, a realistic data bug, and a test of expected vs. actual. In `bugs.json`,
+  a unit test, and verify-bugs on both builds (plus a check that the pages need a sign-in).
+- **Owner's question 3 (unanswered), option a:** the shop benchmark (buggy and clean builds) runs
+  with a saved sign-in setup for the demo account the shop itself shows; logout is denied there, so
+  planted bug 11 (session survives logout) can't be triggered. Run 4's results are reported with
+  and without bug 11. The holdout app has no login and is unchanged.
+- **Also:** the login page's `?next=` accepts only paths in the shop (no open redirect); the
+  worker's sign-in check polls for up to 5 s, because a single-page app changes view after the click
+  without a page load (the real demo shop failed the first check; a fixture now covers it).
+
+## D76. Production packaging: two images, one compose profile, S3 storage, DB-derived metrics (run 4, J6)
+- **Images:** `Dockerfile.web` (multi-stage: npm ci → `next build` standalone → a runtime stage with
+  only the traced server files, running as `node`; a `migrate` target runs `prisma migrate deploy`)
+  and `Dockerfile.worker` (Playwright's own image for this Playwright version, so Chromium and its
+  system libraries match; uv from its official image; locked dependencies without dev tools;
+  runs as `pwuser`).
+- **Compose:** the production services are in `docker-compose.prod.yml` (project `ata-prod`), see
+  D77. Its own Postgres and volume, an S3-compatible store, migrations before web and workers
+  start, `WORKERS` replicas.
+- **Storage:** `Storage` gets `delete_prefix`; `S3Storage` (boto3) next to `LocalStorage`, chosen
+  by `STORAGE`. The web app checks access, then redirects to a 5-minute presigned link: the bucket
+  stays private and the app never streams image bytes. Tested with moto (no real S3).
+- **Retention:** `workspaces.retention_days` (default 30); hourly, screenshots and steps of older
+  runs are deleted and the run marked `purged_at`; findings stay for release comparison.
+- **Health and metrics:** `/api/health` (liveness), `/api/ready` (database), `/api/metrics`
+  (Prometheus text computed from Postgres, so every instance agrees and restarts lose nothing;
+  optional bearer token). JSON logs (`LOG_FORMAT=json`) with run and workspace ids from context
+  variables in the worker; secret-looking keys redacted in the web logger.
+- **CI:** actions pinned by commit SHA with the version in a comment; Dependabot keeps them current.
+  The customer-facing example workflow is pinned the same way.
+- **Alternatives:** one image for both (the worker's browser libraries would bloat the web image);
+  Kubernetes manifests (more to explain, nothing to run them on here); per-process Prometheus
+  counters (lost on restart, different on each instance).
+
+## D77. The production stack: its own compose file, and SeaweedFS instead of MinIO (run 4, J6)
+- **What happened:** the first version put the production services in a `prod` profile of
+  `docker-compose.yml`. Compose checks required variables (`${X:?}`) in the whole file, so plain
+  `npm run db:up` failed without production secrets, and `up --profile prod` with `--env-file`
+  recreated the dev database on the default port (it briefly went down; the data volume was
+  untouched). And MinIO's images (`minio/minio`, `minio/mc`, also on quay.io) are no longer
+  publicly pullable.
+- **Decision:** `docker-compose.yml` is back to the dev database only, byte for byte;
+  `docker-compose.prod.yml` (project name `ata-prod`) holds the production stack. The object store
+  is SeaweedFS 4.51 (Apache-2.0, S3 API) with credentials from `S3_ACCESS_KEY`/`S3_SECRET_KEY`; the
+  worker creates the bucket on first use (tested with moto), so no one-off bucket job is needed.
+  The owner's plan named MinIO; what it needs is "S3-compatible", and only `S3_*` variables change
+  for S3, R2, Garage or a self-run MinIO.
+
+## D78. No Sonnet run in run 4 (J7)
+- **Decision:** the owner's rule was "only if I said yes today"; question 1 (asked at the start) got
+  no answer, so the one allowed claude-cli benchmark was not run. A missing answer was not taken
+  as a yes for anything that spends the owner's Pro limit. The command to run it is in PROGRESS,
+  "Needs me".
+
+## D79. CI's browser jobs run in Playwright's images (run 4, J8)
+- **What happened:** from about 14:00 on 2026-11-11, GitHub's runners couldn't resolve Ubuntu's
+  package archive, so `playwright install --with-deps` (apt) failed in the python and e2e jobs on
+  both ubuntu-latest (now 26.04) and ubuntu-24.04, for hours.
+- **Decision:** those jobs run in `mcr.microsoft.com/playwright/python:v1.64.0-noble` and
+  `mcr.microsoft.com/playwright:v1.64.0-noble`, which already contain Chromium's system libraries;
+  only the browser binary is installed (from Playwright's CDN, no apt). The database service is
+  reached by its name inside a container job. Runners stay pinned to ubuntu-24.04. CI green
+  (run 43062066917).
+
+## D80. Replay judges a change, not a screenshot (run 5, K1)
+- **Problem:** "Save changes does nothing" was found 7 times (bug 8) and rejected every time.
+  The judge saw one screenshot of the end state, and a page where Save did nothing looks exactly
+  like a page where nobody clicked Save.
+- **Decision:** replay captures a compact page state just before the last action that acts on
+  the page (click, double-click, type, select, reload, back, navigate) and again once the page
+  has settled after it (`page_state.py`). The state holds the URL, the visible text lines, form
+  values (passwords never read), totals, local/session storage and cookies (fingerprints only,
+  never values) and, for the time in between, requests (no query strings), dialogs, new tabs,
+  console errors and text that appeared and vanished (a toast, caught by a MutationObserver).
+  The diff sets harmless changes aside: spinner text, a line whose only change is a time or
+  date, and GET requests the page was already sending (polling).
+- **What counts as a response:** URL, text, fields, storage, a request, a dialog, a new tab, or
+  text that appeared briefly. A console error alone does not: users don't see it (it is still
+  shown to the judge as evidence of why nothing happened).
+- **When the measurement decides alone:** the report says the action had no effect (a pattern
+  on title + actual), the action was on a control (button, link, checkbox, select, tab, menu
+  item…), and the diff is empty → confirmed with no model call. A control that does nothing at
+  all is a defect a QA tester would file. Everything else (wrong-change reports, no-effect
+  reports on non-controls, any diff with a change) goes to the judge with the diff summary and
+  one picture: before on the left, after on the right (Pillow; one image works with every
+  provider, including claude-cli and Ollama).
+- **Alternatives:** asking the judge in every case (the 12B judge rejected bug 8 four times
+  even with a clear description; a measured "nothing changed" is stronger evidence than its
+  reading of a picture); sending two images (needs a provider change in five clients for no
+  gain); the accessibility tree instead of visible text (larger, and the text plus field
+  values carried every case in the tests).
+- **Reverify signs in only if the run did:** `login_at_the_time` uses the workspace's login setup
+  only if it existed when the run was created, so old runs replay as they ran.
+
+## D81. The reviewer tier: a stronger model only where judgement is needed (run 5, K2)
+- **Problem:** the explorer reaches bug states and then explains them away (run 4: Gemma
+  dismissed 19 of 23 flagged contradictions). Running a frontier model for every step costs ~40
+  decisions per run; judging is needed in a handful of them.
+- **Decision:** with `REVIEWER_PROVIDER` / `REVIEWER_MODEL` set, (1) a step flagged by the
+  expected-vs-actual check goes to the reviewer at once (action, expectation, what happened,
+  flags, page text fenced, screenshot); it files the bug itself or dismisses the flag, and the
+  explorer is only told the outcome and keeps exploring (no "resolve first" gate); (2) after the
+  loop, each report the explorer filed is reviewed once as text and is kept (and rewritten more
+  precisely, the old title kept as `explorer_title`) or dropped with `reviewer: <reason>`. Replay
+  still verifies everything that is kept.
+- **Unclear answers:** on a flagged step, "not a bug" (exploration continues; the flag is
+  stored); on a final report, "keep" (replay still checks it). Losing a report on a garbled
+  answer is worse than replaying one more.
+- **Costs:** the reviewer's calls count against the run's cost budget the moment they happen,
+  are logged as `review` steps, and are summed into `runs.reviewer_*` (provider, model, tokens,
+  cost), apart from the explorer's share of `runs.cost_usd`. A benchmark records the reviewer
+  in `details.reviewer`, like the judge. A report the reviewer dropped counts as
+  `reviewer_said_no` in the verification funnel.
+- **Scope:** server-level settings (any provider, including claude-cli locally); a
+  per-workspace reviewer choice can come with K4's plans.
+- **Alternatives:** the reviewer on every step (cost of a frontier model per step, no gain on
+  steps that need none); the reviewer only at the end (by then the flagged state is gone, and a
+  flag is exactly where Gemma failed); a vote between explorer and reviewer (the explorer's
+  judgement is the weak part).
+
+## D82. List pages: open at least one item (run 5, K2)
+- **Problem:** run 4's Gemma reached the order list and never opened an order (bug 13 unreached).
+- **Decision:** charter technique 9 ("Lists and details": open an item, check the detail shows
+  the item you opened) plus a per-list reminder in the observation (`agent/lists.py`). A list is
+  two or more same-site links whose paths share a parent and end in an id (digits, a UUID, a slug
+  with a digit, optionally `.html`); the reminder names the list page and one item link and stays
+  until a URL under that parent is visited. Opening a product doesn't tick off the orders list.
+- **Generic:** nothing names a site, a product or a bug; tests check the charter says nothing
+  site-specific.
+
+## D83. Roles and row-level security everywhere (run 5, K3)
+- **Decision:** three login roles, none superuser or BYPASSRLS: `ata_owner` (owns the schema),
+  `ata_web`, `ata_worker`; the apps are members of `app_tenant`, so they see no tenant rows
+  without a workspace set (fail closed). The web app goes through `tenantDb(ctx)` /
+  `inTenant(ctx, fn)` for everything; the worker ties a claimed run's session to its workspace
+  (`enter_tenant`). What must cross workspaces is a narrow SECURITY DEFINER function owned by
+  `ata_owner`, with EXECUTE for one role (DATABASE.md, "Justified bypasses"); sign-in reads
+  users through a read-only policy. Operator commands (bench, reverify, backfill, make-admin,
+  set-plan) use the admin connection.
+- **Env:** `DATABASE_URL` stays the admin connection (migrations, tests, operator commands);
+  `WEB_DATABASE_URL` / `WORKER_DATABASE_URL` are the apps' roles and fall back to it while unset,
+  so nothing breaks before `npm run db:roles` has run. Production compose gives each container
+  only its own URL.
+- **Alternatives:** keep the worker on the owner role (run 4; one compromised worker could read
+  every workspace); a separate database per tenant (heavy to operate at this size); app-level
+  checks only (one forgotten WHERE leaks data).
+- **Tested** as each role (`SET LOCAL ROLE` in the worker's database tests, a real `ata_web` login
+  in the web tests, a real `ata_worker` login for the worker's jobs).
+
+## D84. Rules in Postgres: triggers, functions, views, constraints (run 5, K3)
+- **Decision:** the audit log is written by triggers (actor from `app.user_id`, context from
+  `app.audit_metadata`; no secret values; append-only for the apps), `updated_at` by triggers,
+  triage carry-forward by a trigger on `bugs`; the queue, quota and retention are functions
+  (`claim_next_run`, `consume_quota`, `apply_retention`, …) the apps call; `target_bug_history`
+  (security_invoker) and `model_leaderboard` (materialized, refreshed by a statement trigger on
+  every write: results are rare and the table tiny) are views; fixed sets and ranges are CHECKs.
+  The app's own audit writes and the worker's `apply_triage` were removed.
+- **Why:** these rules must hold for every writer. A rule in one app holds only there.
+- **Kept in code:** fingerprints (Python normalisation), replay, model calls, storage deletes,
+  validation messages.
+
+## D85. Plans and usage (run 5, K4) — decided without owner, revisit
+- **Plans (placeholders until the owner sets prices):** Free 30 runs/month, 40 steps, local
+  models only (Ollama), 3 seats, 7 days; Team 300, 80, any model, 10, 30 days; Business 2000, 150,
+  any, 50, 90 days. New workspaces start on Free; `worker set-plan` moves one.
+- **Enforced by Postgres:** `consume_quota(workspace, provider)` → runs (the lower of the plan's
+  and the workspace's own quota), allowed providers, and the step cap (the web app writes it to
+  `runs.max_steps`); seats in `accept_invitation`; retention in `apply_retention`.
+- **Usage events:** one per finished run, written by a trigger, explorer and reviewer apart;
+  append-only for the apps. The run's own model counts as allowed when it is the server's
+  default (the operator's choice).
+- **Admin view:** `users.is_platform_admin`, set only by `worker make-admin` (owner's question d2,
+  my pick), checked by the database function `platform_usage`.
+- **No payment provider:** ROADMAP.md, "Billing", says what Stripe would add.
+
+## D86. What the first tiered benchmark changed (run 5, K2)
+- **Browser form validation is a response:** replay records invalid fields (with the browser's
+  message) and the focused field; a submit that moves the focus to an invalid field is "the
+  browser refused to submit", a change users see. It was the holdout's one false alarm.
+- **Lists from the crawl seed the reminder:** the deterministic crawl already visits the site;
+  its pages that share a parent and end in an id (found on one list page) are lists the agent is
+  reminded about from step 1. The crawl's own visits don't tick them off: only the agent's do.
+- **The reviewer model:** this Mac has 16 GB. gemma4:12b (7.7 GB) runs the explorer; the largest
+  model that fits next to it and the browser in reasonable time is a ~14B model at 4-bit:
+  qwen3:14b (9.3 GB, free download; the two don't fit in memory together, so Ollama swaps them
+  for each review; reviews are 1–3 per run). It is text-only, so `REVIEWER_VISION=false` wraps it
+  (`TextOnlyClient`): image calls become text calls, with the page text and the measured diff.
+  Larger vision models (27B+) don't fit in 16 GB with the browser.
+- **The e2e fake model** gets a fresh script per run (two e2e tests now run interactive runs).
+- **The dev demo account** is on Business (dev-only; e2e runs it many times a month).

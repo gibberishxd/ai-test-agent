@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toGitHubIssue, toJira, type ExportableBug } from "./export";
+import { evidenceLines, toGitHubIssue, toJira, type ExportableBug } from "./export";
 
 const bug: ExportableBug = {
   title: "GET /api/profile fails with HTTP 500",
@@ -46,5 +46,18 @@ describe("toJira", () => {
 
   it("leaves out the evidence section when there is none", () => {
     expect(toJira({ ...bug, evidence: {} }, context)).not.toContain("{noformat}");
+  });
+});
+
+describe("evidenceLines: what replay measured (run 5, K1)", () => {
+  it("shows the before/after summary of the replayed action", () => {
+    const lines = evidenceLines({
+      replay_diff: { meaningful: false, summary: "No change: no new or removed text.\nConsole errors: TypeError" },
+    });
+    expect(lines).toEqual(["Replay measured the last action:", "No change: no new or removed text.", "Console errors: TypeError"]);
+  });
+
+  it("ignores a malformed diff", () => {
+    expect(evidenceLines({ replay_diff: { summary: 42 } })).toEqual([]);
   });
 });

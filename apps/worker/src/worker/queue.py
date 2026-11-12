@@ -14,12 +14,15 @@ Lease times use the database's clock (now()), so workers with skewed clocks stil
 import logging
 import threading
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from worker.db.models import Run, RunStatus
+from worker.db.tenant import enter_tenant, leave_tenant
+
+BENCHMARK_SLUG = "benchmark"  # the workspace the benchmark queues its runs in
 
 # Which status changes are allowed. Anything else is a bug in the worker.
 TRANSITIONS: dict[str, set[str]] = {
@@ -48,43 +51,45 @@ def transition(run: Run, new_status: RunStatus, error: str | None = None) -> Non
 
 
 def recover_stale_runs(session: Session, older_than_s: float) -> int:
-    """Fail runs stuck in "running" for longer than any run may take.
+    """Fail runs stuck in "running" whose worker hasn't shown a sign of life for `older_than_s`.
 
     If a worker process dies mid-run (crash, deploy, laptop closed), its run would stay
-    "running" forever. Called when a worker starts; returns how many runs were recovered.
+    "running" forever. Called when a worker starts. The rule lives in Postgres
+    (recover_runs, run 5): a run whose worker still heartbeats is alive, however old it is.
     """
-    cutoff = datetime.now(UTC) - timedelta(seconds=older_than_s)
-    stale = session.scalars(
-        select(Run).where(Run.status == RunStatus.RUNNING, Run.started_at < cutoff)
-    ).all()
-    for run in stale:
-        transition(run, RunStatus.FAILED, error="the worker stopped before the run finished")
-    session.commit()
-    return len(stale)
+    return recover_expired_leases(session, older_than_s)
 
 
-def claim_next_run(session: Session, worker_id: str) -> Run | None:
+def claim_next_run(
+    session: Session,
+    worker_id: str,
+    only: list | None = None,
+    skip_benchmark: bool = False,
+) -> Run | None:
     """Claim the oldest queued run, or return None if there is nothing to do.
 
-    The status change is committed immediately: after that the row is no longer "queued", so
-    no other worker can pick it up, and the lock can be released.
+    The claim is the database function claim_next_run (run 5): SELECT ... FOR UPDATE SKIP
+    LOCKED, the status change and the lease in one statement, committed at once. It is the
+    one place that looks across workspaces, so it runs as the schema owner and returns only
+    the run's id; everything after that happens inside the run's own workspace.
+
+    - `only`: claim only these runs (a benchmark processes exactly the runs it queued, with its
+      own model, and never a customer's).
+    - `skip_benchmark`: a regular worker leaves the benchmark workspace's runs alone, so a
+      worker started with another model can't run part of someone's benchmark.
     """
-    stmt = (
-        select(Run)
-        .where(Run.status == RunStatus.QUEUED)
-        .order_by(Run.created_at)
-        .limit(1)
-        .with_for_update(skip_locked=True)
-    )
-    run = session.scalars(stmt).first()
-    if run is None:
-        session.rollback()
-        return None
-    transition(run, RunStatus.RUNNING)
-    run.claimed_by = worker_id
-    run.heartbeat_at = func.now()  # the lease starts with the claim
+    ids = [str(run_id) for run_id in only] if only is not None else None
+    leave_tenant(session)  # a claim looks across workspaces: not as the last run's tenant
     session.commit()
-    return run
+    row = session.execute(
+        text("SELECT id, workspace_id FROM claim_next_run(:worker, :only, :skip)"),
+        {"worker": worker_id, "only": ids, "skip": skip_benchmark},
+    ).first()
+    session.commit()
+    if row is None:
+        return None
+    enter_tenant(session, row.workspace_id)  # the session sees only this run's workspace now
+    return session.get(Run, row.id, populate_existing=True)
 
 
 LEASE_ERROR = "the worker stopped responding (no heartbeat for {lease} s)"
@@ -94,25 +99,14 @@ log = logging.getLogger(__name__)
 def recover_expired_leases(session: Session, lease_s: float) -> int:
     """Fail running runs whose worker hasn't renewed the lease for `lease_s` seconds.
 
-    One UPDATE with the condition in its WHERE: if two workers recover at once, Postgres runs
-    the updates one after the other, and the second finds the row no longer "running".
-    Runs from before leases existed fall back to started_at. Returns how many were failed.
+    The database function recover_runs does it in one UPDATE: if two workers recover at once,
+    Postgres runs the updates one after the other, and the second finds the row no longer
+    "running". Runs from before leases existed fall back to started_at.
     """
-    lease = timedelta(seconds=lease_s)
-    last_sign_of_life = func.coalesce(Run.heartbeat_at, Run.started_at)
-    result = session.execute(
-        update(Run)
-        .where(Run.status == RunStatus.RUNNING, last_sign_of_life < func.now() - lease)
-        .values(
-            status=RunStatus.FAILED,
-            finished_at=func.now(),
-            error=LEASE_ERROR.format(lease=round(lease_s)),
-        )
-        .returning(Run.id)
-    )
-    failed = result.scalars().all()
+    failed = session.execute(text("SELECT recover_runs(:lease)"), {"lease": round(lease_s)})
+    count = failed.scalar() or 0
     session.commit()
-    return len(failed)
+    return count
 
 
 class Heartbeat:
@@ -139,11 +133,7 @@ class Heartbeat:
         while not self._stop.wait(self._interval):
             try:
                 with self._sessions() as session:
-                    session.execute(
-                        update(Run)
-                        .where(Run.id == self._run_id, Run.status == RunStatus.RUNNING)
-                        .values(heartbeat_at=func.now())
-                    )
+                    session.execute(text("SELECT renew_lease(:run)"), {"run": self._run_id})
                     session.commit()
             except Exception:  # a missed beat is fine; the lease is several beats long
                 log.warning("heartbeat for run %s failed", self._run_id, exc_info=True)

@@ -13,7 +13,9 @@ import {
   holdoutPerBug,
   judgeLabel,
   latestPerProvider,
-  leaderboard,
+  validResults,
+  leaderboardFromView,
+  reviewerLabel,
   perBug,
   percent,
   percentOrDash,
@@ -30,7 +32,7 @@ export const metadata: Metadata = { title: "Benchmark" };
 
 export default async function BenchmarkPage() {
   await connection();
-  const rows: BenchmarkRow[] = await db.benchmarkResult.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+  const rows: BenchmarkRow[] = validResults(await db.benchmarkResult.findMany({ orderBy: { createdAt: "desc" }, take: 200 }));
 
   if (rows.length === 0) {
     return (
@@ -45,7 +47,8 @@ export default async function BenchmarkPage() {
   }
 
   const latest = latestPerProvider(rows);
-  const board = leaderboard(rows);
+  const fromView = await db.$queryRaw<{ id: string }[]>`SELECT latest_result_id AS id FROM model_leaderboard`;
+  const board = leaderboardFromView(rows, fromView.map((r) => r.id));
   const newest = rows[0];
   const bugs = perBug(newest);
   const holdoutBugs = holdoutPerBug(newest);
@@ -143,7 +146,10 @@ export default async function BenchmarkPage() {
                 <Tile label="Cost / run" value={formatCost(row.avgCostUsd)} hint={`${Math.round(row.avgDurationS)} s avg`} />
               </dl>
               <VerificationSummary funnel={verification(row)} />
-              <p className="text-xs text-muted-foreground">Judge: {judgeLabel(row)}</p>
+              <p className="text-xs text-muted-foreground">
+                Judge: {judgeLabel(row)}
+                {reviewerLabel(row) && <> · Reviewer: {reviewerLabel(row)}</>}
+              </p>
             </div>
           ))}
         </div>
@@ -226,6 +232,7 @@ export default async function BenchmarkPage() {
                   <TableCell className="whitespace-nowrap">{formatDate(row.createdAt)}</TableCell>
                   <TableCell>
                     {row.provider} · {row.model}
+                    {reviewerLabel(row) && <span className="block text-xs text-muted-foreground">+ reviewer {reviewerLabel(row)}</span>}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{commitLabel(row)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>

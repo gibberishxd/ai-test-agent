@@ -5,13 +5,24 @@ import json
 import os
 
 from worker.config import Settings
-from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
+from worker.llm.base import (
+    Decision,
+    LLMClient,
+    ModelTimeout,
+    TextResult,
+    ToolCall,
+    ToolSpec,
+    Usage,
+)
 from worker.llm.fake import FakeClient
+from worker.llm.text_only import TextOnlyClient
 
 __all__ = [
     "Decision",
     "FakeClient",
     "LLMClient",
+    "ModelTimeout",
+    "TextOnlyClient",
     "TextResult",
     "ToolCall",
     "ToolSpec",
@@ -98,3 +109,21 @@ def make_judge(settings: Settings, agent: LLMClient) -> LLMClient:
         pinned["ollama_model"] = settings.judge_model
         pinned["openai_compat_cheap_model"] = settings.judge_model
     return make_client(settings.model_copy(update=pinned))
+
+
+def make_reviewer(settings: Settings) -> LLMClient | None:
+    """The reviewer tier's client (REVIEWER_PROVIDER / REVIEWER_MODEL), or None when unset.
+
+    The reviewer only answers `review_screenshot` calls, which use the client's agent model, so
+    REVIEWER_MODEL pins that model for whichever provider is chosen.
+    """
+    if not settings.reviewer_provider and not settings.reviewer_model:
+        return None
+    pinned: dict = {"llm_provider": settings.reviewer_provider or settings.provider()}
+    if settings.reviewer_model:
+        model = settings.reviewer_model
+        pinned.update(agent_model=model, ollama_model=model, openai_compat_model=model)
+    client = make_client(settings.model_copy(update=pinned))
+    if settings.reviewer_model:
+        client.agent_model = settings.reviewer_model  # claude-cli takes no model setting
+    return client if settings.reviewer_vision else TextOnlyClient(client)

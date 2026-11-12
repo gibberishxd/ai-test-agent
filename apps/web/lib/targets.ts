@@ -61,7 +61,7 @@ export function parseRunInput(
   } else if (mode === "interactive" && targetUrl) {
     const verified = verifiedOrigins.some((origin) => sameOrigin(origin, targetUrl));
     if (!isDemoTarget(targetUrl) && !verified) {
-      errors.mode = "Interactive tests run only on the demo shop and on domains you've verified.";
+      errors.mode = "Interactive tests run only on the demo shop and on domains you've verified. Verify yours in Settings → Domains (a DNS record or a file), or run a passive scan.";
     }
   }
 

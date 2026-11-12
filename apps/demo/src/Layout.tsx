@@ -18,6 +18,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/">Shop</NavLink>
           <NavLink to="/cart">Cart ({count})</NavLink>
           <NavLink to="/profile">Profile</NavLink>
+          {session && <NavLink to="/orders">My orders</NavLink>}
           {session ? (
             <button type="button" className="link-button" onClick={logout}>
               Log out

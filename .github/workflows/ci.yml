@@ -6,7 +6,7 @@ on:
 
 jobs:
   typescript:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned so the runner image changes only when we choose (run 4)
     services:
       postgres:
         image: postgres:17
@@ -22,8 +22,8 @@ jobs:
       DATABASE_URL: postgresql://agent:agent@localhost:5432/agent
       REQUIRE_DB: "1"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -32,8 +32,11 @@ jobs:
       - run: npm run lint --workspaces
       - run: npm run test --workspaces
 
+  # Run inside Playwright's image: Chromium and its system libraries are already there, so CI
+  # doesn't depend on apt mirrors (an Ubuntu archive outage broke `--with-deps` on 2026-11-11).
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned so the runner image changes only when we choose (run 4)
+    container: mcr.microsoft.com/playwright/python:v1.64.0-noble
     services:
       postgres:
         image: postgres:17
@@ -46,16 +49,16 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U agent" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://agent:agent@localhost:5432/agent
+      DATABASE_URL: postgresql://agent:agent@postgres:5432/agent
       REQUIRE_DB: "1"
     defaults:
       run:
         working-directory: apps/worker
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv sync
-      - run: uv run playwright install --with-deps chromium
+      - run: uv run playwright install chromium # the image has the system libraries
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
@@ -64,7 +67,8 @@ jobs:
   # then the web app's end-to-end tests: real web app, demo shop and worker, with the worker on
   # the scripted FakeClient, so it is free and deterministic.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned so the runner image changes only when we choose (run 4)
+    container: mcr.microsoft.com/playwright:v1.64.0-noble
     services:
       postgres:
         image: postgres:17
@@ -77,23 +81,31 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U agent" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://agent:agent@localhost:5432/agent
+      DATABASE_URL: postgresql://agent:agent@postgres:5432/agent
       DEV_MODE: "true"
       LLM_PROVIDER: fake
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: npm ci
-      - run: npx -w apps/demo playwright install --with-deps chromium
+      - run: npx -w apps/demo playwright install chromium # the image has the system libraries
       - run: uv sync
         working-directory: apps/worker
       - run: uv run playwright install chromium
         working-directory: apps/worker
       - run: npm run db:deploy -w apps/web
+      # The web app and the worker connect as their own roles (run 5, K3), like production.
+      - run: npm run db:roles
+        env:
+          DB_WEB_PASSWORD: ci-web
+          DB_WORKER_PASSWORD: ci-worker
+      - run: |
+          echo "WEB_DATABASE_URL=postgresql://ata_web:ci-web@postgres:5432/agent" >> "$GITHUB_ENV"
+          echo "WORKER_DATABASE_URL=postgresql://ata_worker:ci-worker@postgres:5432/agent" >> "$GITHUB_ENV"
       # A throwaway key for this CI run only, so the model settings test can store a key.
       - run: echo "MODEL_KEYS_SECRET=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - name: Planted bugs (demo shop + holdout app)

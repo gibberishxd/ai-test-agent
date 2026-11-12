@@ -12,7 +12,15 @@ from typing import Any
 
 import httpx
 
-from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
+from worker.llm.base import (
+    Decision,
+    LLMClient,
+    ModelTimeout,
+    TextResult,
+    ToolCall,
+    ToolSpec,
+    Usage,
+)
 
 TIMEOUT_S = 300  # local models on a laptop can be slow, especially the first (loading) call
 CONTEXT_TOKENS = 16384  # Ollama's default context is small; observations need more room
@@ -97,7 +105,10 @@ class OllamaClient(LLMClient):
         }
         if tools:
             body["tools"] = tools
-        response = self._http.post(f"{self._url}/api/chat", json=body)
+        try:
+            response = self._http.post(f"{self._url}/api/chat", json=body)
+        except httpx.TimeoutException as error:
+            raise ModelTimeout(f"no answer within {TIMEOUT_S} s") from error
         response.raise_for_status()
         return response.json()
 

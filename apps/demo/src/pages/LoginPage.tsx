@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { bug } from "../bugs";
 import { DEMO_ACCOUNT, useStore } from "../store";
 import { usePageTitle } from "../usePageTitle";
@@ -11,6 +11,10 @@ export function LoginPage() {
   usePageTitle("Log in");
   const { login } = useStore();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // Back to the page that asked for a login; only paths in this shop (no open redirect).
+  const next = params.get("next");
+  const after = next && next.startsWith("/") && !next.startsWith("//") ? next : "/profile";
   const [error, setError] = useState<LoginError>(null);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -18,7 +22,7 @@ export function LoginPage() {
     const form = new FormData(event.currentTarget);
     const result = login(String(form.get("email") ?? ""), String(form.get("password") ?? ""));
     if (result === "ok") {
-      navigate("/profile");
+      navigate(after);
     } else if (result === "unknown-email") {
       setError({ field: "email", message: "No account with that email." });
     } else {

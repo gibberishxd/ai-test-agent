@@ -18,6 +18,7 @@ from worker.config import Settings
 from worker.db.models import Bug, Run, Step
 from worker.execute import replay_plans
 from worker.llm import LLMClient
+from worker.login import login_at_the_time
 from worker.scan import guarded_browser
 from worker.verify import VIEWPORTS, ReplayError, failure_of, replay, verify_bug
 
@@ -28,18 +29,21 @@ def reverify_run(
     settings: Settings,
     browser: Browser | None = None,
     judge: LLMClient | None = None,
+    only_status: str | None = None,
 ) -> list[dict]:
     """One outcome per agent report: title, recorded status/reason, replayed, reproduced, ..."""
     run = session.get(Run, run_id)
     steps = {s.index: s for s in session.query(Step).filter_by(run_id=run_id)}
-    bugs = (
-        session.query(Bug)
-        .filter(Bug.run_id == run_id, Bug.source != "deterministic", Bug.duplicate_of_id.is_(None))
-        .order_by(Bug.created_at)
-        .all()
+    query = session.query(Bug).filter(
+        Bug.run_id == run_id, Bug.source != "deterministic", Bug.duplicate_of_id.is_(None)
     )
+    if only_status:  # e.g. "dismissed": re-check only what replay rejected
+        query = query.filter(Bug.status == only_status)
+    bugs = query.order_by(Bug.created_at).all()
     outcomes = []
-    with guarded_browser(settings, run.target_url, browser) as (new_context, _guard):
+    login = login_at_the_time(session, settings, run)  # signed in only if the run was
+    scrub = login.scrub if login else (lambda text: text)
+    with guarded_browser(settings, run.target_url, browser, login) as (new_context, _guard):
         for bug in bugs:
             outcome = {
                 "title": bug.title,
@@ -50,6 +54,7 @@ def reverify_run(
                 "failure": None,
                 "start": None,
                 "reason": None,
+                "diff": None,  # what the last replayed action changed (with a judge only)
             }
             viewport = (bug.evidence or {}).get("viewport", "desktop")
             for start_url, replay_steps in replay_plans(bug, steps, run.target_url):
@@ -74,9 +79,11 @@ def reverify_run(
                             bug.expected,
                             bug.actual,
                             viewport=viewport,
+                            scrub=scrub,
                         )
                         replayed, reproduced = verdict.replayed, verdict.reproduced
                         failure, reason = verdict.failure, verdict.reason
+                        outcome["diff"] = verdict.diff
                 finally:
                     context.close()
                 outcome.update(

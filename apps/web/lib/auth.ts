@@ -9,10 +9,15 @@ import { getServerSession, type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import EmailProvider from "next-auth/providers/email";
 import GitHubProvider from "next-auth/providers/github";
-import { appAdapter, createUserWithWorkspace, type AppUser } from "@/lib/auth-adapter";
+import { appAdapter, findOrCreateUser, type AppUser } from "@/lib/auth-adapter";
 import { db } from "@/lib/db";
+import { inTenant } from "@/lib/tenant-db";
 
 export const DEMO_USER_EMAIL = "demo-user@example.com";
+
+export function isEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
+}
 
 export function demoLoginEnabled(): boolean {
   return process.env.NODE_ENV !== "production";
@@ -47,9 +52,23 @@ function providers(): NextAuthOptions["providers"] {
         name: "Demo user",
         credentials: {},
         async authorize() {
-          const existing = await db.user.findUnique({ where: { email: DEMO_USER_EMAIL } });
-          if (existing) return { ...existing, image: existing.image ?? undefined };
-          return createUserWithWorkspace(db, { email: DEMO_USER_EMAIL, name: "Demo User" });
+          const user = await findOrCreateUser(db, { email: DEMO_USER_EMAIL, name: "Demo User" });
+          // Development's shared account runs the e2e tests over and over: not on Free's 30 runs.
+          await inTenant(user.workspaceId, (tx) => tx.workspace.updateMany({ where: { id: user.workspaceId, planId: "free" }, data: { planId: "business" } }));
+          return { ...user, image: user.image ?? undefined };
+        },
+      }),
+      // A new team without email or GitHub configured (development and the e2e tests): an
+      // account and workspace of its own for any address, like an email sign-up minus the link.
+      CredentialsProvider({
+        id: "dev-signup",
+        name: "Test account",
+        credentials: { email: { label: "Email", type: "email" } },
+        async authorize(credentials) {
+          const email = String(credentials?.email ?? "").trim();
+          if (!isEmail(email)) return null;
+          const user = await findOrCreateUser(db, { email, name: null });
+          return { ...user, image: user.image ?? undefined };
         },
       }),
     );

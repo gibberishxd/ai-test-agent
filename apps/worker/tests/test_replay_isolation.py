@@ -184,3 +184,51 @@ def test_reverify_with_a_judge_returns_its_verdict(
 
     assert outcome["replayed"] is True and outcome["reproduced"] is True
     assert "Cart (2)" in judge.calls[0]["prompt"]
+
+
+def test_verification_stores_what_the_last_action_changed(
+    sessions, workspace, settings, site_url, browser
+):
+    url = f"{site_url}/spa.html"
+    run = store_run(sessions, workspace, url, [add_socks_to_cart(url, "2")])
+    llm = FakeClient(texts=[NO_DUPLICATES, REPRODUCED])
+
+    [bug] = verify(sessions, run.id, llm, settings, browser)
+
+    diff = bug.evidence["replay_diff"]
+    assert diff["meaningful"] is True
+    assert "Cart (2)" in diff["summary"]
+
+
+def test_reverify_returns_the_diff_of_the_last_action(
+    sessions, workspace, settings, site_url, browser
+):
+    from worker.reverify import reverify_run
+
+    url = f"{site_url}/spa.html"
+    run = store_run(sessions, workspace, url, [add_socks_to_cart(url, "2")])
+
+    with sessions() as session:
+        [outcome] = reverify_run(
+            session, run.id, settings, browser=browser, judge=FakeClient(texts=[REPRODUCED])
+        )
+
+    assert outcome["diff"]["meaningful"] is True
+
+
+def test_reverify_can_recheck_only_the_reports_that_were_dismissed(
+    sessions, workspace, settings, site_url, browser
+):
+    from worker.reverify import reverify_run
+
+    url = f"{site_url}/spa.html"
+    run = store_run(
+        sessions, workspace, url, [add_socks_to_cart(url, "2"), add_socks_to_cart(url, "3")]
+    )
+    with sessions() as session:
+        first = session.query(Bug).filter_by(run_id=run.id, title="Report 1").one()
+        first.status = "dismissed"
+        session.commit()
+        outcomes = reverify_run(session, run.id, settings, browser=browser, only_status="dismissed")
+
+    assert [o["title"] for o in outcomes] == ["Report 1"]

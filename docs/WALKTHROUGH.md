@@ -940,3 +940,362 @@ single run swings a bug from 0/3 to 2/3. The clean builds turned out to have rea
    the planted list. A benchmark's clean build has to be audited too.
 3. *What would you do next?* Help the model compare expected with actual after each
    state-changing action, then measure on the holdout first.
+
+## Run 4: expected vs. actual (`agent/expect.py`, `agent/loop.py: _compare, _unresolved_gate, _dismiss`, `agent/tools.py`)
+
+**What:** before a state-changing action (click, double_click, select, reload, set_viewport) the
+model writes `expect`: one line of what should happen, with concrete values ("Total: $36.00",
+"'Profile saved'", "/cart"). The worker snapshots the page before the action and compares
+afterwards, without another model call:
+1. `Effect`: what changed: URL, lines added and removed, field values (`Quantity: 0 → 1`;
+   password fields are never read), new console errors and failed requests.
+2. `mismatches()`: the model expected a change and nothing changed; or a value it predicted
+   (amount, number, quoted text, path) is nowhere in the page text, the fields or the URL.
+   Numbers compare by value ($1,236 = 1236.00); values after "not" and dates are ignored.
+3. A mismatch becomes a `Candidate`. The next observation shows it under UNRESOLVED MISMATCH;
+   the model must `report_bug` (which resolves it) or `dismiss` it with a reason. Any other
+   action is refused once; the second time the candidate expires as "ignored", so a stubborn
+   model can't stall the run.
+
+**Why:** run 3 showed Gemma reaching 7 of 12 bug states and reporting 1: it acted, glanced at
+"ok" and moved on. Writing the expectation first makes the model do the arithmetic before it
+sees the answer, and the deterministic comparison puts the contradiction in front of it. It's
+the human tester's habit ("I expect $36") turned into a protocol.
+
+**Cost:** about 20 output tokens per checked action for `expect`, and a candidate line only
+when there is a mismatch. No extra model call. The comparison is a few string operations.
+
+**Weak spots:** the check only knows what the model wrote: a vague "page updates" catches
+only "nothing changed". A wrong expectation (the model miscalculates) creates a candidate it
+must dismiss, costing a step. Values present anywhere on the page count as found, so "$12"
+expected for a line and also shown elsewhere passes.
+
+**Also in J1:**
+- `ModelTimeout` (Ollama's read timeout): the loop retries the decision once with a
+  `trimmed` observation (first line of the task, 30 elements, 4 recent steps, 800 characters of
+  page text, no image). A second timeout ends the run cleanly (D61).
+- claude-cli: if the CLI reports `permission_denials` (the model tried to call a tool
+  natively), the answer is not taken; one corrective message says it does have the listed
+  tools and must answer with the JSON object.
+- `bench --holdout-first`: judge a change on the holdout before spending hours on the shop.
+
+**Interview Q&A**
+1. *Why not ask the model "was that right?" after every action?* That is a second model call
+   per step (double cost and time) and a weak model says "yes". Writing the expectation first
+   is cheaper and the comparison is deterministic.
+2. *Isn't refusing actions until a mismatch is resolved heavy-handed?* Only once per
+   candidate, then it expires. The point is that a contradiction can't scroll out of view.
+3. *How do you know it helps and isn't benchmark tuning?* Nothing in it knows any site; it is
+   kept only if the holdout (never tuned against) doesn't drop and clean-build false alarms
+   don't rise (MISS_ANALYSIS, run 4).
+
+## Run 4: testing apps behind a login (`login.py`, `login_checks.py`, `scan.py: guarded_browser`, `agent/loop.py`, `lib/login-setups.ts`)
+
+**What:** a workspace saves, per site, how to sign in with a test account: a login form (URL,
+username, encrypted password, optional selectors) or a recorded sign-in (Playwright storage state,
+encrypted). Before a run, the worker signs in; every browser context it opens (crawl, agent,
+each replay) is signed in. The agent never gets the credentials.
+
+**How the secrets stay secret:** the password and storage state are AES-256-GCM encrypted (the
+same scheme as model keys); views only say "saved". In the loop, the password and username are
+scrubbed from every observation, step, bug report and replay prompt (`LoginConfig.scrub`), and
+password fields are masked in every screenshot (`mask=[input[type=password]]`). Test sign-in
+stores only ok/failed and a scrubbed reason.
+
+**How the session stays alive:** logout, change/reset password and delete/close account are
+denied on every target (even the demo shops, where the normal deny list is off). The crawler
+skips logout links. If an action lands on the login page without the agent going there itself,
+the session ended: the worker signs in again (max 3) and goes back.
+
+**Why only on verified domains:** signing in submits credentials to a site. A worker that does
+that wherever a workspace says could be used to stuff credentials into someone else's login.
+
+**Weak spots:** "signed out" means "on the login URL"; an app that shows a login modal on the same
+URL isn't detected. SSO/2FA needs a recorded storage state, which expires.
+
+**Interview Q&A**
+1. *Why not give the agent the credentials and let it log in?* The model (and its provider) would
+   see them, it could type them anywhere, and a weak model fails flaky login forms. A deterministic
+   sign-in is cheaper, safer and testable.
+2. *How do you prove the password never leaks?* `test_signed_in_run.py` runs a whole signed-in run
+   and searches every stored row and every model call for the password and username.
+3. *Why scrub the username too?* It's personal data and often an email; the agent doesn't need it
+   to test, and reports get shared.
+
+## Run 4: running it from CI (`lib/api-keys.ts`, `lib/api-v1.ts`, `app/api/v1`, `openapi.json`, `webhooks.py`, `examples/ci`)
+
+**What:** API keys per workspace; `POST /api/v1/runs`, `GET /api/v1/runs/{id}`, `GET
+/api/v1/runs/{id}/report[?format=junit]`; signed webhooks when a run finishes; a CI script and a
+GitHub Actions workflow that fail the build on a chosen severity.
+
+**How:** keys are stored as SHA-256 hashes (random 256-bit keys don't need a slow hash) and looked
+up by a unique index; a per-key, per-minute counter in Postgres (one atomic upsert) rate-limits
+across servers. `startRun` is shared with the dashboard, so the API can't bypass quota or domain
+verification. JUnit maps each reported bug to a failing test case. Webhooks: deliveries are rows
+claimed with SKIP LOCKED, signed with HMAC-SHA256 over "timestamp.body", retried with backoff,
+sent through the same egress guard as the browser.
+
+**Weak spots:** a fixed window lets a burst of 2× the limit across a minute boundary; the CI
+script polls (10 s) instead of waiting on the webhook; one event type only.
+
+**Interview Q&A**
+1. *Why sign the timestamp?* Without it, a captured request verifies forever (replay). With it, the
+   receiver rejects anything older than 5 minutes.
+2. *How does the rate limit stay correct with parallel requests?* `INSERT ... ON CONFLICT DO
+   UPDATE ... RETURNING count` takes a row lock; concurrent requests queue on it and each sees its
+   own count (tested with 8 parallel requests against a limit of 5).
+3. *What stops a webhook from hitting your internal network?* The URL is checked after DNS by the
+   same guard as the browser, and the POST goes through the guard proxy, which connects only to the
+   address it checked, so DNS can't change its answer in between.
+
+## Run 4: bugs across releases (`fingerprint.py`, `triage.py`, `lib/triage.ts`, `components/bug-card.tsx`)
+
+**What:** every finding has a fingerprint; the run page marks each finding New or Still present
+compared with the target's previous run and lists what was Fixed. Members triage a finding
+(confirmed, false positive, won't fix, comment); the decision follows the fingerprint into later
+runs, where false positives are hidden and counted per model.
+
+**How:** fingerprint = hash(route with ids → `:id` | category | key). Keys are chosen to survive
+run-to-run noise: numbers and bundle hashes are removed from messages, agent reports are keyed by
+the element they acted on, so a reworded title stays the same bug. The worker sets it on insert
+(SQLAlchemy hook) and suppresses triaged false positives at the end of a run; the web computes
+new/still/fixed from two runs' fingerprints.
+
+**Weak spots:** a page whose ids are slugs (`/products/desk-lamp`) is one route per product, so the
+same bug on two products is two findings; an agent report without an element falls back to title
+words, which a very different wording breaks.
+
+**Interview Q&A**
+1. *Why not use the title?* Agent titles change wording every run, deterministic titles contain ids
+   and numbers. The element or message, normalised, is the stable part.
+2. *Why is the same message on two pages two bugs?* A developer fixes a page, not a message; and a
+   false positive on one page shouldn't hide a real error on another.
+3. *What does triage teach you?* A false-positive rate per model on real customer sites, not only on
+   our benchmark, which is the number a buyer cares about.
+
+## Run 4: teams, roles and tenant isolation (`lib/roles.ts`, `lib/members.ts`, `lib/tenant-db.ts`, RLS migration)
+
+**What:** four roles with one permission table checked by every route; invitation links; an audit
+log page; Postgres row-level security behind the app's own workspace filters; one default model
+per workspace enforced by a partial unique index.
+
+**How RLS works here:** the web app wraps each query in a transaction that sets
+`app.workspace_id` and switches to the role `app_tenant`; policies on every tenant table compare
+`workspace_id` with that setting (children through their parent). An unset setting matches
+nothing. The worker uses the owner role and isn't filtered.
+
+**Weak spots:** not every web query goes through `tenantDb` yet; the app's DB user must not be a
+superuser in production for the second wall to mean anything; a removed member's runs stay in the
+workspace (as they should) but their name stays on them.
+
+**Interview Q&A**
+1. *What does `SET LOCAL ROLE` give you over just a WHERE clause?* The database enforces it: a
+   query that forgets the filter returns only the tenant's rows. Tested by querying with no WHERE.
+2. *Why is the role read from the database on every request?* Sessions are cookies that live for
+   days; a demoted admin must lose admin rights now, not when their cookie expires.
+3. *How did you test authorization?* One table-driven test calls every protected route as every
+   role and expects 403 exactly where the permission table says no; it caught a 403 that should
+   have been a 404.
+
+## Run 4: production readiness (`Dockerfile.web`, `Dockerfile.worker`, `docker-compose.prod.yml`, `storage.py`, `retention.py`, `lib/storage.ts`, `/api/health|ready|metrics`, `logs.py`)
+
+**What:** container images for the web app and the worker, a production compose stack (Postgres,
+an S3-compatible object store (SeaweedFS), migrations, web, N workers), screenshots in S3-compatible storage behind signed expiring
+links, a retention job, health and metrics endpoints, JSON logs, SHA-pinned CI actions, and
+docs/DEPLOY.md with a threat model.
+
+**How a screenshot is served in production:** the worker uploads `<run>/<file>.png` to the bucket;
+the browser asks the web app for `/api/files/<run>/<file>`; the app checks the run belongs to the
+viewer's workspace (or the share token), then answers 302 to a presigned URL valid for 5 minutes.
+
+**Weak spots:** one Postgres (no replica); the object store is a single node; the worker image is large
+(Chromium); metrics are computed per scrape with a few aggregate queries (fine at this scale,
+cache them at scale).
+
+**Interview Q&A**
+1. *Why presigned links instead of streaming through the app?* The bucket stays private, the app
+   doesn't spend memory and bandwidth on images, and a leaked link expires in minutes.
+2. *Why are migrations a separate one-off container?* So they run once per release, before any new
+   code serves traffic, and not N times in parallel from N web replicas.
+3. *How do you scale?* Add worker replicas: they coordinate through Postgres (`SKIP LOCKED`, leases);
+   the web is stateless behind a load balancer; the bottleneck becomes the model provider.
+
+## Run 4: what the measurements say (MISS_ANALYSIS, "Run 4")
+
+Gemma 4 12B, judge pinned to Gemma, three shop runs and two holdout runs per benchmark:
+run 3 shop AI-only 8%, run 4 J1 8%, run 4 J7 0% (7% before verification); holdout 0% every time;
+0 false alarms on the clean builds every time. The expected-vs-actual check works mechanically
+(23 contradictions flagged in one benchmark) but a 12B model dismisses most of them, and a
+"nothing happened" bug is hard for a screenshot judge to confirm.
+
+**Interview Q&A**
+1. *Your recall went down in the last benchmark: is the product worse?* No: the scored model and
+   judge are the same small local model; one bug was found twice and dismissed by the judge. The
+   per-bug table and the "correct but discarded" count show exactly where it was lost.
+2. *Why keep a change that didn't raise recall?* The rule set in advance: keep it if the holdout
+   doesn't drop and false alarms don't rise. It also produces evidence (expected vs. happened) a
+   stronger judge can use next.
+3. *What would you change next?* Verify "nothing happened" reports by comparing before and after
+   the replayed action, and measure a stronger model (Sonnet reached 38% in run 3).
+
+## Run 5: replay judges a change (`page_state.py`, `verify.py: verify_bug`, `reverify.py`, D80)
+
+**What.** Replay used to end with one screenshot and ask the judge "is the bug visible?". Now it
+records the page twice, just before the last action of the replay and after the page settles,
+and the verdict rests on the difference. `StateRecorder` is attached to the page before it loads,
+so it hears every request, dialog, new tab and console error. `capture()` reads the URL, visible
+text lines, form values, totals, storage and cookie fingerprints, and arms a MutationObserver that
+remembers text added to the page until the next capture (a toast that is gone two seconds later
+still counts). `diff_states(before, after)` returns what appeared, disappeared, changed, was
+sent or was shown, plus what it ignored as harmless.
+
+**How a verdict is reached.**
+1. Replay the steps; `before_last` fires right before the last acting step, once the page is
+   quiet, and captures state + screenshot.
+2. After the step, the page settles (network quiet, DOM quiet) and is captured again.
+3. If the report claims "nothing happens", the action was on a control, and the diff is empty:
+   confirmed, no model call, with a reason that says exactly what was measured.
+4. Otherwise the judge gets the report, the diff summary (fenced as untrusted), the page text, and
+   one picture with before on the left and after on the right.
+
+**Harmless changes.** A line whose only change is a time or date is paired with its twin and
+ignored; spinner words ("Loading…", "Saving...") and "updated 3 seconds ago" stamps are ignored;
+a GET the page was already sending, or sends repeatedly, is polling. Totals are never paired
+away: "Total: $12" → "Total: $24" only changes digits, but it is the change that matters.
+
+**Privacy.** Passwords are never read (the field shows `••••`), storage and cookies are kept as
+12-character SHA-256 fingerprints so the diff can say "changed" without the value, request URLs
+lose their query strings, and the summary goes through the login scrubber and `redact`.
+
+**Weak spots.** "Expected a change" is approximated by "the element is a control"; a button that
+legitimately does nothing visible (a "copy link" button that only writes to the clipboard) would
+be confirmed as dead. The no-effect classifier is a regular expression on the report's wording.
+Changes outside the page (an email sent by the server) are invisible unless a request shows them.
+
+**Interview Q&A**
+1. *Why not just give the model two screenshots?* A picture can't prove absence: a request, a
+   storage write or a toast that vanished in 300 ms are invisible in both. A measured diff is
+   evidence; the picture is context.
+2. *Couldn't this confirm false alarms, e.g. "clicking the logo does nothing"?* Only actions on
+   controls are confirmed by measurement, and only when nothing at all changed; a logo link that
+   navigates changes the URL. Non-controls and anything with a change still go to the judge.
+3. *How do you keep a ticking clock from making every dead button look alive?* Normalise times
+   and dates out of changed lines and pair twins, drop spinner text, and treat repeated or
+   pre-existing GETs as polling; each has a test with a page that does exactly that.
+
+## Run 5: the reviewer tier and list → detail (`agent/reviewer.py`, `agent/loop.py: _review_flag`, `execute.py: _review_candidates`, `agent/lists.py`, D81, D82)
+
+**What.** Two models with two jobs. The explorer (cheap, local) drives the browser for every step,
+as before. The reviewer (stronger, any provider, `REVIEWER_PROVIDER` / `REVIEWER_MODEL`) is
+called only (1) when the expected-vs-actual check flags a step and (2) once per report the
+explorer filed, after the loop. It decides "bug or not" and writes the report.
+
+**How.** In the loop, `_compare` computes the flags as in run 4; with a reviewer it calls
+`review_mismatch` immediately, with the step's action, expectation, what happened, why it was
+flagged, the page text (fenced) and a screenshot. A "bug" becomes a `BugReport` with
+`reported_at = step + 1` (replay repeats the flagged step) and `evidence.reviewer` = the model;
+a "no" is stored in `result.dismissed` with `reviewer:` in front. The explorer sees one line
+("the reviewer filed a bug: …" or "reviewer: not a bug (…)") and goes on: the run-4 gate that
+made it resolve the mismatch first is off, because the explorer is no longer the judge.
+After the loop, `_review_candidates` asks `review_candidate` about each explorer report as text:
+keep and rewrite, or drop. Every reviewer call is logged as a `review` step and summed into
+`runs.reviewer_*`; its cost is charged to the run's budget at once.
+
+**List → detail.** `ListTracker.see` finds lists on each observed page (≥ 2 same-site links under
+one parent ending in an id); `visit` marks a list opened when a URL under its parent is shown;
+`reminder()` adds "LISTS WITH NO ITEM OPENED YET" to the observation. Charter item 9 says why:
+open one item and check it shows the item you opened.
+
+**Why this split.** The 12B explorer is good at getting places and bad at judging what it sees.
+Judgement is needed at a few steps per run, so a frontier model there costs little, and a local
+model elsewhere keeps exploration cheap. Every reviewer token is recorded separately, so the
+price of better judgement is a measured number.
+
+**Weak spots.** The reviewer sees one moment, not the whole session; a mismatch only exists if
+the explorer wrote an expectation; the text-only final review can't look at the page. With two
+local models on a 16 GB Mac, Ollama swaps them in and out of memory for each review.
+
+**Interview Q&A**
+1. *Why not just use the big model for everything?* Cost and latency: ~40 decisions per run vs.
+   a handful of judgements. The tiered run records explorer and reviewer cost separately, so the
+   trade-off is measured, not assumed.
+2. *Why remove the "resolve the mismatch first" gate when there's a reviewer?* The gate existed
+   to force the explorer to judge; with a reviewer the explorer isn't the judge any more, and
+   blocking it would only waste its steps.
+3. *How do you stop the list rule from being a hint for your own demo?* It is derived from link
+   structure (a parent path with id-like children), names no site or bug, and a test asserts the
+   charter contains no site-specific words.
+
+## Run 5: a database that enforces its own rules (migrations `20261112110000`–`130000`, `lib/tenant-db.ts`, `lib/system-db.ts`, `worker/db/tenant.py`, D83, D84)
+
+**What.** Three login roles, none a superuser: `ata_owner` owns the schema; `ata_web` and
+`ata_worker` are the apps. The apps are members of `app_tenant`, the role the run-4 policies apply
+to, so without `app.workspace_id` set they see no tenant rows at all. The web app's every query
+goes through `tenantDb(ctx)` or `inTenant(ctx, fn)`: a transaction that sets the workspace, the
+acting user and audit context, then `SET LOCAL ROLE app_tenant`. The worker claims a run with a
+database function and from then on its session is tied to the run's workspace (an `after_begin`
+listener does the same two statements). Rules moved into Postgres: the audit log and `updated_at`
+as triggers, triage carry-forward as a trigger on `bugs`, `claim_next_run`, `consume_quota`,
+`apply_retention` as functions, a per-target history view and a materialized leaderboard, and
+CHECK constraints.
+
+**Justified bypasses.** A few things must happen before the workspace is known: sign-in reads a
+user by email (a read-only policy), an API key or share token is looked up by its hash or value,
+an invitation moves a user between workspaces, metrics count everything. Each is a narrow
+SECURITY DEFINER function owned by `ata_owner`, with a fixed `search_path` and EXECUTE for one
+role, returning the minimum (usually an id and a workspace).
+
+**How it's tested.** The worker's database tests switch roles with `SET LOCAL ROLE`; the web tests
+log in as `ata_web` for real; the worker's background jobs are tested logged in as `ata_worker`.
+Each app role is shown to see nothing without a workspace, only its workspace with one, unable
+to write into another, unable to edit the audit log or switch RLS off.
+
+**Weak spots.** RLS trusts the app to set the right workspace: it stops a forgotten WHERE, not a
+compromised app. Operator commands use the admin connection. The materialized view is refreshed
+synchronously, fine at a few writes a day, wrong at thousands.
+
+**Interview Q&A**
+1. *Why move the audit log into a trigger?* So every writer is audited (an operator with psql, a
+   future service, a bug that forgets the call); the app supplies only the context (who, which
+   IP) through transaction settings.
+2. *What does SECURITY DEFINER risk and how do you contain it?* It runs as its owner, past RLS.
+   Each one does one thing, sets `search_path` so a caller can't plant objects, returns the
+   minimum, and only one role may execute it.
+3. *Why does the worker see only one workspace when it's trusted?* Least privilege: a bug in run
+   code (or a prompt-injected agent that somehow reached SQL) can't touch other customers' data.
+
+## Run 5: plans and usage (`20261112140000_plans_usage`, `lib/usage.ts`, `app/settings/usage`, `app/admin/usage`, `worker/admin.py`, D85)
+
+**What.** `plans` (runs per month, steps per run, allowed providers, seats, retention) with every
+workspace on one; `usage_events`, one row per finished run written by a trigger, with the
+explorer's and the reviewer's tokens and cost apart. `consume_quota` enforces runs, providers and
+the step cap; `accept_invitation` enforces seats; `apply_retention` caps retention by plan. A
+usage page per workspace and an admin view across workspaces (platform admins, set from the CLI).
+
+**Why in the database.** A billing record that the app could forget or double-write isn't a
+billing record. The trigger fires once per run at its final status; the unique run id makes a
+second insert impossible; the apps can't change or delete events.
+
+**Interview Q&A**
+1. *How do you stop a burst of API calls from exceeding the plan?* `consume_quota` locks the
+   workspace row; the run is inserted in the same transaction; concurrent starts serialise.
+2. *Why record explorer and reviewer cost apart?* The tiered agent's whole case is "a strong
+   model only where it matters": its price must be visible on its own.
+3. *What's missing for real billing?* A payment provider: ROADMAP.md lists the five pieces.
+
+## Run 5: first-run experience (`lib/onboarding.ts`, `components/getting-started.tsx`, `e2e/first-run.e2e.ts`)
+
+**What.** A new workspace sees "Getting started" on the dashboard: workspace (done at sign-up),
+choose what to test (verify a domain or use the demo shop), pick a model (the server's by
+default), start a run, read the report. Each step's state comes from the database; the card goes
+away once the first report exists. The unverified-domain error says where to verify. A dev-only
+"create a test account" stands in for an email sign-up, so an e2e test covers the whole path as a
+brand-new team.
+
+**Interview Q&A**
+1. *Why compute onboarding from data instead of storing "steps done"?* Nothing to keep in sync:
+   a verified domain or a finished run is the truth.
+2. *Why a dev-only sign-up?* E2E needs a fresh team; email needs SMTP. It's off in production
+   like the demo account.
+3. *What did writing the e2e test find?* Concurrent first sign-ins raced on the unique email;
+   the fake model's script was shared between runs; the dev demo account would hit Free's limits.

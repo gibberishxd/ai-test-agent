@@ -82,7 +82,7 @@ def apply_migrations(engine) -> None:
     """Run Prisma's migration SQL files in order: the real schema, without needing Node."""
     with engine.begin() as conn:
         for sql_file in sorted(MIGRATIONS_DIR.glob("*/migration.sql")):
-            conn.exec_driver_sql(sql_file.read_text())
+            conn.exec_driver_sql(sql_file.read_text().replace("%", "%%"))  # % is a placeholder
 
 
 @pytest.fixture(scope="session")
@@ -98,7 +98,7 @@ def db_engine():
 
     from worker.config import Settings
 
-    admin_url = Settings().sqlalchemy_url()
+    admin_url = Settings().admin_sqlalchemy_url()
     try:
         admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as conn:
@@ -124,7 +124,8 @@ def sessions(db_engine):
     from worker.db.models import Base
     from worker.db.session import make_session_factory
 
-    tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
+    # plans is reference data seeded by its migration (run 5, K4): kept between tests.
+    tables = ", ".join(t.name for t in Base.metadata.sorted_tables if t.name != "plans")
     with db_engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} CASCADE"))
     return make_session_factory(db_engine)
@@ -139,3 +140,26 @@ def workspace(sessions):
         session.add(ws)
         session.commit()
         return ws
+
+
+@pytest.fixture(scope="session")
+def worker_engine(db_engine):
+    """The test database as ata_worker, the role production's worker uses (run 5, K3): not a
+    superuser, no row-level-security bypass. Dev-only password."""
+    from sqlalchemy import create_engine, text
+
+    password = os.environ.get("DB_WORKER_PASSWORD", "ata_worker_dev")
+    with db_engine.begin() as conn:
+        conn.execute(text(f"ALTER ROLE ata_worker WITH LOGIN PASSWORD '{password}'"))
+    url = db_engine.url.set(username="ata_worker", password=password)
+    engine = create_engine(url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def worker_sessions(sessions, worker_engine):
+    """Sessions as ata_worker on the emptied test database (fixtures still use `sessions`)."""
+    from worker.db.session import make_session_factory
+
+    return make_session_factory(worker_engine)

@@ -10,7 +10,9 @@ export default defineConfig(({ mode }) => {
   const clean = mode === "clean";
   return {
     plugins: [react(), demoApi(clean)],
-    server: { port: clean ? 5174 : 5173, strictPort: true },
+    // host.docker.internal: the local production stack's workers reach the demo from Docker
+    // (docs/DEPLOY.md); Vite otherwise refuses unknown Host headers.
+    server: { port: clean ? 5174 : 5173, strictPort: true, allowedHosts: ["host.docker.internal"] },
     preview: { port: clean ? 5174 : 5173, strictPort: true },
   };
 });

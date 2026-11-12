@@ -128,10 +128,24 @@ def build(admin_url) -> None:
     admin.dispose()
 
 
-def measure(conn, sql: str) -> tuple[float, str]:
-    """Median execution time (ms) over REPEAT runs, and the plan of the last one."""
+# Run 4, J5: the queries a member's page runs, measured as the owner and as app_tenant (RLS on).
+RLS_QUERIES = [
+    "run page: the run (web, every 1.5 s while open)",
+    "run page / live pane: its steps",
+    "run page: its bugs",
+    "runs list of a workspace (newest 50)",
+]
+
+
+def measure(conn, sql: str, tenant: str | None = None) -> tuple[float, str]:
+    """Median execution time (ms) over REPEAT runs, and the plan of the last one.
+
+    `tenant`: run as app_tenant with app.workspace_id set, i.e. with row-level security."""
     times, plan = [], ""
     for _ in range(REPEAT):
+        if tenant:
+            conn.execute(text("SELECT set_config('app.workspace_id', :w, true)"), {"w": tenant})
+            conn.execute(text("SET LOCAL ROLE app_tenant"))
         rows = conn.execute(text(f"EXPLAIN (ANALYZE, BUFFERS) {sql}")).scalars().all()
         plan = "\n".join(rows)
         times.append(float(rows[-1].split(":")[1].split("ms")[0]))
@@ -149,13 +163,13 @@ def top_node(plan: str) -> str:
 
 
 def main() -> None:
-    show_plans = "--plans" in sys.argv
+    show_plans = "--plans" in sys.argv  # --rls: also measure with row-level security
     admin_url = Settings().sqlalchemy_url()
     build(admin_url)
     engine = create_engine(make_url(admin_url).set(database=PERF_DB))
     with engine.begin() as conn:
         for sql_file in sorted(MIGRATIONS.glob("*/migration.sql")):
-            conn.exec_driver_sql(sql_file.read_text())
+            conn.exec_driver_sql(sql_file.read_text().replace("%", "%%"))  # % is a placeholder
         conn.exec_driver_sql(SEED.replace("%", "%%"))  # % is a placeholder for the driver
     with engine.connect() as conn:
         counts = {
@@ -176,6 +190,17 @@ def main() -> None:
             ms, plan = measure(conn, sql.replace("{big}", str(big)).replace("{run}", str(run)))
             plans[name] = plan
             print(f"| {name} | {ms:.3f} | {top_node(plan)} |")
+    if "--rls" in sys.argv:
+        with engine.connect() as conn:
+            print()
+            print("| Query (row-level security) | Owner ms | app_tenant ms | Plan with RLS |")
+            print("|---|---|---|---|")
+            for name in RLS_QUERIES:
+                sql = QUERIES[name].replace("{big}", str(big)).replace("{run}", str(run))
+                plain, _ = measure(conn, sql)
+                rls, rls_plan = measure(conn, sql, tenant=str(big))
+                plans[name + " (RLS)"] = rls_plan
+                print(f"| {name} | {plain:.3f} | {rls:.3f} | {top_node(rls_plan)} |")
     if show_plans:
         for name, plan in plans.items():
             print(f"\n== {name}\n{plan}")

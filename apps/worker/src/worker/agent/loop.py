@@ -5,6 +5,7 @@ it, enforces the budgets, and records everything. Callbacks (`on_step`, `on_bug`
 `should_stop`) connect the loop to the database without the loop knowing about it.
 """
 
+import json
 import re
 import secrets
 from collections.abc import Callable
@@ -15,12 +16,22 @@ from urllib.parse import urljoin, urlsplit
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
+from worker.agent.expect import (
+    EXPECT_ACTIONS,
+    RESOLVING_ACTIONS,
+    Candidate,
+    Effect,
+    mismatches,
+)
+from worker.agent.lists import ListTracker
 from worker.agent.observe import Element, Memory, PageState, build_observation, read_page
 from worker.agent.policy import Budget, card_number_reason, deny_reason
 from worker.agent.prompt import SYSTEM_PROMPT
+from worker.agent.reviewer import review_mismatch
 from worker.agent.tools import TOOL_NAMES, TOOLS
 from worker.browser import VIEWPORTS, listen, viewport_label, wait_until_quiet
-from worker.llm import LLMClient, ToolCall, Usage
+from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage
+from worker.login import LoginConfig, SignInResult, on_login_page
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
@@ -45,6 +56,10 @@ class AgentConfig:
     budget: Budget
     focus: str | None = None
     is_demo_target: bool = False
+    # Set when the worker signed in with the workspace's test account (run 4, J2).
+    login: LoginConfig | None = None
+    # Lists the crawl found before the agent started: {parent path: (list page, an item's id)}.
+    known_lists: dict | None = None
 
 
 @dataclass
@@ -77,6 +92,12 @@ class AgentResult:
     summary: str | None = None
     # Console errors and failed requests seen during the session, per URL (become findings).
     pages: dict[str, PageResult] = field(default_factory=dict)
+    # Expected-vs-actual mismatches the model closed as not a bug ({step, reason, flags}), and
+    # the steps of mismatches it ignored until they expired.
+    dismissed: list[dict] = field(default_factory=list)
+    ignored: list[int] = field(default_factory=list)
+    relogins: int = 0  # times the session ended and the worker signed in again
+    reviewer_usage: list[Usage] = field(default_factory=list)  # one per reviewer call
 
 
 class ModelCallFailed(Exception):
@@ -94,8 +115,13 @@ class AgentRun:
         on_step: Callable[[StepRecord], None] | None = None,
         on_bug: Callable[[BugReport], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        relogin: Callable[[], SignInResult] | None = None,
+        reviewer: LLMClient | None = None,
     ):
         self.page = page
+        # The reviewer tier (run 5, K2): decides on flagged steps instead of the explorer.
+        self.reviewer = reviewer
+        self.relogin = relogin
         self.llm = llm
         self.guard = guard
         self.config = config
@@ -112,6 +138,9 @@ class AgentRun:
         self._seen_urls: set[str] = set()
         self._last_site_url = config.target_url  # where to return to if a step leaves the site
         self._viewport = "desktop"
+        self._pending: list[Candidate] = []  # mismatches the model hasn't resolved yet
+        self._lists = ListTracker()  # list pages and whether an item of each was opened
+        self._lists.seed(config.known_lists or {})
         page.set_viewport_size(VIEWPORTS[self._viewport])
         listen(page, self._console, self._failed)
 
@@ -155,20 +184,34 @@ class AgentRun:
     def _step(self) -> StepRecord:
         """One turn: look at the page, let the model choose, check and run it, record it."""
         state, events, image, screenshot = self._observe()
-        observation = build_observation(
-            state,
-            self._task(),
-            self._budget_line(),
-            events,
-            self.memory,
-            viewport_label(self._viewport),
-        )
+        self._lists.see(state.url, state.elements)
+
+        def observation(trimmed: bool = False) -> str:
+            return self._scrub(
+                build_observation(
+                    state,
+                    self._task(),
+                    self._budget_line(),
+                    events,
+                    self.memory,
+                    viewport_label(self._viewport),
+                    checks=self._open_mismatches(),
+                    trimmed=trimmed,
+                )
+            )
+
         try:
-            decision = self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
-        except Exception as error:  # timeout, connection refused, provider error...
+            decision = self.llm.decide(SYSTEM_PROMPT, observation(), TOOLS, image)
+        except ModelTimeout:
+            # A long observation is what makes a local model slow: one more try, shorter.
+            decision = self._decide(observation(trimmed=True), None)
+        except Exception as error:  # connection refused, provider error...
             raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
         index = len(self.result.steps) + 1
         outcome = self._act(decision.tool_call, state, index)
+        outcome = self._restore_session(decision.tool_call, state, outcome)
+        outcome = self._scrub_outcome(outcome)
+        events = [self._scrub(e) for e in events]
         step = StepRecord(
             index=index,
             url=state.url,
@@ -183,6 +226,12 @@ class AgentRun:
         self.on_step(step)
         return step
 
+    def _decide(self, observation: str, image: bytes | None):
+        try:
+            return self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
+        except Exception as error:
+            raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
+
     def _observe(self) -> tuple[PageState, list[str], bytes | None, bytes | None]:
         """The page as the model will see it: state, new events, the image for the model (if
         due) and the step's screenshot. The step's screenshot is taken now, before the action,
@@ -196,7 +245,7 @@ class AgentRun:
         if late_exit:
             events.append(f"the page went to another site and was brought back ({late_exit})")
         try:
-            screenshot = self.page.screenshot()
+            screenshot = self._screenshot()
         except PlaywrightError:
             screenshot = None
         image = None
@@ -226,6 +275,14 @@ class AgentRun:
             "element": element.target() if element else None,
             "box": element.box if element else None,
         }
+        unresolved = self._unresolved_gate(call.name)
+        if unresolved:
+            return {
+                **outcome,
+                "result": f"BLOCKED: {unresolved}",
+                "blocked": True,
+                "block_reason": unresolved,
+            }
         blocked = self._check(call.name, args, element)
         if blocked:
             return {
@@ -234,7 +291,12 @@ class AgentRun:
                 "blocked": True,
                 "block_reason": blocked,
             }
+        before = self._snapshot() if call.name in EXPECT_ACTIONS else None
         result, changed = self._execute(call.name, args, element, state, index)
+        if call.name == "report_bug" and result == "bug recorded" and self._pending:
+            result += f" (resolves the mismatch from #{self._pending.pop(0).step})"
+        if before is not None and not result.startswith("error"):
+            result = self._compare(args, before, result, index, outcome)
         left = self._return_to_site()
         if left:
             # Marked blocked so replay doesn't repeat a step that leaves the site.
@@ -256,7 +318,11 @@ class AgentRun:
         if action in CLICK_ACTIONS and info:
             if info.href and self._off_site(info.href):
                 return OFF_SITE.format(host=urlsplit(info.href).hostname)
-            return deny_reason(info, is_demo_target=self.config.is_demo_target)
+            return deny_reason(
+                info,
+                is_demo_target=self.config.is_demo_target,
+                signed_in=self.config.login is not None,
+            )
         if action == "type":
             return card_number_reason(str(args.get("text", "")), self.config.is_demo_target)
         if action == "navigate":
@@ -308,6 +374,8 @@ class AgentRun:
                 return self._set_viewport(str(args.get("size", "")))
             elif action == "note":
                 return self._note(str(args.get("text", ""))), False
+            elif action == "dismiss":
+                return self._dismiss(args), False
             elif action == "type":
                 self.page.locator(element.locator).fill(
                     str(args.get("text", "")), timeout=ACTION_TIMEOUT_MS
@@ -372,6 +440,215 @@ class AgentRun:
             "problem you saw, report it now with report_bug)"
         )
 
+    # --- signed-in runs (J2) ---------------------------------------------------------------------
+
+    def _screenshot(self) -> bytes:
+        """Every screenshot hides password fields, whatever they contain."""
+        return self.page.screenshot(mask=[self.page.locator("input[type=password]")])
+
+    def _scrub(self, text: str) -> str:
+        login = self.config.login
+        return login.scrub(text) if login and text else text
+
+    def _scrub_outcome(self, outcome: dict) -> dict:
+        if not self.config.login:
+            return outcome
+        clean = dict(outcome)
+        for key in ("human", "result", "reasoning", "block_reason"):
+            if isinstance(clean.get(key), str):
+                clean[key] = self._scrub(clean[key])
+        clean["args"] = json.loads(self._scrub(json.dumps(clean.get("args") or {})))
+        return clean
+
+    def _restore_session(self, call: ToolCall | None, state: PageState, outcome: dict) -> dict:
+        """If the action ended on the login page without the agent going there, the session
+        ended (a timeout, a server restart): sign in again and go back where the agent was."""
+        login = self.config.login
+        if not (login and self.relogin) or self.result.relogins >= MAX_RELOGINS:
+            return outcome
+        if on_login_page(state.url, login) or not on_login_page(self.page.url, login):
+            return outcome
+        if call and self._targets_login_page(call, state, login):
+            return outcome
+        self.result.relogins += 1
+        signed_in = self.relogin()
+        if signed_in.ok:
+            try:
+                self.page.goto(state.url, timeout=NAVIGATION_TIMEOUT_MS)
+                wait_until_quiet(self.page, SETTLE_MS)
+            except PlaywrightError:
+                pass
+            note = "the session had ended; the worker signed in again and went back"
+        else:
+            note = f"the session had ended and signing in again failed ({signed_in.detail})"
+        return {**outcome, "result": f"{outcome.get('result', '')} | {note}"}
+
+    def _targets_login_page(self, call: ToolCall, state: PageState, login: LoginConfig) -> bool:
+        """Did the agent itself go to the login page (a link or a URL)? Then it isn't a drop."""
+        if call.name == "navigate":
+            target = urljoin(self.page.url, str(call.args.get("url", "")))
+            return on_login_page(target, login)
+        element = self._element(state, call.args)
+        href = element.info().href if element else None
+        return bool(href) and on_login_page(urljoin(state.url, href), login)
+
+    # --- expected vs. actual (J1) ---------------------------------------------------------------
+
+    def _snapshot(self) -> dict:
+        """What the page looks like before an action whose result will be checked."""
+        return {
+            "url": self.page.url,
+            "text": self._page_text(),
+            "fields": self._field_values(),
+            "console": len(self._console),
+            "failed": len(self._failed),
+            "viewport": self._viewport,
+        }
+
+    def _compare(
+        self, args: dict, before: dict, result: str, index: int, outcome: dict | None = None
+    ) -> str:
+        """Record what the action changed, compare it with the model's expectation, and open a
+        candidate when they don't match. Returns the result line, with the mismatch if any."""
+        text, fields = self._page_text(), self._field_values()
+        old_lines, new_lines = _lines(before["text"]), _lines(text)
+        effect = Effect(
+            url_before=before["url"],
+            url_after=self.page.url,
+            added=[line for line in new_lines if line not in set(old_lines)],
+            removed=[line for line in old_lines if line not in set(new_lines)],
+            fields=[
+                f"{name}: {before['fields'].get(name, '')} → {value}"
+                for name, value in fields.items()
+                if before["fields"].get(name) != value
+            ],
+            viewport=(
+                f"{before['viewport']} → {self._viewport}"
+                if before["viewport"] != self._viewport
+                else None
+            ),
+            events=[f"{e.kind} error: {e.text[:100]}" for e in self._console[before["console"] :]]
+            + [
+                f"network: {r.method} {r.url} → {r.status or r.failure}"
+                for r in self._failed[before["failed"] :]
+            ],
+        )
+        expected = redact(str(args.get("expect") or "")).strip()[:200]
+        flags = mismatches(expected, effect, text, fields)
+        args["check"] = {"expected": expected, "happened": effect.describe(), "flags": flags}
+        if not flags:
+            return result
+        if self.reviewer is not None:
+            return self._review_flag(
+                args, expected, effect.describe(), flags, result, index, outcome
+            )
+        self._pending.append(Candidate(index, expected, effect.describe(), flags))
+        return (
+            f"{result} | MISMATCH with what you expected ({'; '.join(flags)}): report it with "
+            "report_bug, or dismiss it with a reason"
+        )
+
+    def _review_flag(
+        self,
+        args: dict,
+        expected: str,
+        happened: str,
+        flags: list[str],
+        result: str,
+        index: int,
+        outcome: dict | None,
+    ) -> str:
+        """The reviewer decides on a flagged step: a bug it reports, or a dismissal with its
+        reason. The explorer is told the outcome and carries on; nothing waits on it."""
+        outcome = outcome or {}
+        action = outcome.get("human") or args.get("action", "the last action")
+        review = review_mismatch(
+            self.reviewer,
+            target_url=self.config.target_url,
+            action=action,
+            expected=expected,
+            happened=happened,
+            flags=flags,
+            page_text=self._page_text(),
+            screenshot=self._screenshot(),
+            scrub=self._scrub,
+        )
+        self._charge_reviewer(review.usage)
+        args["check"]["review"] = {"bug": review.is_bug, "reason": review.reason}
+        flagged = f"{result} | MISMATCH with what you expected ({'; '.join(flags)})"
+        if not review.is_bug:
+            self.result.dismissed.append(
+                {"step": index, "reason": f"reviewer: {review.reason}", "flags": flags}
+            )
+            return f"{flagged}: reviewer: not a bug ({review.reason})"
+        element = outcome.get("element") or {}
+        named = {"element": {"role": element.get("role"), "name": element["name"]}}
+        self._record_bug(
+            review.report,
+            url=self.page.url,
+            step_ids=[index],
+            reported_at=index + 1,  # replay repeats this step too
+            observed=happened,
+            reasoning=review.reason,
+            current=[action],
+            extra={
+                "reviewer": self.reviewer.agent_model,
+                **(named if element.get("name") else {}),
+            },
+        )
+        return f"{flagged}: the reviewer filed a bug: {review.report['title']}"
+
+    def _charge_reviewer(self, usage: Usage | None) -> None:
+        if usage is None:
+            return
+        self.result.reviewer_usage.append(usage)
+        self.config.budget.cost_usd += usage.cost_usd
+
+    def _field_values(self) -> dict[str, str]:
+        try:
+            pairs = self.page.evaluate(FIELD_VALUES_JS)
+        except PlaywrightError:
+            return {}
+        return {str(name)[:60]: redact(str(value))[:100] for name, value in pairs}
+
+    def _unresolved_gate(self, action: str) -> str | None:
+        """While a mismatch is open, other actions are refused once; then it expires as ignored,
+        so a model that won't resolve it can't stall the run."""
+        if not self._pending or action in RESOLVING_ACTIONS:
+            return None
+        candidate = self._pending[0]
+        if not candidate.blocked_once:
+            candidate.blocked_once = True
+            return (
+                f"resolve the mismatch from #{candidate.step} first: report_bug if it is a bug, "
+                "or dismiss it with a reason"
+            )
+        self._pending.pop(0)
+        self.result.ignored.append(candidate.step)
+        return None
+
+    def _dismiss(self, args: dict) -> str:
+        if not self._pending:
+            return "error: there is no unresolved mismatch to dismiss"
+        reason = redact(str(args.get("reason") or "")).strip()[:300]
+        if not reason:
+            return "error: say why this is not a bug (reason)"
+        step = element_number(args.get("step_id"))
+        candidate = next((c for c in self._pending if c.step == step), self._pending[0])
+        self._pending.remove(candidate)
+        self.result.dismissed.append(
+            {"step": candidate.step, "reason": reason, "flags": candidate.flags}
+        )
+        return f"dismissed the mismatch from #{candidate.step}"
+
+    def _open_mismatches(self) -> str:
+        if not self._pending:
+            return ""
+        return (
+            "UNRESOLVED MISMATCH (resolve it before anything else: report_bug if it is a bug, "
+            "or dismiss with a reason)\n" + "\n".join(c.describe() for c in self._pending)
+        )
+
     def _scroll_position(self) -> float:
         try:
             return self.page.evaluate("() => window.scrollY")
@@ -392,25 +669,54 @@ class AgentRun:
             locator.select_option(value=option, timeout=ACTION_TIMEOUT_MS)
 
     def _report_bug(self, args: dict, state: PageState, index: int) -> str:
+        args = {k: self._scrub(v) if isinstance(v, str) else v for k, v in args.items()}
         title = redact(str(args.get("title") or "Untitled bug"))[:200]
         if title in self.memory.bugs:
             return "error: this bug was already reported"
         step_ids = [i for i in args.get("step_ids") or [] if isinstance(i, int) and 0 < i < index]
         steps = {s.index: s for s in self.result.steps}
+        self._record_bug(
+            {**args, "title": title},
+            url=state.url,
+            step_ids=step_ids,
+            reported_at=index,
+            observed=str(args.get("evidence") or ""),
+            reasoning=str(args.get("reasoning") or ""),
+            # The element of its last step keys the fingerprint (a reworded report stays one bug).
+            extra=self._last_element(step_ids, steps),
+        )
+        return "bug recorded"
+
+    def _record_bug(
+        self,
+        fields: dict,
+        *,
+        url: str,
+        step_ids: list[int],
+        reported_at: int,
+        observed: str,
+        reasoning: str,
+        extra: dict,
+        current: list[str] | None = None,
+    ) -> BugReport:
+        """Record a report (the explorer's or the reviewer's). `reported_at`: replay repeats
+        every action before this step."""
+        steps = {s.index: s for s in self.result.steps}
         repro = [f"Open {self.config.target_url}"]
         repro += [steps[i].human for i in step_ids if i in steps and not steps[i].blocked]
-        severity = str(args.get("severity", "medium"))
+        repro += current or []  # the step being taken now (not stored yet)
+        severity = str(fields.get("severity", "medium"))
+        title = redact(str(fields.get("title") or "Untitled bug"))[:200]
         bug = BugReport(
             title=title,
             severity=severity if severity in ("critical", "high", "medium", "low") else "medium",
-            category=str(args.get("category") or "functional"),
-            page_url=state.url,
-            expected=redact(str(args.get("expected") or "")) or None,
-            actual=redact(str(args.get("actual") or "")) or None,
+            category=str(fields.get("category") or "functional"),
+            page_url=url,
+            expected=redact(str(fields.get("expected") or "")) or None,
+            actual=redact(str(fields.get("actual") or "")) or None,
             repro_steps=repro,
-            # The step where the bug was reported: replay repeats every action up to here.
-            evidence={"observed": redact(str(args.get("evidence") or "")), "reported_at": index},
-            reasoning=redact(str(args.get("reasoning") or "")) or None,
+            evidence={"observed": redact(observed), "reported_at": reported_at, **extra},
+            reasoning=redact(reasoning) or None,
             step_indexes=step_ids,
             source="agent",
             status="candidate",
@@ -418,7 +724,15 @@ class AgentRun:
         self.result.bugs.append(bug)
         self.memory.bugs.append(title)
         self.on_bug(bug)
-        return "bug recorded"
+        return bug
+
+    @staticmethod
+    def _last_element(step_ids: list[int], steps: dict) -> dict:
+        for i in reversed(step_ids):
+            element = steps[i].element if i in steps else None
+            if element and element.get("name"):
+                return {"element": {"role": element.get("role"), "name": element["name"]}}
+        return {}
 
     # --- helpers -----------------------------------------------------------------------------
 
@@ -452,6 +766,9 @@ class AgentRun:
                 "\nWARNING: you keep repeating the same action. Repeating it once more ends "
                 "the run: do something different."
             )
+        lists = self._lists.reminder()
+        if lists:
+            line += "\n" + lists
         untried = untried_techniques(self.result.steps)
         if untried:
             line += "\nCHARTER TECHNIQUES NOT TRIED YET in this run (use each where it fits):"
@@ -549,7 +866,26 @@ def describe(action: str, args: dict, element: Element | None) -> str:
         return f"Report bug: {args.get('title', '')}"
     if action == "finish":
         return "Finish"
+    if action == "dismiss":
+        return f"Dismiss the mismatch from #{args.get('step_id', '')}"
     return action
+
+
+MAX_RELOGINS = 3
+
+
+# Field values by label, for expected-vs-actual. Passwords and hidden fields are never read.
+FIELD_VALUES_JS = """() => Array.from(document.querySelectorAll('input, select, textarea'))
+  .filter(e => e.type !== 'password' && e.type !== 'hidden')
+  .map(e => [
+    (e.labels && e.labels[0] && e.labels[0].innerText.trim()) || e.getAttribute('aria-label')
+      || e.name || e.id || e.type,
+    (e.type === 'checkbox' || e.type === 'radio') ? String(e.checked) : e.value,
+  ])"""
+
+
+def _lines(text: str) -> list[str]:
+    return list(dict.fromkeys(line.strip() for line in text.splitlines() if line.strip()))
 
 
 # Charter techniques a model can visibly try with one tool call, and the reminder shown until it

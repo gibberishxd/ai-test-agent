@@ -131,3 +131,20 @@ test("fixed: an empty display name is not saved", async ({ page }) => {
   await expect(page.getByRole("alert").filter({ hasText: "Enter a display name." })).toBeVisible();
   await expect(page.getByText("Profile saved.")).toBeHidden();
 });
+
+// Bug 13 (run 4): behind the login. The order page shows a different order than the one opened.
+test("bug 13: an order's page shows a different order", async ({ page }) => {
+  await logIn(page);
+  await page.waitForURL("**/profile");
+  await page.getByRole("link", { name: "My orders" }).click();
+  await page.getByRole("link", { name: /Order #1001/ }).click();
+  await page.waitForURL("**/orders/1001");
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText(/^Order #\d+$/); // the order page, not the list still on screen
+  expectBug((await heading.textContent()) !== "Order #1001");
+});
+
+test("not planted: the order pages need a signed-in user", async ({ page }) => {
+  await page.goto("/orders");
+  await expect(page).toHaveURL(/\/login\?next=%2Forders/);
+});

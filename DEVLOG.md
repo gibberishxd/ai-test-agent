@@ -63,3 +63,14 @@ Benchmark scores go here too, once Phase 2 exists.
   states but reports ~1 (shop AI-only 8%, holdout 0%). One Sonnet benchmark via claude-cli:
   shop AI-only 38% (was 13%), recall 58%, holdout 25% / 50%; its 3 "false alarms" are real
   bugs in the clean build. Next limit for small models: recognising a wrong state.
+
+## 2026-11-11 (run 4, branch agent-v4)
+- Pipeline-ready: sign-in setups for apps behind a login (encrypted, scrubbed, logout denied),
+  /api/v1 with hashed keys, JUnit and signed webhooks plus a CI script, fingerprints with
+  new/still/fixed and triage, roles, invitations, audit log, Postgres row-level security, Docker
+  images and a production stack (Postgres, SeaweedFS, N workers) run locally end to end.
+- Measured: the expected-vs-actual check flags contradictions but Gemma 12B dismisses most
+  (holdout 0% → 0%, kept); final Gemma benchmark shop AI-only 0% (bug 8 found twice, dismissed by
+  the replay judge). Sonnet not run without the owner's yes.
+- Learned the hard way: no e2e tests during a benchmark (D67), stop processes by PID only (D71),
+  and keep the dev and production compose files apart (D77).

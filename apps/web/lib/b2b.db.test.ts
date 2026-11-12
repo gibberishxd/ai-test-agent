@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createUserWithWorkspace } from "@/lib/auth-adapter";
-import { db } from "@/lib/db";
+import { adminDb as db } from "../test/admin-db";
 import type { VerifyDeps } from "@/lib/domains";
 import { getRun, listRuns, requestStop, startRun } from "@/lib/runs";
 import { addDomain, checkDomain } from "@/lib/settings-data";
@@ -23,7 +23,8 @@ import { hasTestDb } from "../test/use-test-db";
 const DEMO = "http://localhost:5173/";
 
 async function workspace(slug: string, quota = 50) {
-  return db.workspace.create({ data: { name: slug, slug, monthlyRunQuota: quota } });
+  // Team plan: these tests bring their own hosted models, which the Free plan doesn't include.
+  return db.workspace.create({ data: { name: slug, slug, monthlyRunQuota: quota, planId: "team" } });
 }
 
 function signedIn(workspaceId: string): RequestContext {
@@ -287,6 +288,18 @@ describe.skipIf(!hasTestDb)("B2B foundations (database)", () => {
       await setDefaultModel(a.id, second.id);
       const models = await listModelConfigs(a.id);
       expect(models.filter((m) => m.isDefault).map((m) => m.id)).toEqual([second.id]);
+    });
+
+    it("the database itself refuses a second default in one workspace (run 4, J5)", async () => {
+      const a = await workspace("a");
+      const b = await workspace("b");
+      const first = await created(a.id);
+      const second = await created(a.id);
+      await db.modelConfig.update({ where: { id: first.id }, data: { isDefault: true } });
+      // Code that forgets setDefaultModel's "unset the others first" fails instead of corrupting.
+      await expect(db.modelConfig.update({ where: { id: second.id }, data: { isDefault: true } })).rejects.toThrow();
+      const other = await created(b.id);
+      await db.modelConfig.update({ where: { id: other.id }, data: { isDefault: true } }); // another workspace: fine
     });
   });
 

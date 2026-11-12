@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dataDir, resolveKey } from "@/lib/files";
 import { canReadFile } from "@/lib/share";
+import { presignedUrl, storageConfig } from "@/lib/storage";
 import { currentWorkspaceId } from "@/lib/workspace";
 
 /**
@@ -17,6 +18,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ key:
   const workspaceId = await currentWorkspaceId();
   if (!(await canReadFile(joined, { workspaceId, shareToken }))) {
     return new Response("Not found", { status: 404 });
+  }
+
+  const storage = storageConfig();
+  if (storage.mode === "s3") {
+    // Access is checked above; the link itself expires in a few minutes.
+    return Response.redirect(await presignedUrl(storage, joined), 302);
   }
 
   try {

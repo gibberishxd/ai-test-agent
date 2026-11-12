@@ -7,6 +7,7 @@
  */
 import type { Adapter, AdapterAccount, AdapterUser, VerificationToken } from "next-auth/adapters";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { inTenant } from "@/lib/tenant-db";
 
 export type AppUser = AdapterUser & { workspaceId: string };
 
@@ -34,14 +35,19 @@ export function workspaceSlug(email: string, suffix: string): string {
   return `${base || "workspace"}-${suffix}`;
 }
 
-/** Create a user and their personal workspace together. */
+/**
+ * Create a user and their personal workspace together. The new workspace's id is chosen here,
+ * so the whole thing runs inside that workspace (row-level security allows exactly this).
+ */
 export async function createUserWithWorkspace(
-  db: PrismaClient,
+  _db: PrismaClient,
   data: { email: string; name?: string | null; image?: string | null; emailVerified?: Date | null },
 ): Promise<AppUser> {
-  const user = await db.$transaction(async (tx) => {
+  const workspaceId = crypto.randomUUID();
+  const user = await inTenant(workspaceId, async (tx) => {
     const workspace = await tx.workspace.create({
       data: {
+        id: workspaceId,
         name: `${data.name || data.email.split("@")[0]}'s workspace`,
         slug: workspaceSlug(data.email, crypto.randomUUID().slice(0, 4)),
       },
@@ -53,10 +59,32 @@ export async function createUserWithWorkspace(
         image: data.image ?? null,
         emailVerified: data.emailVerified ?? null,
         workspaceId: workspace.id,
+        role: "owner", // whoever creates a workspace owns it
       },
     });
   });
   return toAdapterUser(user);
+}
+
+/**
+ * The user with this email, created (with a workspace) if there is none. Two first sign-ins at
+ * the same moment both see "none" and both insert; the loser's insert fails on the unique email
+ * (its workspace rolls back with it), so it reads the winner's user instead.
+ */
+export async function findOrCreateUser(
+  db: PrismaClient,
+  data: { email: string; name?: string | null },
+): Promise<AppUser> {
+  const email = data.email.toLowerCase();
+  const existing = await db.user.findUnique({ where: { email } });
+  if (existing) return toAdapterUser(existing);
+  try {
+    return await createUserWithWorkspace(db, { ...data, email });
+  } catch (error) {
+    const raced = await db.user.findUnique({ where: { email } });
+    if (raced) return toAdapterUser(raced);
+    throw error;
+  }
 }
 
 export function appAdapter(db: PrismaClient): Adapter {
@@ -82,10 +110,11 @@ export function appAdapter(db: PrismaClient): Adapter {
     },
 
     async updateUser({ id, ...data }) {
-      const user = await db.user.update({
-        where: { id },
-        data: { name: data.name, image: data.image, emailVerified: data.emailVerified },
-      });
+      // Reading the user is allowed before the workspace is known; the write happens inside it.
+      const { workspaceId } = await db.user.findUniqueOrThrow({ where: { id }, select: { workspaceId: true } });
+      const user = await inTenant({ workspaceId, userId: id }, (tx) =>
+        tx.user.update({ where: { id }, data: { name: data.name, image: data.image, emailVerified: data.emailVerified } }),
+      );
       return toAdapterUser(user);
     },
 

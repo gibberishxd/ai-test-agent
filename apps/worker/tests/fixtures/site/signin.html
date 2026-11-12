@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sign in</title><link rel="icon" href="data:,"></head>
+<body>
+  <main>
+    <h1>Sign in</h1>
+    <form id="form">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username">
+      <label for="pw">Password</label>
+      <input id="pw" type="password">
+      <button type="submit">Sign in</button>
+      <p id="error" role="alert"></p>
+    </form>
+  </main>
+  <script>
+    document.getElementById("form").onsubmit = (event) => {
+      event.preventDefault();
+      const email = document.getElementById("email").value;
+      const pw = document.getElementById("pw").value;
+      if (email === "tester@example.com" && pw === "s3cret-Pass!") {
+        localStorage.setItem("session", "tester");
+        location.href = "/account.html";
+      } else {
+        document.getElementById("error").textContent = "Wrong email or password.";
+      }
+    };
+  </script>
+</body>
+</html>

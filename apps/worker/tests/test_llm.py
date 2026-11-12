@@ -13,6 +13,7 @@ from worker.llm import (
     Usage,
     make_client,
     make_judge,
+    make_reviewer,
 )
 from worker.llm.claude import ClaudeClient, tool_definitions
 from worker.llm.ollama import OllamaClient, parse_text_tool_call
@@ -317,3 +318,70 @@ def test_claude_cli_never_starts_in_production(monkeypatch, variable):
     monkeypatch.setenv(variable, "production")
     with pytest.raises(ConfigError, match="production"):
         make_client(Settings(_env_file=None, llm_provider="claude-cli", dev_mode=True))
+
+
+# --- make_reviewer (run 5, K2: the tiered agent) -----------------------------------------------
+
+
+def test_no_reviewer_unless_one_is_configured():
+    settings = Settings(
+        _env_file=None, llm_provider="ollama", reviewer_provider="", reviewer_model=""
+    )
+    assert make_reviewer(settings) is None
+
+
+def test_reviewer_model_on_the_explorers_provider():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="ollama",
+        ollama_model="gemma4:12b",
+        reviewer_provider="",
+        reviewer_model="qwen3:14b",
+    )
+    reviewer = make_reviewer(settings)
+    assert (reviewer.provider, reviewer.agent_model) == ("ollama", "qwen3:14b")
+
+
+@pytest.mark.parametrize(
+    "provider, extra",
+    [
+        ("claude", {"anthropic_api_key": "sk-ant-test-key"}),
+        ("openai-compat", {"openai_compat_base_url": "http://127.0.0.1:9/v1"}),
+        ("ollama", {}),
+    ],
+)
+def test_reviewer_works_with_every_provider(provider, extra):
+    settings = Settings(
+        _env_file=None,
+        llm_provider="ollama",
+        reviewer_provider=provider,
+        reviewer_model="big-model",
+        **extra,
+    )
+    reviewer = make_reviewer(settings)
+    assert (reviewer.provider, reviewer.agent_model) == (provider, "big-model")
+
+
+def test_a_text_only_reviewer_gets_text_instead_of_a_screenshot():
+    """qwen3:14b and other text models refuse images (Ollama answers 400). REVIEWER_VISION=false
+    sends the same prompt as text, saying there is no screenshot."""
+    from worker.llm import TextOnlyClient
+
+    inner = FakeClient(texts=['{"bug": false, "reason": "r"}'])
+    client = TextOnlyClient(inner)
+    result = client.review_screenshot("Is this a bug?", b"\x89PNG", system="sys")
+    assert result.text.startswith("{")
+    [call] = inner.calls
+    assert call["method"] == "complete" and call["cheap"] is False
+    assert "Is this a bug?" in call["prompt"] and "no screenshot" in call["prompt"].lower()
+    assert (client.provider, client.agent_model) == (inner.provider, inner.agent_model)
+
+
+def test_reviewer_vision_off_wraps_the_reviewer():
+    from worker.llm import TextOnlyClient
+
+    settings = Settings(
+        _env_file=None, llm_provider="ollama", reviewer_model="qwen3:14b", reviewer_vision=False
+    )
+    reviewer = make_reviewer(settings)
+    assert isinstance(reviewer, TextOnlyClient) and reviewer.agent_model == "qwen3:14b"

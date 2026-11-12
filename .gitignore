@@ -39,3 +39,7 @@ aitestagentprogress*.txt
 *.transcript.txt
 testprogress*.txt
 testagentprogress*.txt
+
+# Production-style environment files (secrets): never committed (run 4, J6)
+.env.prod
+.env.*.local

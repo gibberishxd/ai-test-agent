@@ -10,7 +10,9 @@ import { PrismaClient } from "@/lib/generated/prisma/client";
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
 function createClient(): PrismaClient {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  // WEB_DATABASE_URL: the web app's own role, ata_web (run 5, K3). DATABASE_URL is the admin
+  // connection migrations use; it is the fallback until the roles exist.
+  const adapter = new PrismaPg({ connectionString: process.env.WEB_DATABASE_URL || process.env.DATABASE_URL });
   return new PrismaClient({ adapter });
 }
 

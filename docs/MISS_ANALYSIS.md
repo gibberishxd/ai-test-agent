@@ -20,7 +20,7 @@ Runs read (all on the buggy apps; step logs in the database, run ids below):
 |---|---|---|---|---|
 | R2 | gemma4:12b | run 2 after D52 (commit 21e5669) | shop 804c2a85, e2ccf43f, d750ccfc; holdout d712b435, fba800a4 | 480 s |
 | S | Sonnet via claude-cli | run 2 (commit 0124950) | shop be495c9f | 480 s |
-| R3a | gemma4:12b | run 3 after the replay fix (f1bf08a; the result row says 984755e, see D58) | shop 6f8600fc, 88dafc6f, 906111fd; holdout e9a9fe78, 7c8f8521 | 1200 s |
+| R3a | gemma4:12b | run 3 after the replay fix (f1bf08a; the result row said 984755e until run 4, D58, D63) | shop 6f8600fc, 88dafc6f, 906111fd; holdout e9a9fe78, 7c8f8521 | 1200 s |
 | R3b | gemma4:12b | run 3 with D58–D60 (984755e) | shop 9590b85f (failed at step 31), a0e4c761, d52e106d; holdout 73b945f8, ab273f55 (failed at step 17) | 1200 s |
 
 How "did it trigger the bug" was judged: by reading what the agent typed and clicked, and on
@@ -186,3 +186,121 @@ provider; noted, not fixed (verifying a fix would need another Sonnet run).
 
 Sonnet finds what Gemma reaches but doesn't recognise (bugs 5, 8 and holdout 3, 4 are all
 states Gemma reached in R3b). That supports the R3b conclusion: the gap is recognition.
+
+## Run 4, J1: expected vs. actual (Gemma 4 12B)
+
+Result row `bea561fa` (commit a0af21e plus uncommitted J3 code that doesn't touch the agent, D71),
+same settings as R3a/R3b (1200 s, 40 steps, judge gemma4:12b), holdout run first
+(`bench --holdout-first`). All 7 runs finished; no Ollama timeout this time. Two earlier attempts
+were void (D67: a fake-model worker took the runs; D71: the database went down); their runs are
+marked failed and their result `6a0d7e24` is marked invalid.
+
+| | R3b (D59–D60) | J1 (expected vs. actual) |
+|---|---|---|
+| Holdout AI-only / recall | 0% / 33% | **0% / 33%** (no drop) |
+| Shop AI-only / recall | 8% / 39% | 8% / 39% (12% / 42% before verification) |
+| False alarms, clean shop / clean holdout | 0.0 / 0.0 | **0.0 / 0.0** (no rise) |
+| Correct but discarded | 0 | 1 (bug 8, the judge said no) |
+| Avg input tokens per agent step | ~3,490 | ~4,100 (+17%: the larger tool schema) |
+
+How the check was used (7 runs): 142 actions carried an expectation; 23 were flagged as a
+mismatch; Gemma **dismissed 19** with a reason, reported 4 (shop runs), and was never refused an
+action (it always resolved the mismatch first). On the clean shop it dismissed all 6 mismatches,
+which is the right outcome there; on the holdout it dismissed all 5, which included real bug states.
+
+**Verdict:** kept under the run plan's rule (holdout didn't drop, false alarms didn't rise), but it
+did not raise recall. The protocol works mechanically: the model writes expectations, the worker
+finds contradictions, the model is forced to look at them. The limit moved one step further: a 12B
+model, shown "you expected $360, the page says $120", talks itself out of it ("the total may not
+include all nights yet"). The next lever is not more prompting of the same model: either a
+stronger judge for the mismatch only (one cheap call on the 10–20% of steps that are flagged) or a
+stronger agent model. The Sonnet run in J7 shows the upper bound.
+
+## Run 4, J7: everything in run 4, the shop signed in (Gemma 4 12B)
+
+Result row `bd88e166` (commit b114b43), same settings (1200 s, 40 steps, judge gemma4:12b). The
+shop now has 13 planted bugs (bug 13 only when signed in) and its benchmark runs start signed in
+with a saved setup (D75), so logout is denied and bug 11 can't be triggered: recall is given with
+and without it. All 7 runs finished; no timeouts.
+
+| | Run 2 (G6 rerun) | Run 3 (R3b) | Run 4 J1 | **Run 4 J7** |
+|---|---|---|---|---|
+| Shop AI-only | 4% | 8% | 8% | **0%** (7% before verification) |
+| Shop recall | 36% | 39% | 39% | **31%** (33% without bug 11) |
+| Holdout AI-only / recall | 0% / 33% | 0% / 33% | 0% / 33% | **0% / 33%** |
+| False alarms (shop / holdout) | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 | **0.0 / 0.0** |
+| Correct but discarded | not measured | 0 | 1 | **2** |
+
+**Why 0%:** Gemma reported bug 8 ("Save changes does nothing") in 2 of 3 runs and the replay judge
+(also Gemma) dismissed both: "the screenshot shows a static state". A bug whose symptom is that
+nothing happens can't be seen on one screenshot after the replay; in J1 the same judge accepted it
+2 of 3 times, so this is judge variance on a known weak spot (bug 8 is the "Reported, then
+dropped" kind again). Bug 13 (order history): the signed-in crawl visited `/orders`, but the agent
+never opened an order's page. Logout was refused 3 times across the shop runs, as designed.
+
+**What it says:** run 4 changed what the product can do (CI, logins, releases, teams,
+production), not how many judgement bugs a 12B model finds. Two concrete next steps, both generic:
+replay verification should compare before and after the replayed action for "nothing happened"
+reports (the agent's own Effect from J1 already records "nothing on the page changed"), and a
+stronger model (Sonnet's 38% in run 3 is the reference; not re-run today without the owner's yes).
+
+## Run 5, K1: re-checking rejected reports with before/after replay
+
+Offline, read-only (`reverify_run(..., only_status="dismissed")`, stored verdicts unchanged), judge
+pinned to ollama/gemma4:12b, at the K1 commit. Scope: every dismissed, non-duplicate agent report
+in every valid benchmark result (11 reports, all on buggy shop runs), plus Sonnet's single run
+be495c9f (run 2, 5 dismissed reports). **No clean-build report had ever been dismissed** (every
+clean-build agent report in stored results was already confirmed), so the re-check can't create
+a new confirmed false alarm on a clean build.
+
+| Result · run | Model | Report | Before | After K1 |
+|---|---|---|---|---|
+| 0029d375 · 3f9d8dd0 | Gemma | Save changes does not update display name (bug 8) | could not replay | **confirmed by measurement** |
+| c6c3f95e · d750ccfc | Gemma | Save changes does not update display name (bug 8) | could not replay | **confirmed by measurement** |
+| bea561fa · c8043ec4 | Gemma | Save changes does not update display name (bug 8) | judge said no | **confirmed by measurement** |
+| bd88e166 · 9598b42c | Gemma | Profile update button does not save (bug 8) | judge said no | **confirmed by measurement** |
+| bd88e166 · 67fa30d2 | Gemma | Save changes does not update display name (bug 8) | judge said no | **confirmed by measurement** |
+| f6151b32 · 99bd8afb | Sonnet | Save changes does nothing (bug 8) | judge said no | **confirmed by the judge** (diff) |
+| be495c9f (single run) | Sonnet | Save changes does nothing (bug 8) | could not replay | **confirmed by the judge** (diff) |
+| be495c9f | Sonnet | Cart total doesn't match line price (bug 5) | could not replay | **confirmed by the judge** |
+| 873b1b56, 7db4ddf9 · 6657cffb | Gemma | Profile API returns 500 (bug 2, also found by the checks) | judge said no | confirmed by the judge |
+| bd88e166 · 9598b42c, 0348ce58 | Gemma | Quantity spinbutton does not change value | judge said no | still dismissed, by rule (a click into a field only focuses it) |
+| f6151b32, be495c9f | Sonnet | Quantity 0 / huge / fractional quantity accepted | dismissed | confirmed (unplanted; quantity 0 → 1 is the owner's open decision) |
+
+**Acceptance:** all 7 rejected bug-8 reports verify (5 Gemma, 2 Sonnet); no clean-build report
+becomes a confirmed false alarm. Stored benchmark numbers are unchanged (history isn't
+rewritten); the next benchmark (K6) measures the effect. A first pass of the re-check let Gemma's
+judge confirm "Quantity spinbutton does not increment value" from a "no change" diff; the field
+rule (D80) was added because of it, test first.
+Why the "could not replay" ones replay now: they were older runs, before run 3's replay fixes
+(waiting for routes, fresh contexts, shorter plans), not because of K1.
+
+## Run 5, K2: Gemma explorer + Gemma reviewer (baseline of the tiered setup)
+
+Result `14203d1f` (commit da16f0e, K1 + K2 code before the follow-ups below), gemma4:12b
+explorer and reviewer, judge ollama/gemma4:12b, 1200 s and 40 steps per run, holdout first.
+
+| Set | AI-only | Recall | Precision | False alarms |
+|---|---|---|---|---|
+| Shop (3 buggy + 1 clean) | 0% | 31% | 88% | 0.0 |
+| Holdout (2 buggy + 1 clean) | 0% | 33% | 100% | **1.0** |
+
+What happened, run by run:
+- **The reviewer was asked rarely:** 1–3 flagged steps per run. Gemma writes few checkable
+  expectations, so the expected-vs-actual check flags little, and the reviewer only sees flags.
+- **Bug 8's report didn't come this time** (Gemma didn't test the profile save in these runs);
+  the "Quantity spinbutton does not increment" report appeared three times and replay dismissed
+  it by K1's rule each time (a click into a field only focuses it).
+- **"Price and Total display NaN"** was confirmed twice, on /cart; the per-bug table counts bug 9
+  0/3 because the matcher only offers bugs listed for the report's page (bug 9 is listed on "/"),
+  the open matcher question from run 2.
+- **The holdout false alarm** ("Book now fails with missing required fields") was the browser's
+  own form validation: the browser refused the submit, focused the empty field and showed its
+  bubble, which isn't in the page. Replay measured "no change" and the judge confirmed it.
+  Fixed (D86): a refused submit is a response.
+- **Bug 13 not reached:** only the free crawl opened `/orders/100x`; the agent never went to the
+  order list, so its per-list reminder never fired. Fixed (D86): lists the crawl found seed it.
+
+**Decision for the default:** a Gemma reviewer doesn't qualify (holdout AI-only didn't rise;
+clean-build false alarms rose 0 → 1.0). The next measurement uses the largest local model this
+Mac runs as the reviewer (below).

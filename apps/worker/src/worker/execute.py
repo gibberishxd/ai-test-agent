@@ -13,31 +13,41 @@ from urllib.parse import urljoin, urlsplit
 from playwright.sync_api import Browser, BrowserContext
 from sqlalchemy.orm import Session
 
+from worker.agent.lists import lists_from_crawl
 from worker.agent.loop import AgentConfig, AgentRun, StepRecord
 from worker.agent.policy import Budget
+from worker.agent.reviewer import review_candidate
 from worker.config import Settings
 from worker.db.models import Bug, Domain, Run, RunMode, Step
 from worker.findings import findings_from_pages
 from worker.llm import LLMClient, Usage
+from worker.login import LoginConfig, login_for_run, sign_in
 from worker.report import BugReport, PageResult
 from worker.review import review_screenshots
 from worker.runner import ExecuteFn
 from worker.safety.network import BlockedError
 from worker.scan import guarded_browser, guarded_context, is_demo_target, passive_scan
 from worker.storage import Storage
+from worker.triage import suppressed_count
 from worker.urls import normalize
 from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
 
 MAX_EVENTS_PER_STEP = 20
 
 
-def make_execute(settings: Settings, storage: Storage, browser: Browser | None = None) -> ExecuteFn:
-    """`browser`: reuse an already-running browser (tests); normally each run launches one."""
+def make_execute(
+    settings: Settings,
+    storage: Storage,
+    browser: Browser | None = None,
+    reviewer: LLMClient | None = None,
+) -> ExecuteFn:
+    """`browser`: reuse an already-running browser (tests); normally each run launches one.
+    `reviewer`: the reviewer tier's client (run 5, K2), or None for the explorer alone."""
 
     def execute(session: Session, run: Run, llm: LLMClient) -> None:
         if run.mode == RunMode.INTERACTIVE:
             verified = is_verified_domain(session, run.workspace_id, run.target_url)
-            run_interactive(session, run, llm, settings, storage, browser, verified)
+            run_interactive(session, run, llm, settings, storage, browser, verified, reviewer)
         else:
             run_passive(session, run, llm, settings, storage, browser)
 
@@ -53,6 +63,7 @@ def run_passive(
     browser: Browser | None = None,
 ) -> None:
     step_numbers = itertools.count(run.step_count)
+    login = login_for_run(session, settings, run)
 
     report = passive_scan(
         run.target_url,
@@ -62,6 +73,7 @@ def run_passive(
         on_page=lambda page: _save_visit(session, run, page, next(step_numbers)),
         should_stop=lambda: _stop_requested(session, run),
         browser=browser,
+        login=login,
     )
     bugs = list(report.bugs)
 
@@ -80,10 +92,14 @@ def run_passive(
     for bug in bugs:
         session.add(Bug(run_id=run.id, **bug.model_dump()))
     session.commit()
-    verification = verify_and_dedupe(session, run, llm, settings, browser)
+    verification = verify_and_dedupe(session, run, llm, settings, browser, login)
     session.refresh(run)
     all_bugs = [BugReport.model_validate(b, from_attributes=True) for b in run.bugs]
-    run.summary = {**summarize(report.pages, all_bugs), "verification": verification}
+    run.summary = {
+        **summarize(report.pages, all_bugs),
+        "verification": verification,
+        "suppressed": suppressed_count(session, run),  # triaged as false positives earlier
+    }
     session.commit()
 
 
@@ -141,6 +157,14 @@ def interactive_allowed(settings: Settings, target_url: str, verified: bool = Fa
     return verified or is_demo_target(settings, target_url)
 
 
+def run_limits(settings: Settings, run: Run) -> tuple[int, int]:
+    """Steps and seconds for this run: the worker's limits, or lower ones the run asked for
+    (set through the API by a CI pipeline, run 4). A run can never raise them."""
+    steps = min(settings.max_steps, run.max_steps or settings.max_steps)
+    seconds = min(settings.max_run_seconds, run.max_seconds or settings.max_run_seconds)
+    return steps, seconds
+
+
 def run_interactive(
     session: Session,
     run: Run,
@@ -149,11 +173,13 @@ def run_interactive(
     storage: Storage,
     browser: Browser | None = None,
     verified: bool = False,
+    reviewer: LLMClient | None = None,
 ) -> None:
     """Deterministic scan first (free), then the agent loop. Everything is saved as it happens."""
     if not interactive_allowed(settings, run.target_url, verified):
         raise BlockedError("interactive mode is only allowed on the demo shop and verified domains")
     started = time.monotonic()
+    login = login_for_run(session, settings, run)
 
     # 1. The free part: crawl and run the deterministic checks (no screenshot review; the agent
     #    looks at screenshots itself).
@@ -166,6 +192,7 @@ def run_interactive(
         on_page=lambda page: _save_visit(session, run, page, next(step_numbers)),
         should_stop=lambda: _stop_requested(session, run),
         browser=browser,
+        login=login,
     )
     known_titles = {bug.title for bug in report.bugs}
     for bug in report.bugs:
@@ -176,9 +203,10 @@ def run_interactive(
         return
 
     # 2. The agent loop, with what's left of the budgets.
+    max_steps, max_seconds = run_limits(settings, run)
     budget = Budget(
-        max_steps=settings.max_steps,
-        max_seconds=max(settings.max_run_seconds - (time.monotonic() - started), 0),
+        max_steps=max_steps,
+        max_seconds=max(max_seconds - (time.monotonic() - started), 0),
         max_cost_usd=max(settings.max_run_cost_usd - run.cost_usd, 0),
         max_repeats=settings.max_repeated_actions,
     )
@@ -228,13 +256,15 @@ def run_interactive(
     def save(png: bytes, name: str) -> str:
         return storage.save(f"{run.id}/agent-{next(counter):03d}-{name}.png", png)
 
-    with guarded_context(settings, run.target_url, browser) as (context, guard):
+    with guarded_context(settings, run.target_url, browser, login) as (context, guard):
         config = AgentConfig(
             target_url=run.target_url,
             mode=run.mode,
             budget=budget,
             focus=run.focus,
             is_demo_target=is_demo_target(settings, run.target_url),
+            login=login,
+            known_lists=lists_from_crawl([(p.url, p.found_on) for p in report.pages]),
         )
         agent = AgentRun(
             context.new_page(),
@@ -245,8 +275,12 @@ def run_interactive(
             on_step=on_step,
             on_bug=on_bug,
             should_stop=lambda: _stop_requested(session, run),
+            relogin=(lambda: sign_in(context, login)) if login else None,
+            reviewer=reviewer,
         )
         result = agent.run()
+    if reviewer is not None:
+        _review_candidates(session, run, reviewer, result.reviewer_usage, login, settings)
 
     # 3. Errors seen while the agent clicked around are deterministic findings too.
     extra = [
@@ -255,14 +289,75 @@ def run_interactive(
     for bug in extra:
         session.add(Bug(run_id=run.id, **bug.model_dump()))
     session.commit()
-    verification = verify_and_dedupe(session, run, llm, settings, browser)
+    verification = verify_and_dedupe(session, run, llm, settings, browser, login)
     all_bugs = [BugReport.model_validate(b, from_attributes=True) for b in run.bugs]
     run.summary = {
         **summarize(report.pages, all_bugs),
         "stop_reason": result.stop_reason,
         "agent_summary": result.summary,
         "verification": verification,
+        "suppressed": suppressed_count(session, run),  # triaged as false positives earlier
+        "expectation_checks": {"dismissed": result.dismissed, "ignored": result.ignored},
     }
+    session.commit()
+
+
+def _review_candidates(
+    session: Session,
+    run: Run,
+    reviewer: LLMClient,
+    loop_usage: list[Usage],
+    login: LoginConfig | None,
+    settings: Settings,
+) -> None:
+    """The reviewer looks at each report the explorer filed: keep (rewritten) or drop.
+
+    Reports the reviewer filed itself during the loop aren't reviewed again. Every reviewer
+    call (the loop's and these) is logged as a "review" step and summed into the run's
+    reviewer_* columns, apart from the explorer's share.
+    """
+    run.reviewer_provider, run.reviewer_model = reviewer.provider, reviewer.agent_model
+    usages = list(loop_usage)
+    explorer_reports = (
+        session.query(Bug)
+        .filter(Bug.run_id == run.id, Bug.source == "agent", Bug.status == "candidate")
+        .order_by(Bug.created_at)
+        .all()
+    )
+    for bug in explorer_reports:
+        if "reviewer" in (bug.evidence or {}):
+            continue
+        if run.cost_usd + sum(u.cost_usd for u in usages) >= settings.max_run_cost_usd:
+            break  # out of budget: replay still checks the rest
+        review = review_candidate(
+            reviewer,
+            target_url=run.target_url,
+            title=bug.title,
+            expected=bug.expected,
+            actual=bug.actual,
+            evidence=(bug.evidence or {}).get("observed"),
+            steps=list(bug.repro_steps or []),
+            scrub=login.scrub if login else (lambda text: text),
+        )
+        if review.usage:
+            usages.append(review.usage)
+        evidence = {**(bug.evidence or {}), "reviewer": reviewer.agent_model}
+        if not review.is_bug:
+            bug.status, bug.dismiss_reason = "dismissed", f"reviewer: {review.reason}"
+        elif review.report:
+            evidence["explorer_title"] = bug.title
+            bug.title = review.report["title"]
+            bug.severity = review.report["severity"]
+            bug.category = review.report["category"]
+            bug.expected = review.report["expected"] or bug.expected
+            bug.actual = review.report["actual"] or bug.actual
+        bug.evidence = evidence
+    for usage in usages:
+        _log_model_step(session, run, "review", {"model": usage.model}, usage)
+        fields = usage_fields(usage)
+        run.reviewer_input_tokens += fields["input_tokens"]
+        run.reviewer_output_tokens += fields["output_tokens"]
+        run.reviewer_cost_usd += fields["cost_usd"]
     session.commit()
 
 
@@ -296,6 +391,7 @@ def verify_and_dedupe(
     llm: LLMClient,
     settings: Settings,
     browser: Browser | None = None,
+    login: LoginConfig | None = None,
 ) -> dict:
     """Merge duplicates, then replay every remaining candidate in a fresh browser (brief 5.3).
 
@@ -317,12 +413,12 @@ def verify_and_dedupe(
     candidates = [b for b in bugs if b.status == "candidate" and b.source != "deterministic"]
 
     if candidates and not run.stop_requested:
-        with guarded_browser(settings, run.target_url, browser) as (new_context, _guard):
+        with guarded_browser(settings, run.target_url, browser, login) as (new_context, _guard):
             for bug in candidates:
                 if run.cost_usd >= settings.max_run_cost_usd:
                     break  # out of budget: leave the rest as unverified candidates
                 verdict, start_url = _replay_bug(
-                    session, run, llm, settings, new_context, bug, steps
+                    session, run, llm, settings, new_context, bug, steps, login
                 )
                 if verdict.reproduced:
                     bug.status, bug.dismiss_reason = "confirmed", None
@@ -331,10 +427,13 @@ def verify_and_dedupe(
                 else:
                     bug.status = "dismissed"
                     bug.dismiss_reason = f"could not replay: {verdict.reason}"
-                evidence = {k: v for k, v in (bug.evidence or {}).items() if k != "replay_failure"}
+                stale = ("replay_failure", "replay_diff")
+                evidence = {k: v for k, v in (bug.evidence or {}).items() if k not in stale}
                 bug.evidence = {**evidence, "replay": verdict.reason, "replay_start": start_url}
                 if verdict.failure:
                     bug.evidence["replay_failure"] = verdict.failure
+                if verdict.diff:
+                    bug.evidence["replay_diff"] = verdict.diff
                 stats["confirmed" if verdict.reproduced else "dismissed"] += 1
     session.commit()
     return stats
@@ -372,6 +471,7 @@ def _replay_bug(
     new_context: Callable[[], BrowserContext],
     bug: Bug,
     steps: dict[int, Step],
+    login: LoginConfig | None = None,
 ) -> tuple[Verdict, str]:
     """Try each replay plan until one reproduces the bug; returns the last verdict and start.
 
@@ -392,6 +492,7 @@ def _replay_bug(
                 bug.expected,
                 bug.actual,
                 viewport=(bug.evidence or {}).get("viewport", "desktop"),
+                scrub=login.scrub if login else (lambda text: text),
             )
         finally:
             context.close()

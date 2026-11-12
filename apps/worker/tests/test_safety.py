@@ -186,3 +186,14 @@ def test_dev_mode_has_to_be_switched_on_explicitly():
     guard = make_guard(settings, settings.demo_url)
     assert guard.check("http://localhost:5173/") is None
     assert guard.check("http://localhost:3000/") is not None  # only the demo shops' ports
+
+
+def test_dev_mode_allows_the_demo_shops_own_host_name_too():
+    # Run 4, J6: in the local production stack the worker runs in a container and reaches the
+    # demo shop on the host as host.docker.internal; still only that port, still only in dev mode.
+    from worker.safety.network import dev_allowed_local
+
+    allowed = dev_allowed_local(["http://host.docker.internal:5173/"])
+    assert ("host.docker.internal", 5173) in allowed
+    assert ("localhost", 5173) in allowed
+    assert ("host.docker.internal", 5432) not in allowed

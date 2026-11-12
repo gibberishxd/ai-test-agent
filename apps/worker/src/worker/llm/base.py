@@ -51,6 +51,10 @@ class TextResult:
     usage: Usage
 
 
+class ModelTimeout(Exception):
+    """The model didn't answer within the client's time limit (a slow local model, usually)."""
+
+
 class LLMClient(ABC):
     provider: str
     agent_model: str

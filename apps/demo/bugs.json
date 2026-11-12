@@ -120,6 +120,16 @@
       "description": "Logging in with demo@example.com and a wrong password shows 'Incorrect password.' under the Email field instead of the Password field.",
       "detection": "agent",
       "how_to_detect": "Submit a wrong password for the demo account: the error is inside the email field group."
+    },
+    {
+      "id": 13,
+      "page": "/orders",
+      "category": "functional",
+      "severity": "high",
+      "title": "Opening an order shows a different order",
+      "description": "Signed in, on My orders, opening Order #1001 shows Order #1002's number, items and total (each order shows the next one). Only reachable when signed in.",
+      "detection": "agent",
+      "how_to_detect": "Sign in, open My orders, open an order: the heading and items don't match the order that was clicked."
     }
   ],
   "not_bugs": [

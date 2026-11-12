@@ -55,6 +55,14 @@ DENY_RULES = [
     _rule("outbound", "transfer", r"\btransfer\b"),
 ]
 
+# When the worker signed in with the workspace's test account (run 4, J2), the agent must keep
+# that session and that account: these apply on every target, our demo shops included.
+SIGNED_IN_RULES = [
+    _rule("session", "log out", r"\b(?:log|sign)\s*-?\s*(?:out|off)\b"),
+    _rule("account", "delete account", rf"\b(?:delete|remove|close|deactivate)\s+{OWN}account\b"),
+    _rule("account", "change password", rf"\b(?:change|reset|update)\s+{OWN}password\b"),
+]
+
 # Clicking into a field only focuses it, and its text is what the user typed, not an action.
 TYPING_ROLES = {"textbox", "searchbox", "combobox", "slider", "spinbutton"}
 CARD_NUMBER = re.compile(r"^\d{13,19}$")
@@ -71,10 +79,14 @@ def url_words(url: str | None) -> str:
     return re.sub(r"[^A-Za-z0-9]+", " ", text).strip()
 
 
-def deny_reason(element: ElementInfo, is_demo_target: bool) -> str | None:
-    """None if clicking `element` is allowed, otherwise why safe mode refuses it."""
-    if is_demo_target or element.role in TYPING_ROLES:
+def deny_reason(element: ElementInfo, is_demo_target: bool, signed_in: bool = False) -> str | None:
+    """None if clicking `element` is allowed, otherwise why safe mode refuses it.
+
+    `signed_in`: the worker signed in with a saved test account, so the session and account
+    rules apply too, on every target."""
+    if element.role in TYPING_ROLES:
         return None
+    rules = (SIGNED_IN_RULES if signed_in else []) + ([] if is_demo_target else DENY_RULES)
     fields = {
         "text": element.name,
         "aria-label": element.aria_label,
@@ -85,7 +97,7 @@ def deny_reason(element: ElementInfo, is_demo_target: bool) -> str | None:
     for label, value in fields.items():
         if not value:
             continue
-        for rule in DENY_RULES:
+        for rule in rules:
             if rule.pattern.search(value):
                 return f"safe mode ({rule.category}): the element's {label} says '{rule.phrase}'"
     return None

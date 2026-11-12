@@ -17,26 +17,317 @@ the queue is polled (each idle worker asks once per second), which is cheap at t
 
 ## Entity diagram
 
+Generated from the real schema (run 5): `node apps/web/scripts/er-diagram.mjs <database url>`
+reads tables, columns and foreign keys from Postgres's catalog after the migrations ran, so it
+can't drift from them. `||--o{` = one to many; `|o--o{` = the key may be null. `plans` is the
+only table every workspace points at; `benchmark_results` and `verification_tokens` stand alone.
+
 ```mermaid
 erDiagram
-    workspaces ||--o{ users : "has"
-    workspaces ||--o{ runs : "owns"
-    workspaces ||--o{ domains : "verifies"
-    workspaces ||--o{ model_configs : "brings"
-    workspaces ||--o{ audit_log : "records"
-    users ||--o{ accounts : "signs in with"
-    users |o--o{ runs : "started"
-    users |o--o{ audit_log : "did"
-    model_configs |o--o{ runs : "used by"
-    runs ||--o{ steps : "timeline"
-    runs ||--o{ bugs : "found"
-    bugs |o--o{ bugs : "duplicate_of_id"
-    benchmark_results
-    verification_tokens
+  users ||--o{ accounts : "user_id"
+  workspaces ||--o{ api_keys : "workspace_id"
+  api_keys ||--o{ api_rate_windows : "api_key_id"
+  users |o--o{ audit_log : "user_id"
+  workspaces ||--o{ audit_log : "workspace_id"
+  runs ||--o{ bugs : "run_id"
+  workspaces ||--o{ domains : "workspace_id"
+  workspaces ||--o{ finding_triage : "workspace_id"
+  workspaces ||--o{ invitations : "workspace_id"
+  workspaces ||--o{ login_setups : "workspace_id"
+  workspaces ||--o{ model_configs : "workspace_id"
+  api_keys |o--o{ runs : "api_key_id"
+  users |o--o{ runs : "created_by_id"
+  model_configs |o--o{ runs : "model_config_id"
+  workspaces ||--o{ runs : "workspace_id"
+  runs ||--o{ steps : "run_id"
+  runs |o--o{ usage_events : "run_id"
+  workspaces ||--o{ usage_events : "workspace_id"
+  workspaces ||--o{ users : "workspace_id"
+  webhook_endpoints ||--o{ webhook_deliveries : "endpoint_id"
+  runs |o--o{ webhook_deliveries : "run_id"
+  workspaces ||--o{ webhook_endpoints : "workspace_id"
+  plans ||--o{ workspaces : "plan_id"
+  accounts {
+    uuid id PK
+    uuid user_id FK
+    text type
+    text provider
+    text provider_account_id
+    text refresh_token
+    text access_token
+    integer expires_at
+    text token_type
+    text scope
+    text id_token
+    text session_state
+  }
+  api_keys {
+    uuid id PK
+    uuid workspace_id FK
+    text name
+    text prefix
+    text key_hash
+    uuid created_by_id
+    timestamp_with_time_zone last_used_at
+    timestamp_with_time_zone revoked_at
+    timestamp_with_time_zone created_at
+  }
+  api_rate_windows {
+    uuid api_key_id PK
+    timestamp_with_time_zone window_start PK
+    integer count
+  }
+  audit_log {
+    uuid id PK
+    uuid workspace_id FK
+    uuid user_id FK
+    text action
+    text target_url
+    run_mode mode
+    uuid run_id
+    jsonb metadata
+    timestamp_with_time_zone created_at
+  }
+  benchmark_results {
+    uuid id PK
+    text provider
+    text model
+    text git_commit
+    integer runs_buggy
+    double_precision recall
+    double_precision precision
+    double_precision false_alarms
+    double_precision avg_cost_usd
+    double_precision avg_duration_s
+    jsonb details
+    timestamp_with_time_zone created_at
+    double_precision ai_recall
+    integer holdout_runs_buggy
+    double_precision holdout_recall
+    double_precision holdout_ai_recall
+    double_precision holdout_precision
+    double_precision holdout_false_alarms
+    text judge
+    text rescore_commit
+  }
+  bugs {
+    uuid id PK
+    uuid run_id FK
+    text title
+    severity severity
+    text category
+    text page_url
+    text expected
+    text actual
+    jsonb repro_steps
+    jsonb evidence
+    text reasoning
+    text screenshot
+    int4[] step_indexes
+    bug_source source
+    bug_status status
+    text dismiss_reason
+    uuid duplicate_of_id
+    timestamp_with_time_zone created_at
+    text fingerprint
+    boolean suppressed
+  }
+  domains {
+    uuid id PK
+    uuid workspace_id FK
+    text hostname
+    timestamp_with_time_zone verified_at
+    text method
+    timestamp_with_time_zone created_at
+  }
+  finding_triage {
+    uuid id PK
+    uuid workspace_id FK
+    text origin
+    text fingerprint
+    text state
+    text comment
+    text title
+    uuid updated_by_id
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  invitations {
+    uuid id PK
+    uuid workspace_id FK
+    text token_hash
+    workspace_role role
+    uuid created_by_id
+    timestamp_with_time_zone expires_at
+    timestamp_with_time_zone accepted_at
+    uuid accepted_by_id
+    timestamp_with_time_zone revoked_at
+    timestamp_with_time_zone created_at
+  }
+  login_setups {
+    uuid id PK
+    uuid workspace_id FK
+    text origin
+    text kind
+    text login_url
+    text username
+    text password_ciphertext
+    text username_selector
+    text password_selector
+    text submit_selector
+    text success_selector
+    text storage_state_ciphertext
+    timestamp_with_time_zone check_requested_at
+    jsonb last_check
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  model_configs {
+    uuid id PK
+    uuid workspace_id FK
+    text label
+    text provider
+    text base_url
+    text model
+    text cheap_model
+    text api_key_ciphertext
+    text api_key_last4
+    double_precision input_price
+    double_precision output_price
+    boolean is_default
+    jsonb probe
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  plans {
+    text id PK
+    text name
+    integer runs_per_month
+    integer max_steps_per_run
+    text[] allowed_providers
+    integer seats
+    integer retention_days
+    double_precision price_usd_month
+    timestamp_with_time_zone created_at
+  }
+  runs {
+    uuid id PK
+    uuid workspace_id FK
+    uuid created_by_id FK
+    text target_url
+    run_mode mode
+    text focus
+    run_status status
+    boolean stop_requested
+    text claimed_by
+    text provider
+    text model
+    integer pages_visited
+    integer step_count
+    integer input_tokens
+    integer output_tokens
+    double_precision cost_usd
+    text error
+    jsonb summary
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone started_at
+    timestamp_with_time_zone finished_at
+    text share_token
+    uuid model_config_id FK
+    timestamp_with_time_zone heartbeat_at
+    uuid api_key_id FK
+    integer max_seconds
+    integer max_steps
+    timestamp_with_time_zone purged_at
+    text reviewer_provider
+    text reviewer_model
+    integer reviewer_input_tokens
+    integer reviewer_output_tokens
+    double_precision reviewer_cost_usd
+  }
+  steps {
+    uuid id PK
+    uuid run_id FK
+    integer index
+    text action
+    jsonb args
+    text reasoning
+    text url
+    text screenshot
+    jsonb events
+    boolean blocked
+    text block_reason
+    integer input_tokens
+    integer output_tokens
+    double_precision cost_usd
+    timestamp_with_time_zone created_at
+  }
+  usage_events {
+    uuid id PK
+    uuid workspace_id FK
+    uuid run_id FK
+    text kind
+    text explorer_provider
+    text explorer_model
+    integer explorer_input_tokens
+    integer explorer_output_tokens
+    double_precision explorer_cost_usd
+    text reviewer_provider
+    text reviewer_model
+    integer reviewer_input_tokens
+    integer reviewer_output_tokens
+    double_precision reviewer_cost_usd
+    timestamp_with_time_zone created_at
+  }
+  users {
+    uuid id PK
+    text email
+    text name
+    uuid workspace_id FK
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone email_verified
+    text image
+    workspace_role role
+    boolean is_platform_admin
+  }
+  verification_tokens {
+    text identifier
+    text token
+    timestamp_with_time_zone expires
+  }
+  webhook_deliveries {
+    uuid id PK
+    uuid endpoint_id FK
+    uuid run_id FK
+    text event
+    jsonb payload
+    text status
+    integer attempts
+    timestamp_with_time_zone next_attempt_at
+    integer last_status_code
+    text last_error
+    timestamp_with_time_zone delivered_at
+    timestamp_with_time_zone created_at
+  }
+  webhook_endpoints {
+    uuid id PK
+    uuid workspace_id FK
+    text url
+    text secret_ciphertext
+    boolean enabled
+    timestamp_with_time_zone created_at
+  }
+  workspaces {
+    uuid id PK
+    text name
+    text slug
+    integer monthly_run_quota
+    timestamp_with_time_zone created_at
+    text verification_token
+    integer retention_days
+    text plan_id FK
+  }
 ```
-
-`||--o{` = one to many; `|o--o{` = optional (the column may be null). `benchmark_results` and
-`verification_tokens` stand alone.
 
 ## Tables
 
@@ -132,6 +423,68 @@ as associated data, so a ciphertext copied into another workspace's row fails to
 - Not enforced by the database: "at most one default per workspace" (the API clears the old
   default in the same transaction). A partial unique index
   (`UNIQUE (workspace_id) WHERE is_default`) would make it a database rule; noted, not done.
+
+### login_setups — how the worker signs in to an app (run 4)
+One row per workspace and target origin (`UNIQUE (workspace_id, origin)`): a login form (`kind =
+'form'`: `login_url`, `username`, `password_ciphertext`, optional selectors) or a recorded sign-in
+(`kind = 'storage_state'`: `storage_state_ciphertext`). The password and the storage state are
+AES-256-GCM encrypted like model keys (workspace id as associated data, so a ciphertext copied into
+another workspace's row doesn't decrypt). The username is plain: settings show it so people know
+which test account it is; it is still scrubbed from everything the model or a report sees.
+`check_requested_at` is a tiny job queue for "Test sign-in": the web sets it, a worker claims the
+row `FOR UPDATE SKIP LOCKED`, signs in, writes `last_check` (`{ok, detail, checkedAt}`, never a
+secret) and clears it. No index on it: a workspace has a handful of setups.
+
+### api_keys — keys for the public API (run 4)
+Only `key_hash` (SHA-256, `UNIQUE`) is stored, never the key. A password needs a slow hash
+because people choose guessable ones; a key is 32 random bytes, so nothing can brute-force it
+and a fast hash plus a unique index makes every request one equality lookup. `prefix` (first 12
+characters) lets people tell keys apart; `revoked_at` ends a key at once while keeping the row for
+the audit trail; `last_used_at` is written at most once a minute. Index `(workspace_id,
+created_at)` for the settings list. `runs.api_key_id` (`ON DELETE SET NULL`) records which key
+started a run.
+
+### api_rate_windows — requests per key per minute (run 4)
+Primary key `(api_key_id, window_start)`. Each request runs one statement:
+`INSERT ... VALUES (key, minute, 1) ON CONFLICT (api_key_id, window_start) DO UPDATE SET count =
+count + 1 RETURNING count`. The row lock taken by the upsert serialises parallel requests, so 8
+simultaneous requests against a limit of 5 let exactly 5 through (tested), and it works across
+several web servers, unlike a counter in memory. Old windows are removed by the retention job.
+
+### webhook_endpoints, webhook_deliveries — signed run notifications (run 4)
+An endpoint is a URL and an encrypted signing secret (the worker must read it to sign, so it can't
+be hashed). A delivery is one event for one endpoint: `status` (`pending` → `delivered` or
+`failed`), `attempts`, `next_attempt_at`, `last_status_code`, `last_error`. The worker claims due
+deliveries with `WHERE status = 'pending' AND next_attempt_at <= now() ... FOR UPDATE SKIP LOCKED`,
+served by the index `(status, next_attempt_at)`; `(endpoint_id, created_at)` serves "the last 10
+deliveries" in settings. `run_id` is `ON DELETE SET NULL`: the log outlives a deleted run.
+
+### bugs: fingerprint and suppressed; finding_triage (run 4, J4)
+`bugs.fingerprint` (16 hex characters) recognises the same bug in later runs of a target:
+SHA-256 over the page route with ids normalised, the category and a key (failing request,
+message without numbers, axe rule, link, or the element an agent report was about). Set for
+every insert by a SQLAlchemy `before_insert` hook, so no code path can forget it; older rows were
+filled by `uv run worker backfill-fingerprints`. `bugs.suppressed`: hidden because the workspace
+triaged that fingerprint as a false positive; set by the worker when a run finishes.
+
+`finding_triage` holds the current decision per `(workspace_id, origin, fingerprint)` (`UNIQUE`,
+which also serves the lookup "decisions for these fingerprints on this site"). `state` is limited
+by a CHECK constraint to `confirmed`, `false_positive`, `wont_fix` (Prisma can't express CHECKs;
+the migration adds it). History (who changed what, when) is in `audit_log` (`triage.changed`).
+Comparing with the previous run reads that run's bugs by `run_id` (indexed); no index on
+`bugs.fingerprint` is needed because fingerprints are only compared within two runs.
+
+### Retention (run 4, J6)
+`workspaces.retention_days` (default 30) and `runs.purged_at`. Once an hour a worker finds finished
+runs older than their workspace's retention (`finished_at < now() - make_interval(days =>
+retention_days)`, a join on workspaces), deletes their screenshots from storage and their steps,
+clears the findings' screenshot references and sets `purged_at`, one run per transaction. Runs and
+findings stay: release comparison needs their fingerprints. Rate-limit windows older than an hour
+are deleted in the same pass.
+
+### runs: budgets from the API (run 4)
+`max_steps` and `max_seconds` (nullable): a CI caller may lower the worker's limits for one run,
+never raise them (`run_limits()` takes the smaller value).
 
 ## Keys and constraints, in one place
 - **Primary keys:** `id uuid` everywhere (except `verification_tokens`, keyed by its unique
@@ -241,6 +594,209 @@ What the plans showed:
 
 Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
 
+## Roles and invitations (run 4, J5)
+`users.role` (enum `workspace_role`: owner, admin, member, viewer). Whoever signs up owns the
+workspace created for them; existing users became owners in the migration. `invitations` store a
+SHA-256 hash of the link's token, the role (a CHECK forbids `owner`: ownership is transferred,
+not handed out), `expires_at`, and `accepted_at` / `revoked_at`. Accepting is one transaction
+whose `UPDATE ... WHERE accepted_at IS NULL` makes a link work once even if two people open it
+together. What each role may do is one table in `apps/web/lib/roles.ts`; every route uses it and
+`route-roles.db.test.ts` calls every protected route as every role.
+
+"One default model per workspace" is a database rule: a partial unique index
+`UNIQUE (workspace_id) WHERE is_default` (Prisma's `partialIndexes` preview feature), so code that
+forgets to unset the old default gets an error instead of two defaults.
+
+## Row-level security (run 4, J5)
+The app filters every query by `workspace_id`. Row-level security (RLS) is a second wall inside
+Postgres: if a query forgets its WHERE, the database still returns only the current workspace.
+
+- **Policies:** each tenant table has `ENABLE ROW LEVEL SECURITY` and a policy `tenant_isolation`
+  for the role `app_tenant`: `USING (workspace_id = app_current_workspace())` (and `WITH CHECK`,
+  so rows can't be written into another workspace). Tables without a `workspace_id` (steps, bugs,
+  webhook_deliveries, api_rate_windows) check through their parent: `EXISTS (SELECT 1 FROM runs r
+  WHERE r.id = steps.run_id)`; the parent is itself filtered, so the child inherits it.
+- **The current workspace** is a per-transaction setting: `set_config('app.workspace_id', id,
+  true)`. `app_current_workspace()` turns an unset value into NULL, which matches no row: a
+  transaction that forgot to set it sees nothing (fails closed).
+- **Prisma:** `tenantDb(workspaceId)` (`apps/web/lib/tenant-db.ts`) is a client extension that
+  runs every query in a batch transaction: `set_config(...)`, `SET LOCAL ROLE app_tenant`, the
+  query. `LOCAL` means both end with the transaction, so a pooled connection never carries one
+  tenant's setting into the next request. The run page, run list, API reads and the settings
+  lists use it; the WHERE clauses stay (first line of defence).
+- **The worker (since run 5):** connects as `ata_worker` and works on a run inside that run's
+  workspace (`worker/db/tenant.py`); see "Rules in the database" below. (Run 4 had the worker
+  connect as the owner, outside the policies.)
+- **Production (since run 5):** the app roles `ata_web` and `ata_worker` are neither superusers
+  nor `BYPASSRLS`; only migrations and the role script use the admin connection.
+- **Tests:** `rls.db.test.ts`: a query without WHERE sees only its workspace (runs, bugs, steps,
+  workspaces); writing into another workspace fails; updating its rows changes nothing; an unset
+  workspace sees nothing; the owner role sees everything.
+
+**Cost** (EXPLAIN ANALYZE on 10k runs / 500k steps, `scripts/db_perf.py --rls`, median of 7):
+
+| Query | Owner | app_tenant (RLS) | Plan with RLS |
+|---|---|---|---|
+| run page: the run | 0.006 ms | 0.010 ms | Index Scan using runs_pkey |
+| run page: its steps (50) | 0.038 ms | 0.066 ms | Index Scan using steps_run_id_index_key |
+| run page: its bugs | 0.013 ms | 0.021 ms | Bitmap Heap Scan on bugs |
+| runs list (newest 50) | 0.018 ms | 0.029 ms | Index Scan Backward using runs_workspace_id_created_at_idx |
+
+The policies add tens of microseconds because the parent check is a primary-key lookup and the
+plans keep their indexes. The larger cost is two extra statements per query (`set_config`, `SET
+LOCAL ROLE`) in the same round trip batch: about 0.1–0.3 ms locally, per query.
+
+## Rules in the database (run 5, K3)
+
+Run 4 kept most rules in app code: the web app wrote the audit log, the worker claimed runs
+with its own SQL, two places counted the monthly quota. A rule in app code holds only for that
+app; the database is the one place every writer passes through (the web app, the worker, a
+migration, an operator with psql). Run 5 moves the rules that must never be skipped into
+Postgres, each tested by calling the database directly (`apps/worker/tests/test_db_rules.py`,
+`apps/web/lib/rls.db.test.ts`).
+
+**Tables: 20** (plus Prisma's `_prisma_migrations`). K3 added none: its rules are functions,
+triggers, views and constraints on the tables that existed. K4 added two that billing genuinely
+needs: `plans` and `usage_events` (below).
+
+### Roles
+| Role | Login | Used by | Can |
+|---|---|---|---|
+| `ata_owner` | yes | migrations (on a managed database) | owns every table, view, sequence, type and function; the only role (besides a superuser) that can change the schema or switch row-level security off |
+| `ata_web` | yes | the web app (`WEB_DATABASE_URL`) | tenant rows only inside a tenant transaction; read `users` for sign-in; `accounts`/`verification_tokens`; the web functions below |
+| `ata_worker` | yes | the worker (`WORKER_DATABASE_URL`) | tenant rows only inside a run's workspace; the worker functions below; write `benchmark_results` |
+| `app_tenant` | no | `SET LOCAL ROLE` inside a tenant transaction | the tenant policies apply to it (and to its members, `ata_web` and `ata_worker`) |
+
+None is a superuser, none has `BYPASSRLS` or `CREATEROLE` (tested). The admin connection
+(`DATABASE_URL`) is used only by migrations, `npm run db:roles` (`apps/web/scripts/db-roles.mjs`,
+which creates missing roles and sets passwords from `DB_*_PASSWORD`), the test setup, and the
+worker's maintenance commands run by an operator (`bench`, `reverify`, `backfill-fingerprints`).
+The web app and the workers never get it (production compose gives each container only its own
+URL).
+
+### Functions
+| Function | Kind | Who may call | What and why in the database |
+|---|---|---|---|
+| `claim_next_run(worker, only, skip_benchmark)` | SECURITY DEFINER | ata_worker | `FOR UPDATE SKIP LOCKED` on the oldest queued run, status, claim and lease in one statement. The one place that looks across workspaces for the queue; returns only id and workspace. |
+| `renew_lease(run)` | SECURITY DEFINER | ata_worker | heartbeat; only while the run is still running |
+| `recover_runs(lease_s)` | SECURITY DEFINER | ata_worker | fails runs whose lease expired, in one UPDATE (two workers can't both fail a run) |
+| `consume_quota(workspace)` | INVOKER | app_tenant | locks the workspace row for the rest of the transaction, counts this month's runs, returns allowed/used/quota. The caller inserts its run in the same transaction: a burst of starts can't overshoot. Under RLS a tenant can only consume its own quota. |
+| `apply_retention(now, batch)` | SECURITY DEFINER | ata_worker | purges expired runs (steps deleted, screenshots unlinked, `purged_at`), old rate windows; returns run ids so the worker deletes their files |
+| `due_webhook_deliveries(limit)`, `requested_login_checks(limit)` | SECURITY DEFINER | ata_worker | what is due anywhere (ids and workspaces only); each item is then locked and processed inside its workspace |
+| `api_key_by_hash`, `shared_run`, `invitation_by_token`, `accept_invitation`, `demo_workspace`, `service_metrics` | SECURITY DEFINER | ata_web | the justified bypasses, below |
+| `remove_member(user)` | SECURITY DEFINER | app_tenant | moves a member out of the current workspace into a new one of their own (acts only in `app.workspace_id`) |
+| `url_origin(url)`, `app_current_workspace()`, `app_current_user()` | helpers | app_tenant | the origin rule of the worker's `origin_of`; the transaction's workspace and user |
+
+Every SECURITY DEFINER function sets `search_path = public, pg_temp` (so a caller can't plant a
+look-alike table) and has `EXECUTE` revoked from PUBLIC and granted to one role.
+
+### Triggers
+| Trigger | On | Does |
+|---|---|---|
+| `*_updated_at` | `login_setups`, `model_configs`, `finding_triage` | `updated_at = now()` on every update, whoever updates |
+| `bugs_carry_triage` | `bugs` insert / fingerprint change | a finding whose fingerprint the workspace marked a false positive on that target is stored `suppressed`, in every later run (replaces the worker's `apply_triage`) |
+| `*_audit` (`audit_change`) | runs, domains, model_configs, login_setups, api_keys, webhook_endpoints, invitations, users, finding_triage, workspaces | writes the audit log with the actor from `app.user_id` and context from `app.audit_metadata` (the visitor's IP, the API key); only names and ids of what changed, never a secret column's value. The action names are the ones the app used (`run.started`, `model.added`, `api_key.revoked`, `member.role_changed`, …). The app no longer writes audit rows. |
+| `benchmark_results_refresh_leaderboard` | `benchmark_results`, statement level | refreshes `model_leaderboard` |
+
+`audit_log` is append-only for the app roles (`UPDATE`, `DELETE` revoked): what happened can't be
+edited or erased by the apps.
+
+### Views
+- **`target_bug_history`** (`security_invoker`): per workspace, target origin and fingerprint:
+  latest title and status, first and last seen (dated by the runs), in how many runs, last run,
+  triage state. `security_invoker` makes the caller's row-level security apply, so a tenant sees
+  only its own history. The run page shows "N runs since <date>" from it.
+- **`model_leaderboard`** (materialized): one row per (provider, model, judge, reviewer) with its
+  newest valid result (rows with `details.invalid` are left out) and how many results it has.
+  **Refresh strategy:** a statement trigger refreshes it after every insert, update, delete or
+  truncate of `benchmark_results`. Results arrive a few times a day and the table is tiny, so a
+  full refresh costs milliseconds and the view is never stale; the benchmark page reads it on
+  every visit. (`REFRESH ... CONCURRENTLY`, which the unique index allows, would only matter if
+  refreshes took long enough to block readers.)
+
+### Policies
+- `tenant_isolation` on every tenant table, `TO app_tenant` (run 4; unchanged).
+- `sign_in_lookup` on `users`, `FOR SELECT TO ata_web USING (true)`: the one read the web role
+  may do across workspaces (below).
+
+### Justified bypasses
+Things that happen before a workspace is known, or span two. Each is narrow, read-mostly where
+possible, and returns the minimum:
+1. **Sign-in** reads a user by id, email or OAuth account (Auth.js) before any workspace is set:
+   the `sign_in_lookup` policy (SELECT only; every write to `users` goes through a tenant).
+2. **API keys:** the key's hash is the credential; `api_key_by_hash` returns id and workspace.
+3. **Share links:** the token is the credential; `shared_run` returns id and workspace.
+4. **Invitations:** `invitation_by_token` (to show who invites you) and `accept_invitation`, which
+   checks expiry, revocation, single use and the ownership rule and moves the user, in one
+   transaction (a move between workspaces is something no single tenant may do).
+5. **Removing a member** creates their own workspace: `remove_member`, limited to the caller's
+   current workspace.
+6. **Visitors** use the shared demo workspace: `demo_workspace`.
+7. **Metrics:** `/api/metrics` reports totals only: `service_metrics`.
+8. **The worker's queue and background jobs:** `claim_next_run`, `recover_runs`, `renew_lease`,
+   `apply_retention`, `due_webhook_deliveries`, `requested_login_checks`.
+9. **Operator commands** (`bench`, `reverify`, `backfill-fingerprints`) use the admin
+   connection: they are run by hand, never by the service.
+10. **Public tables:** `benchmark_results` and `model_leaderboard` are readable by everyone (the
+    benchmark page is public), writable only by the worker and the owner.
+
+Everything else in the web app goes through `tenantDb(ctx)` / `inTenant(ctx, fn)`
+(`apps/web/lib/tenant-db.ts`), and the worker's run code through `enter_tenant`. A query that
+forgets them sees no tenant rows at all (tested from both apps).
+
+### Check constraints
+| Table | Constraint |
+|---|---|
+| runs | counts, tokens and costs (also the reviewer's) ≥ 0; `max_steps` 1–500, `max_seconds` 1–86400; `finished_at ≥ started_at` |
+| steps | index, tokens, cost ≥ 0 |
+| bugs | category 1–40 characters (the set is open: models name categories); title not empty |
+| workspaces | quota ≥ 0; retention 1–3650 days |
+| login_setups | `kind IN ('form', 'storage_state')` |
+| model_configs | `provider IN ('claude', 'ollama', 'openai-compat', 'claude-cli')`; prices ≥ 0 |
+| domains | `method IN ('dns', 'file')` or null |
+| webhook_deliveries | `status IN ('pending', 'delivered', 'failed')`; attempts ≥ 0 |
+| api_rate_windows | count ≥ 0 |
+| invitations | expires after it was created (plus run 4's "never an owner link") |
+| benchmark_results | every rate between 0 and 1 |
+
+Fixed sets that already were Postgres enums stay enums (`run_status`, `run_mode`, `severity`,
+`bug_source`, `bug_status`, `workspace_role`). The new ones are CHECKs, not enums, because adding a
+value to a CHECK is one migration that can also be rolled back, while enum values can't be
+removed.
+
+### Why these in the database and not the others
+In the database: rules that protect data no matter who writes (isolation, the audit trail,
+quota, triage carry-forward, constraints) and the queue, whose correctness depends on locking.
+In app code: anything that needs the outside world or a model (fingerprints are computed by the
+worker in Python: they normalize URLs and messages; replay, model calls, storage deletes), and
+input validation with good error messages (the CHECKs are the backstop, not the UX).
+
+## Plans and usage (run 5, K4)
+
+### plans — what a workspace may do
+`id` (`free`, `team`, `business`), `runs_per_month`, `max_steps_per_run`, `allowed_providers`
+(empty = every provider), `seats`, `retention_days`, `price_usd_month` (no billing connected).
+Seeded by the migration; public reference data (everyone reads, only the owner writes). CHECKs
+keep limits in range and providers known. Each workspace has `plan_id` (default `free`); the
+numbers are placeholders (DECISIONS D85).
+
+### usage_events — what a bill would be computed from
+One row per finished run (`run_id` unique), written by the trigger `runs_record_usage` when a
+run's status becomes final: the explorer's provider, model, tokens and cost (the run's totals
+minus the reviewer's) and the reviewer's, apart. Tenant data under row-level security;
+append-only for the apps (they can't insert, change or delete a billing record). Index
+`(workspace_id, created_at)` serves "this month's usage".
+
+### Enforcement
+- `consume_quota(workspace, provider)` returns `allowed, used, quota, max_steps, reason`: the
+  quota is the lower of the plan's and the workspace's own `monthly_run_quota` (a custom
+  contract can lower it); a provider outside the plan is refused with a reason; `max_steps` is
+  the plan's cap, which the web app writes to `runs.max_steps` (the worker obeys it).
+- Seats: `accept_invitation` locks the workspace and refuses when the plan's seats are taken.
+- Retention: `apply_retention` uses the lower of the workspace's and the plan's days.
+- `platform_usage(since)`: usage per workspace, only for a user with `is_platform_admin` (set by
+  `worker make-admin`), checked inside the function.
+
 ## Prisma and SQLAlchemy: one schema, two apps
 
 - **Prisma owns the schema.** `apps/web/prisma/schema.prisma` is the source of truth; every
@@ -268,6 +824,18 @@ Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
 | `20261110130000_model_configs` | workspace models, `runs.model_config_id` |
 | `20261111010000_run_lease` | `runs.heartbeat_at` (run 3, the lease) |
 | `20261111020000_benchmark_results_newest` | `benchmark_results(created_at)` index (run 3) |
+| `20261111100000_login_setups` | sign-in setups for apps behind a login (run 4, J2) |
+| `20261111120000_public_api_webhooks` | API keys, rate windows, run budgets, webhook endpoints and deliveries (run 4, J3) |
+| `20261111140000_fingerprints_triage` | `bugs.fingerprint`, `bugs.suppressed`, `finding_triage` with a CHECK on `state` (run 4, J4) |
+| `20261111160000_one_default_model` | partial unique index: one default model per workspace (run 4, J5) |
+| `20261111170000_roles_invitations` | `users.role`, `invitations` with a CHECK against owner links (run 4, J5) |
+| `20261111180000_row_level_security` | role `app_tenant`, `app_current_workspace()`, a policy on every tenant table (run 4, J5) |
+| `20261111190000_retention` | `workspaces.retention_days`, `runs.purged_at` (run 4, J6) |
+| `20261112100000_reviewer_usage` | `runs.reviewer_*`: the reviewer tier's provider, model, tokens, cost (run 5, K2) |
+| `20261112110000_database_rules` | roles, ownership, queue/quota/retention functions, audit, updated_at and triage triggers, the two views, check constraints (run 5, K3) |
+| `20261112120000_web_access` | the web app's justified bypasses: sign-in lookup policy and narrow functions (run 5, K3) |
+| `20261112130000_worker_access` | due webhooks and requested sign-in checks for the worker (run 5, K3) |
+| `20261112140000_plans_usage` | `plans`, `workspaces.plan_id`, `users.is_platform_admin`, `usage_events` + trigger, plan-aware `consume_quota`, seats, retention, `platform_usage` (run 5, K4) |
 
 ## Interview questions
 1. **Why `SKIP LOCKED` and not just `FOR UPDATE`?** With plain `FOR UPDATE`, a second worker
@@ -282,3 +850,14 @@ Rerun: `cd apps/worker && uv run python scripts/db_perf.py --plans`.
    and after: here the benchmark page went from a Seq Scan + sort over every row (0.87 ms,
    growing) to an index scan that stops after 200 rows (0.09 ms). Every other hot query already
    used an index, so nothing else was added.
+
+4. **Why RLS if the app already filters by workspace?** Defence in depth: one forgotten WHERE in
+   hundreds of queries is a data leak between customers. With RLS the database refuses to return
+   another workspace's rows to the tenant role, whatever the query says.
+5. **How does RLS know the workspace with a connection pool?** `set_config(..., true)` and `SET
+   LOCAL ROLE` last only until the transaction ends, so each query's transaction sets them again
+   and nothing leaks to the next request on the same pooled connection.
+6. **Why does the worker bypass RLS?** It is the system component that serves every tenant's queue;
+   giving it a per-run tenant context is possible (set the run's workspace before each run), but
+   its queries are keyed by a run id it claimed, and the risk RLS addresses is the web app's many
+   request-driven queries.
