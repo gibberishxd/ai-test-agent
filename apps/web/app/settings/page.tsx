@@ -127,7 +127,7 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="models" className="scroll-mt-20">
         <CardHeader>
           <CardTitle>Models</CardTitle>
           <CardDescription>
@@ -142,7 +142,7 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="domains" className="scroll-mt-20">
         <CardHeader>
           <CardTitle>Domains for interactive tests</CardTitle>
           <CardDescription>

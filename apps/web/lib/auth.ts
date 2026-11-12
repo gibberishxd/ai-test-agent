@@ -14,6 +14,10 @@ import { db } from "@/lib/db";
 
 export const DEMO_USER_EMAIL = "demo-user@example.com";
 
+export function isEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
+}
+
 export function demoLoginEnabled(): boolean {
   return process.env.NODE_ENV !== "production";
 }
@@ -48,6 +52,19 @@ function providers(): NextAuthOptions["providers"] {
         credentials: {},
         async authorize() {
           const user = await findOrCreateUser(db, { email: DEMO_USER_EMAIL, name: "Demo User" });
+          return { ...user, image: user.image ?? undefined };
+        },
+      }),
+      // A new team without email or GitHub configured (development and the e2e tests): an
+      // account and workspace of its own for any address, like an email sign-up minus the link.
+      CredentialsProvider({
+        id: "dev-signup",
+        name: "Test account",
+        credentials: { email: { label: "Email", type: "email" } },
+        async authorize(credentials) {
+          const email = String(credentials?.email ?? "").trim();
+          if (!isEmail(email)) return null;
+          const user = await findOrCreateUser(db, { email, name: null });
           return { ...user, image: user.image ?? undefined };
         },
       }),
