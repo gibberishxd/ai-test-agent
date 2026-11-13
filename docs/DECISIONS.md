@@ -1059,3 +1059,11 @@ numbers are the real test (Needs me).
   Larger vision models (27B+) don't fit in 16 GB with the browser.
 - **The e2e fake model** gets a fresh script per run (two e2e tests now run interactive runs).
 - **The dev demo account** is on Business (dev-only; e2e runs it many times a month).
+
+## D87. The reviewer tier stays optional, not the default (run 5, K2)
+- **Measured:** Gemma + Gemma reviewer: shop 0%, holdout 0%, holdout false alarms 1.0. Gemma +
+  qwen3:14b reviewer: shop 19%, holdout 0%, false alarms 0.0 (MISS_ANALYSIS, "Run 5, K2").
+- **Rule (the owner's, set in advance):** default only if holdout judgement-only recall rises and
+  clean-build false alarms don't. Holdout didn't rise with either reviewer, so `REVIEWER_*` stays
+  empty by default; the tier is there for anyone who sets it (a hosted reviewer is the obvious
+  next measurement, which needs an API budget).

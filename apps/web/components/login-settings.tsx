@@ -138,7 +138,7 @@ export function LoginSettings({ setups }: { setups: LoginSetupView[] }) {
             <Input id="login-target" value={form.targetUrl} onChange={set("targetUrl")} placeholder="https://staging.example.com" />
           </FormField>
           <FormField id="login-kind" label="How to sign in" error={errors.kind}>
-            <select id="login-kind" value={form.kind} onChange={set("kind")} className="h-9 rounded-md border bg-transparent px-3 text-sm">
+            <select id="login-kind" value={form.kind} onChange={set("kind")} className="h-9 w-full min-w-0 truncate rounded-md border bg-transparent px-3 text-sm">
               <option value="form">Fill in the login form</option>
               <option value="storage_state">Use a recorded sign-in (SSO, two-factor)</option>
             </select>
@@ -222,7 +222,7 @@ function CheckBadge({ setup }: { setup: LoginSetupView }) {
 
 function FormField({ id, label, error, children }: { id: string; label: string; error?: string; children: ReactNode }) {
   return (
-    <div className="grid gap-1.5">
+    <div className="grid min-w-0 gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       {children}
       {error && <p className="text-sm text-destructive">{error}</p>}

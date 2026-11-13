@@ -97,6 +97,7 @@ export default async function BenchmarkPage() {
                   <TableCell className="tabular-nums text-muted-foreground">{i + 1}</TableCell>
                   <TableCell>
                     {row.provider} <span className="text-muted-foreground">· {row.model}</span>
+                    {reviewerLabel(row) && <span className="block text-xs text-muted-foreground">+ reviewer {reviewerLabel(row)}</span>}
                   </TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.recall)}</TableCell>
@@ -281,7 +282,7 @@ function Intro() {
     <div className="grid gap-2">
       <h1 className="text-2xl font-semibold tracking-tight">Benchmark</h1>
       <p className="max-w-3xl text-muted-foreground">
-        The agent runs against a demo shop with 12 planted bugs, and once against a clean copy with
+        The agent runs against a demo shop with 13 planted bugs (one behind a login), and once against a clean copy with
         none. <b className="font-medium text-foreground">AI-only recall</b> counts only the bugs that need
         judgement (the free deterministic checks find the others whatever the model), so it is the number
         to compare models by. <b className="font-medium text-foreground">Recall</b> is the share of all planted bugs found;{" "}

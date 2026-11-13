@@ -16,6 +16,8 @@ __pycache__/
 .env
 reports/
 screenshots/
+# ...but the README's screenshots are part of the repo.
+!docs/screenshots/
 
 # Editors / OS
 .idea/

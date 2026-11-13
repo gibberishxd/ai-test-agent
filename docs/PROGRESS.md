@@ -165,6 +165,8 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | K3 Database rules | done | Roles ata_owner/web/worker (none superuser or BYPASSRLS); every web query through the tenant client, worker per-run tenant; justified bypasses as narrow functions; audit/updated_at/triage triggers, claim/quota/retention functions, two views, CHECKs; tested as each role (D83, D84; DATABASE.md). |
 | K4 Plans and usage | done | `plans`, `usage_events` (trigger, explorer/reviewer apart), plan-aware `consume_quota`, seats, retention cap; /settings/usage and /admin/usage (`worker make-admin`, `set-plan`); ROADMAP "Billing" (D85, placeholders). |
 | K5 First-run path | done | Dashboard "Getting started" (workspace → target → model → run → report, from the database); dev-only "create a test account" sign-up standing in for an email link; the unverified-domain error says where to verify; `e2e/first-run.e2e.ts` covers sign-up to report (9/9 e2e locally, with web and worker on their own database roles); fixed on the way: concurrent first sign-ins, the e2e fake model's script shared between runs, Free-plan limits on the dev demo account. Fresh screenshots via `e2e/screenshots.mjs`. |
+| K6 Measure | done | Gemma alone (default setup) `8546919c`: shop AI-only 7%, recall 36%, 0 false alarms; holdout 0% / 33% / 0. With the qwen3:14b reviewer `dbc3482e`: shop 19% / 44% / 0, holdout 0% / 33% / 0 (bug 13 found 3/3, first time). Gemma+Gemma reviewer `14203d1f`: 0% / 0%, holdout false alarms 1.0. Sonnet not run (no yes); no API calls (`API_BUDGET_USD` 0). Leaderboard rows per reviewer (materialized view). MISS_ANALYSIS "Run 5". |
+| K7 Wrap-up | done | README (run 5 section, results, screenshots), WALKTHROUGH (K1–K5 with Q&A), PROGRESS, ROADMAP, DATABASE (every object, roles, ER diagram from the schema), DECISIONS D80–D87, DEVLOG; tests and lint green; e2e 9/9 locally; pushed, nothing merged; servers stopped by PID, Ollama running. |
 
 ## Run 4 (branch `agent-v4`, plan in `docs/RUN_PLAN_4.md`)
 
@@ -187,6 +189,29 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
+0. **Run 5 (branch `agent-v5`, nothing merged):**
+   - **PRs (answered):** #2 and #3 (`agent-v5` → main) were merged by the owner on 2026-11-12;
+     #4 holds the commits pushed after #3 (measurements, settings UI fixes, docs). Not merged.
+   - **Sonnet (K6):** the owner said no for now. To run it later with the same settings as
+     f6151b32 plus bug 13: `cd apps/worker && LLM_PROVIDER=claude-cli uv run worker bench
+     --holdout-first` (~30 minutes of the Pro limit).
+   - **API budget:** `API_BUDGET_USD` was 0, so no Claude API call was made. With a budget, the
+     first step is one smoke run through `ClaudeClient` (LLM_PROVIDER=claude), then a benchmark
+     with a Claude reviewer behind Gemma (`REVIEWER_PROVIDER=claude REVIEWER_MODEL=...`).
+   - **Plans (D85, decided without you, revisit):** placeholder limits and prices: Free 30 runs,
+     40 steps, local models, 3 seats, 7 days; Team 300/80/any/10/30; Business 2000/150/any/50/90.
+     Change them in a migration (or tell me the numbers). `worker set-plan <slug> <plan>` moves a
+     workspace.
+   - **Platform admins:** `cd apps/worker && uv run worker make-admin you@company.com`, then
+     /admin/usage.
+   - **Dev database roles:** `.env` now has `WEB_DATABASE_URL` / `WORKER_DATABASE_URL` (dev-only
+     passwords, set by `npm run db:roles`). A fresh clone: `npm run db:migrate && npm run
+     db:roles`, then copy those lines from `.env.example`.
+   - **Production stack:** `.env.prod` needs `DB_WEB_PASSWORD` and `DB_WORKER_PASSWORD` (long
+     random values); the migrate job sets them on the roles.
+   - **Still yours from earlier runs:** bug 7's hidden code, the cart emptied by a reload,
+     quantity 0 → 1, and the matcher offering only bugs listed on a report's own page (bug 9's
+     "$NaN" seen on /cart doesn't count).
 0. **Run 4 (branch `agent-v4`, nothing merged):**
    - **Merge PR #2 (`agent-v3` → main)**, then tell me: I rebase `agent-v4` onto main
      (`--force-with-lease`, the one allowed exception) and open its PR.
@@ -249,5 +274,6 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.
 
 ## Spend tonight
+Run 5: $0.00. No Claude API call (`API_BUDGET_USD` = 0), no claude-cli call (no yes for Sonnet). Ollama local: three benchmarks (21 runs), the K1 re-check, one qwen3:14b download (9.3 GB).
 Run 3: $0.00. No API key and no paid calls. claude-cli (owner's Pro login): one Haiku check call and one benchmark (7 runs, ~220 agent decisions), no usage limit hit. Ollama local.
 Earlier: Claude API: $0.00 (no key, no Claude calls made). Ollama: $0 (local): ~12 agent runs + 2 benchmark scorings.
