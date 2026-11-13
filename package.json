@@ -1,6 +1,7 @@
 {
   "name": "ai-test-agent",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "apps/web",
     "apps/demo",

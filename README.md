@@ -197,3 +197,7 @@ implementation, over several planned runs. Every decision is recorded in
 [docs/DECISIONS.md](docs/DECISIONS.md) and every component is explained in
 [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md). The product decisions, the benchmark design and the
 planted bug list are the owner's.
+
+## License
+
+[MIT](LICENSE): use, change and share it freely, keeping the copyright notice.
