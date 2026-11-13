@@ -100,7 +100,7 @@ export default async function LandingPage() {
         <div className="grid gap-2">
           <h2 className="text-2xl font-semibold tracking-tight">Measured, not promised</h2>
           <p className="max-w-2xl text-muted-foreground">
-            The agent is benchmarked against a demo shop with 12 planted bugs and a clean copy with
+            The agent is benchmarked against a demo shop with 13 planted bugs and a clean copy with
             none. These are the latest numbers.
           </p>
         </div>
