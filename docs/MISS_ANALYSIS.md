@@ -451,7 +451,7 @@ a small sample.
 Techniques per buggy run: double_click 1–2, reload 1–3, a phone-width screen 1–3, 3–7 reports.
 No run ended early: 35–40 agent steps each (the "tools not available" failure didn't recur).
 
-**What the misses have in common.** Sonnet reaches more pages than Haiku (shop "never" 8 of 27
+**What the misses have in common.** Sonnet reaches more pages than Haiku (shop "never" 7 of 27
 bug-runs against Haiku's 14 of 27) and its misses move from *never reached* to *reached, not
 triggered or not recognised*: it was on the profile (bug 8) and the long-name product (bug 10) in
 two runs each without reporting them, and on the holdout's room page in both runs without trying
