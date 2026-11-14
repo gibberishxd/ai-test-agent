@@ -171,6 +171,7 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Benchmark | Result | Agent / reviewer (reported model) | Limit | Shop AI-only | Shop all | Holdout AI-only | Holdout all | Precision shop / holdout | False alarms clean shop / holdout | Avg run | Est. API cost / run | Est. / verified bug (shop) | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | a) Haiku agent | `091936b3` (commit 123e23e) | claude-haiku-5-5 / none | 480 s | 26% (7 of 27) | 49% (19 of 39) | **62% (5 of 8)** | 75% (9 of 12) | 81% / 100% | 0.0 / 0.0 (3.0 / 0.0 before replay) | 246 s | $0.093 shop, $0.060 holdout | $0.013 | 2026-11-14 |
+| b) Sonnet agent | `2ed718fa` (commit 0079304, agent code of 123e23e) | claude-sonnet-5-5 (cheap calls claude-haiku-5-5) / none | 480 s | 33% (9 of 27) | 54% (21 of 39) | **75% (6 of 8)** | 83% (10 of 12) | 84% / 100% | 2.0 / 1.0 (real behaviour, see MISS_ANALYSIS) | 196 s | $1.44 shop, $1.68 holdout | $0.23 | 2026-11-14 |
 
 ## Run 5 (branch `agent-v5`, plan in `docs/RUN_PLAN_5.md`)
 

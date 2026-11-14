@@ -413,3 +413,53 @@ real behaviour, not hallucinations: quantity 0 accepted as 1 (twice; the owner's
 question), a double-clicked "Add to cart" adding twice, a new order missing from "My orders",
 and the profile showing a "[test account]" placeholder. Replay dismissed all 3 reports on the
 clean shop (false alarms 3.0 → 0.0).
+
+## Run 6, (b): Sonnet 5.5 as the agent (claude-cli)
+
+Result `2ed718fa` (commit 0079304; the agent code is 123e23e's, D89), `claude-sonnet-5-5` pinned
+for decisions; the cheap calls (dedup) reported `claude-haiku-5-5`. Judge ollama/gemma4:12b, 480 s
+and 40 steps, holdout first: the settings of run 3's `f6151b32` (alias "sonnet") plus bug 13.
+No usage limit, no credits used. Estimated total for the 7 runs: $10.79 (cap $15).
+Runs: holdout d46ea753, 95f2dfd6, clean 97df2e12; shop deff0766, ea506a58, c8119656, clean ebcf78f9.
+
+| Set | AI-only | All | Precision | False alarms (before replay) | Est. API cost / run |
+|---|---|---|---|---|---|
+| Shop | 33% (9 of 27) | 54% (21 of 39) | 84% | 2.0 (2.0) | $1.44 |
+| Holdout | 75% (6 of 8) | 83% (10 of 12) | 100% | 1.0 (1.0) | $1.68 |
+
+Against run 3's alias run `f6151b32`: the shop found the same 9 bug-runs (38% of 24 then, 33% of
+27 now: bug 13 was added since), the holdout rose from 25% (2 of 8) to 75% (6 of 8). Whether
+"sonnet" was the same model in run 3 can't be known (it wasn't recorded), and two holdout runs are
+a small sample.
+
+| Bug | found | dropped | reached | never |
+|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 2 | 0 | 1 | 0 |
+| Shop 6. Invalid email at checkout | 0 | 0 | 1 | 2 |
+| Shop 7. Discount twice | 1 | 0 | 2 | 0 |
+| Shop 8. Save changes does nothing | 0 | 0 | 2 | 1 |
+| Shop 9. $NaN | 3 | 0 | 0 | 0 |
+| Shop 10. Long name on mobile | 0 | 0 | 2 | 1 |
+| Shop 11. Session after logout + reload | 0 | 0 | 2 | 1 |
+| Shop 12. Wrong-password error placement | 0 | 0 | 1 | 2 |
+| Shop 13. Wrong order opened | 3 | 0 | 0 | 0 |
+| Holdout 3. One night charged | 2 | 0 | 0 | 0 |
+| Holdout 4. Check-out before check-in | 2 | 0 | 0 | 0 |
+| Holdout 5. Double-click Book now | 0 | 0 | 2 | 0 |
+| Holdout 6. Room name on mobile | 2 | 0 | 0 | 0 |
+
+Techniques per buggy run: double_click 1–2, reload 1–3, a phone-width screen 1–3, 3–7 reports.
+No run ended early: 35–40 agent steps each (the "tools not available" failure didn't recur).
+
+**What the misses have in common.** Sonnet reaches more pages than Haiku (shop "never" 8 of 27
+bug-runs against Haiku's 14 of 27) and its misses move from *never reached* to *reached, not
+triggered or not recognised*: it was on the profile (bug 8) and the long-name product (bug 10) in
+two runs each without reporting them, and on the holdout's room page in both runs without trying
+a double click on "Book now" (bug 5, which Haiku found 2 of 2). The checkout (bug 6) and the login
+error (bug 12) are mostly never reached within 40 steps.
+
+**False alarms are real behaviour again** (as in run 3): on the clean shop "quantity 0 is added as
+1" (the owner's open product question) and "Recent orders on the profile shows different orders
+than My orders"; on the clean holdout "booking accepted for dates outside the room's availability
+window". All three were confirmed by replay. They count as false alarms because they aren't
+planted; the two new ones are worth a look as real bugs in the demo apps (owner's call).
