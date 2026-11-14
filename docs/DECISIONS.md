@@ -1098,3 +1098,11 @@ numbers are the real test (Needs me).
   rows): the owner's answer.
 - **Opus as the agent (e):** not run. The owner asked to be asked first, to check the weekly
   limit, and was away; it is under "Needs me".
+
+## D89. No code changes between the run 6 benchmarks (run 6, L2)
+- **Decision:** benchmarks a–d all run on commit 123e23e's agent code (later commits only add
+  docs), even though (a) showed a fixable weakness (a `finish` claiming the tools are
+  unavailable, without a refused native call).
+- **Why:** the point of L2 is to compare models; a code change between them would mix a model
+  effect with a code effect, and each benchmark costs the owner's limit. The fix is noted under
+  "Needs me" / next steps.

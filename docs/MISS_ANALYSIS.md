@@ -361,3 +361,55 @@ What separates the parts:
 
 Sonnet (claude-cli) was not re-run: no yes from the owner this run. No Claude API call was
 made: `API_BUDGET_USD` was 0.
+
+## Run 6, (a): Haiku 5.5 as the agent (claude-cli)
+
+Result `091936b3` (commit 123e23e), `claude-haiku-5-5` pinned (every call reported that model),
+judge ollama/gemma4:12b, 480 s and 40 steps, holdout first. No usage limit, no credits used.
+Runs: holdout 7f629a69, 86cf8520, clean d1f060f3; shop 8855967b, e3eb2b69, 6f53b8b5, clean 3ca24548.
+
+| Set | AI-only | All | Precision | False alarms (before replay) | Est. API cost / run |
+|---|---|---|---|---|---|
+| Shop | 26% (7 of 27) | 49% (19 of 39) | 81% | 0.0 (3.0) | $0.093 |
+| Holdout | 62% (5 of 8) | 75% (9 of 12) | 100% | 0.0 (0.0) | $0.060 |
+
+Per judgement bug, in how many buggy runs it was **found** / **dropped** by verification /
+**reached** (the agent acted on the bug's page, no matching report) / **never** reached:
+
+| Bug | found | dropped | reached | never |
+|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0 | 0 | 1 | 2 |
+| Shop 6. Invalid email at checkout | 0 | 0 | 1 | 2 |
+| Shop 7. Discount twice | 0 | 0 | 1 | 2 |
+| Shop 8. Save changes does nothing | 1 | 0 | 1 | 1 |
+| Shop 9. $NaN | 3 | 0 | 0 | 0 |
+| Shop 10. Long name on mobile | 0 | 0 | 0 | 3 |
+| Shop 11. Session after logout + reload | 0 | 0 | 2 | 1 |
+| Shop 12. Wrong-password error placement | 0 | 0 | 0 | 3 |
+| Shop 13. Wrong order opened | 3 | 0 | 0 | 0 |
+| Holdout 3. One night charged | 2 | 0 | 0 | 0 |
+| Holdout 4. Check-out before check-in | 0 | 0 | 2 | 0 |
+| Holdout 5. Double-click Book now | 2 | 0 | 0 | 0 |
+| Holdout 6. Room name on mobile | 1 | 0 | 0 | 1 |
+
+Techniques per buggy run: double_click 0–1, reload 1, a phone-width screen 1, 2–8 reports.
+Haiku uses the charter's techniques (Gemma almost never did), which is why it finds the holdout's
+double-booking and its one-night total, the two that every Gemma setup missed.
+
+**What the misses have in common.** Shop misses are mostly *never reached*: the cart, checkout,
+login and the long-name product page were each visited in at most one run, while the agent spent
+its steps on the product list, profile and orders (bug 13 3 of 3). That is coverage within 40
+steps, not recognition: where it did reach the cart or checkout it mostly didn't trigger the bug
+(one unit, a valid email).
+
+**One run lost to "my tools are not available".** Shop run e3eb2b69 finished at step 15 with
+"the browser tools ... are not available in this session", the same failure Sonnet had once in
+run 3 (H7). D66's correction only fires when the CLI reports a refused native tool call; here
+none was reported, so the claim went through. Not fixed during the measurements, so a–d run the
+same code (D89).
+
+**Unmatched but real.** Precision 81%: the 5 verified reports that matched no planted bug are
+real behaviour, not hallucinations: quantity 0 accepted as 1 (twice; the owner's open product
+question), a double-clicked "Add to cart" adding twice, a new order missing from "My orders",
+and the profile showing a "[test account]" placeholder. Replay dismissed all 3 reports on the
+clean shop (false alarms 3.0 → 0.0).

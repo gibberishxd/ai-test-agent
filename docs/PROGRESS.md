@@ -165,6 +165,13 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | L3 Analysis | todo | |
 | L4 Wrap-up | todo | |
 
+### Run 6 measurements (claude-cli, judge pinned to ollama/gemma4:12b, 40 steps; shop 3 + clean, holdout 2 + clean, holdout first)
+Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bugs, 39 slots in all), holdout 4 × 2 = 8 (6 bugs, 12). Estimated cost is the API-equivalent from the CLI's token counts (D88), not a charge.
+
+| Benchmark | Result | Agent / reviewer (reported model) | Limit | Shop AI-only | Shop all | Holdout AI-only | Holdout all | Precision shop / holdout | False alarms clean shop / holdout | Avg run | Est. API cost / run | Est. / verified bug (shop) | Date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| a) Haiku agent | `091936b3` (commit 123e23e) | claude-haiku-5-5 / none | 480 s | 26% (7 of 27) | 49% (19 of 39) | **62% (5 of 8)** | 75% (9 of 12) | 81% / 100% | 0.0 / 0.0 (3.0 / 0.0 before replay) | 246 s | $0.093 shop, $0.060 holdout | $0.013 | 2026-11-14 |
+
 ## Run 5 (branch `agent-v5`, plan in `docs/RUN_PLAN_5.md`)
 
 | Goal | Status | Check |
