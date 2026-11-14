@@ -167,6 +167,37 @@ def test_cost_budget_stops_the_run(agent):
     assert len(result.steps) == 3  # $1.20 > $1.00 after the third step
 
 
+def test_an_estimated_cost_counts_toward_the_budget_too(agent):
+    # Run 6: claude-cli is charged $0 on the Pro plan, but its API-equivalent estimate must
+    # still stop a runaway run.
+    class FlatRateClient(FakeClient):
+        def decide(self, *args, **kwargs):
+            decision = super().decide(*args, **kwargs)
+            decision.usage = Usage(model="x", cost_usd=0.0, estimated_cost_usd=0.4)
+            return decision
+
+    run, _, _ = agent([])
+    run.llm = FlatRateClient(
+        decisions=[call("scroll", direction="down"), call("scroll", direction="up")] * 5
+    )
+    result = run.run()
+    assert "cost budget" in result.stop_reason
+    assert len(result.steps) == 3
+
+
+def test_a_usage_limit_ends_the_run_instead_of_carrying_on(agent):
+    from worker.llm import UsageLimitReached
+
+    class LimitedClient(FakeClient):
+        def decide(self, *args, **kwargs):
+            raise UsageLimitReached("usage limit: Claude AI usage limit reached")
+
+    run, _, _ = agent([])
+    run.llm = LimitedClient()
+    with pytest.raises(UsageLimitReached):
+        run.run()
+
+
 def test_report_bug_records_a_candidate_with_repro_steps(agent):
     run, _, _ = agent(
         [

@@ -310,3 +310,84 @@ def test_a_benchmark_records_the_reviewer_and_its_cost_with_the_settings():
     assert reviewer_of([]) == ""
     scores = score(FUNNEL_RUNS, {}, PLANTED, [], [], "fake", "m", "abc", reviewer="ollama/x")
     assert scores.reviewer == "ollama/x"
+
+
+# --- Run 6, L1: estimated API cost per run and per verified planted bug ------------------------
+
+
+def test_estimated_cost_per_run_and_per_verified_planted_bug():
+    buggy = {
+        "a": [decision("a", 1), decision("a", 2), decision("a", None)],  # 2 verified bugs
+        "b": [decision("b", 1)],  # 1 verified bug
+    }
+    scores = score(
+        buggy,
+        {"c": 0},
+        PLANTED,
+        [0, 0, 0],
+        [],
+        "claude-cli",
+        "claude-haiku-5-5",
+        "abc",
+        estimated_costs={"a": 0.40, "b": 0.20, "c": 0.30},
+    )
+    assert scores.avg_estimated_cost_usd == pytest.approx(0.30)  # every run, clean included
+    # The buggy runs' cost over the planted bugs they verified: $0.60 / 3.
+    assert scores.estimated_cost_per_verified_bug == pytest.approx(0.20)
+
+
+def test_no_verified_bug_means_no_cost_per_bug_rather_than_a_division_by_zero():
+    scores = score(
+        {"a": [decision("a", None)]},
+        {},
+        PLANTED,
+        [],
+        [],
+        "fake",
+        "m",
+        "abc",
+        estimated_costs={"a": 0.5},
+    )
+    assert scores.estimated_cost_per_verified_bug is None
+
+
+def test_without_estimates_the_cost_is_not_measured():
+    scores = score({"a": [decision("a", 1)]}, {}, PLANTED, [], [], "fake", "m", "abc")
+    assert scores.avg_estimated_cost_usd is None
+    assert scores.estimated_cost_per_verified_bug is None
+
+
+def test_printed_estimates_are_labelled_as_estimates(capsys):
+    from worker.benchmark import print_scores
+
+    print_scores(
+        score(
+            {"a": [decision("a", 1)]},
+            {},
+            PLANTED,
+            [0],
+            [],
+            "claude-cli",
+            "claude-haiku-5-5",
+            "abc",
+            estimated_costs={"a": 0.12},
+        )
+    )
+    out = capsys.readouterr().out
+    assert "est. API cost / run" in out and "$0.120" in out
+    assert "est. API cost / verified bug" in out
+    assert "estimate" in out.lower()
+
+
+# --- Run 6, L1: a claude-cli benchmark runs on pinned model IDs only ---------------------------
+
+
+def test_a_claude_cli_benchmark_refuses_a_bare_alias():
+    from worker.benchmark import check_pinned_models
+    from worker.llm.claude_cli import ClaudeCliClient
+
+    with pytest.raises(ValueError, match="alias"):
+        check_pinned_models([ClaudeCliClient(agent_model="sonnet")])
+    with pytest.raises(ValueError, match="alias"):
+        check_pinned_models([ClaudeCliClient(cheap_model="haiku")])
+    check_pinned_models([ClaudeCliClient(), FakeClient(), None])  # pinned or not claude-cli

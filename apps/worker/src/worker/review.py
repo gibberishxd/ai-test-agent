@@ -89,7 +89,7 @@ def review_screenshots(
                 )
             result = llm.review_screenshot(prompt, storage.load(screenshot), system=REVIEW_SYSTEM)
             usages.append(result.usage)
-            spent += result.usage.cost_usd
+            spent += result.usage.api_cost_usd
             look = f"Look at the page at {MOBILE_WIDTH} px width" if mobile else "Look at the page"
             for issue in parse_issues(result.text):
                 severity = str(issue.get("severity", "medium")).lower()

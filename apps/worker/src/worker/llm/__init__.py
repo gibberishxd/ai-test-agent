@@ -13,6 +13,7 @@ from worker.llm.base import (
     ToolCall,
     ToolSpec,
     Usage,
+    UsageLimitReached,
 )
 from worker.llm.fake import FakeClient
 from worker.llm.text_only import TextOnlyClient
@@ -27,6 +28,7 @@ __all__ = [
     "ToolCall",
     "ToolSpec",
     "Usage",
+    "UsageLimitReached",
     "make_client",
     "make_judge",
 ]
@@ -68,7 +70,7 @@ def make_client(settings: Settings) -> LLMClient:
         _check_local_only(settings)
         from worker.llm.claude_cli import ClaudeCliClient
 
-        return ClaudeCliClient()
+        return ClaudeCliClient(settings.claude_cli_model, settings.claude_cli_cheap_model)
     return FakeClient(decisions=_fake_script(settings.fake_script))
 
 
@@ -122,8 +124,8 @@ def make_reviewer(settings: Settings) -> LLMClient | None:
     pinned: dict = {"llm_provider": settings.reviewer_provider or settings.provider()}
     if settings.reviewer_model:
         model = settings.reviewer_model
-        pinned.update(agent_model=model, ollama_model=model, openai_compat_model=model)
+        pinned.update(
+            agent_model=model, ollama_model=model, openai_compat_model=model, claude_cli_model=model
+        )
     client = make_client(settings.model_copy(update=pinned))
-    if settings.reviewer_model:
-        client.agent_model = settings.reviewer_model  # claude-cli takes no model setting
     return client if settings.reviewer_vision else TextOnlyClient(client)

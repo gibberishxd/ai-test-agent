@@ -155,6 +155,16 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Run 6 (branch `agent-v6`, plan in `docs/RUN_PLAN_6.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| L0 Plan | done | `agent-v6` from main; RUN_PLAN_6.md; L2 matrix sent; owner said yes to a, b, c and d (d after a–c), 480 s for a/b, 1200 s for c/d, caps $15 for b and $5 for the others; e (Opus agent) only after asking. |
+| L1 Measurable claude-cli | done | Pinned IDs, reported model per step, four token types, API-equivalent estimate per step/run/reviewer share used by both budgets, usage-limit and credit latch, estimated cost per run and per verified bug in bench output and on the leaderboard (D88). Tests: recorded Haiku CLI JSON (+2 synthetic), `npm test` exit 0 (web 229 + 11 + 4, worker 631 + 1 skipped); the one real Haiku call matched the CLI's own list-price cost exactly. |
+| L2 Measure | in progress | a) Haiku agent, b) Sonnet agent, c) Gemma + Sonnet reviewer, d) Gemma + Opus reviewer. |
+| L3 Analysis | todo | |
+| L4 Wrap-up | todo | |
+
 ## Run 5 (branch `agent-v5`, plan in `docs/RUN_PLAN_5.md`)
 
 | Goal | Status | Check |

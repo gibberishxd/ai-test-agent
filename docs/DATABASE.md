@@ -109,6 +109,8 @@ erDiagram
     double_precision holdout_false_alarms
     text judge
     text rescore_commit
+    double_precision avg_estimated_cost_usd
+    double_precision estimated_cost_per_verified_bug
   }
   bugs {
     uuid id PK
@@ -244,6 +246,12 @@ erDiagram
     integer reviewer_input_tokens
     integer reviewer_output_tokens
     double_precision reviewer_cost_usd
+    integer cache_read_tokens
+    integer cache_write_tokens
+    double_precision estimated_cost_usd
+    integer reviewer_cache_read_tokens
+    integer reviewer_cache_write_tokens
+    double_precision reviewer_estimated_cost_usd
   }
   steps {
     uuid id PK
@@ -261,6 +269,10 @@ erDiagram
     integer output_tokens
     double_precision cost_usd
     timestamp_with_time_zone created_at
+    text model
+    integer cache_read_tokens
+    integer cache_write_tokens
+    double_precision estimated_cost_usd
   }
   usage_events {
     uuid id PK
@@ -364,6 +376,11 @@ The web app inserts a run as `queued`; a worker claims it, sets `running`, and f
   see "The queue"), `created_at` / `started_at` / `finished_at`, `error`.
 - *Progress and cost:* `pages_visited`, `step_count`, `input_tokens`, `output_tokens`,
   `cost_usd`, `provider`, `model`. Updated as the run goes, so the live page shows them.
+  Run 6: `cache_read_tokens` / `cache_write_tokens` (the cached share of `input_tokens`) and
+  `estimated_cost_usd`, the API-equivalent cost: the charge for a provider that charges, an
+  estimate from token counts for claude-cli (charged $0). Budgets spend it. The reviewer's share
+  has the same three columns with a `reviewer_` prefix; `steps` has them too, plus `model`
+  (the model the provider reported for that call).
 - *Result:* `summary` (JSON written at the end), `share_token` (unique, unguessable; a
   read-only share link; null = not shared).
 - Indexes: `runs_status_created_at_idx` (status, created_at) serves the queue (oldest queued
@@ -708,6 +725,7 @@ edited or erased by the apps.
   only its own history. The run page shows "N runs since <date>" from it.
 - **`model_leaderboard`** (materialized): one row per (provider, model, judge, reviewer) with its
   newest valid result (rows with `details.invalid` are left out) and how many results it has.
+  Run 6 added `avg_estimated_cost_usd` and `estimated_cost_per_verified_bug` (null on older rows).
   **Refresh strategy:** a statement trigger refreshes it after every insert, update, delete or
   truncate of `benchmark_results`. Results arrive a few times a day and the table is tiny, so a
   full refresh costs milliseconds and the view is never stale; the benchmark page reads it on

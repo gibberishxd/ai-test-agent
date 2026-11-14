@@ -25,6 +25,9 @@ export type BenchmarkRow = {
   holdoutFalseAlarms: number | null;
   judge: string | null;
   rescoreCommit: string | null;
+  /** Run 6: API-equivalent cost per run and per verified planted bug (estimates); null = not measured. */
+  avgEstimatedCostUsd: number | null;
+  estimatedCostPerVerifiedBug: number | null;
 };
 
 /** `needsJudgement`: the deterministic checks can't find it; only the AI can. */

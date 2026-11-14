@@ -229,3 +229,98 @@ def test_the_shop_benchmark_runs_signed_in_with_the_demo_account(sessions, monke
     run_benchmark(settings, FakeClient(), FakeClient(), sessions, lambda *_: None, 1, "passive", 0)
     with sessions() as session:
         assert session.query(LoginSetup).count() == 2  # saved once, not again per benchmark
+
+
+# --- Run 6, L1 ---------------------------------------------------------------------------------
+
+
+def test_saved_result_has_the_estimated_costs(sessions):
+    with sessions() as session:
+        row = save_scores(
+            session,
+            scores(avg_estimated_cost_usd=0.3, estimated_cost_per_verified_bug=0.2),
+            {"buggy": [], "clean": []},
+        )
+        assert (row.avg_estimated_cost_usd, row.estimated_cost_per_verified_bug) == (0.3, 0.2)
+
+
+def _stub_settings(**fields):
+    from worker.config import Settings
+
+    return Settings(
+        _env_file=None, demo_url="http://shop/", clean_demo_url="http://shop-clean/", **fields
+    )
+
+
+def test_a_usage_limit_stops_the_benchmark_and_records_what_finished(sessions, monkeypatch):
+    # Run 6 rule: a usage-limit message stops the benchmark at once, no retry, and what
+    # finished is recorded (kept out of the leaderboard as incomplete).
+    from worker.db.models import Run
+    from worker.llm import UsageLimitReached
+    from worker.llm.claude_cli import _latch as latch
+    from worker.llm.claude_cli import reset_limit_latch
+    from worker.main import run_benchmark
+
+    monkeypatch.setattr("worker.main.git_commit", lambda: "abc1234")
+    started = []
+
+    def execute(_session, run, *_):
+        started.append(run.target_url)
+        if len(started) == 2:
+            raise latch("usage limit: Claude AI usage limit reached")
+
+    try:
+        run_benchmark(_stub_settings(), FakeClient(), FakeClient(), sessions, execute, 3, "passive")
+    finally:
+        reset_limit_latch()
+    assert len(started) == 2  # the third buggy run and the clean run never started
+    with sessions() as session:
+        statuses = sorted(r.status for r in session.query(Run))
+        assert statuses == ["done", "failed", "stopped", "stopped"]
+        latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
+        assert "usage limit" in latest.details["invalid"]
+        assert latest.details["incomplete"]["finished"] == 1
+    assert UsageLimitReached  # imported for clarity of what latch raises
+
+
+def test_the_estimated_cost_cap_stops_the_benchmark(sessions, monkeypatch):
+    from worker.db.models import Run
+    from worker.main import run_benchmark
+
+    monkeypatch.setattr("worker.main.git_commit", lambda: "abc1234")
+
+    def execute(_session, run, *_):
+        run.estimated_cost_usd = 0.6  # each run: $0.60 at API prices
+
+    run_benchmark(
+        _stub_settings(bench_max_cost_usd=1.0),
+        FakeClient(),
+        FakeClient(),
+        sessions,
+        execute,
+        3,
+        "passive",
+    )
+    with sessions() as session:
+        statuses = sorted(r.status for r in session.query(Run))
+        assert statuses == ["done", "done", "stopped", "stopped"]  # $1.20 ≥ $1.00 after two
+        latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
+        assert "cost cap" in latest.details["invalid"]
+
+
+def test_a_benchmark_records_the_models_its_calls_reported(sessions, monkeypatch):
+    from worker.db.models import Step
+    from worker.main import run_benchmark
+
+    monkeypatch.setattr("worker.main.git_commit", lambda: "abc1234")
+
+    def execute(session, run, *_):
+        session.add(Step(run_id=run.id, index=0, action="click", model="claude-haiku-5-5"))
+        session.add(Step(run_id=run.id, index=1, action="visit"))  # no model call
+        session.commit()
+
+    run_benchmark(_stub_settings(), FakeClient(), FakeClient(), sessions, execute, 1, "passive")
+    with sessions() as session:
+        latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
+        assert latest.details["reported_models"] == ["claude-haiku-5-5"]
+        assert "invalid" not in latest.details

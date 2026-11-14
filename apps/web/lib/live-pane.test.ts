@@ -16,6 +16,8 @@ function step(index: number, fields: Partial<StepView> = {}): StepView {
     blocked: false,
     blockReason: null,
     costUsd: 0,
+    model: null,
+    estimatedCostUsd: 0,
     createdAt: "2026-11-10T10:00:00.000Z",
     ...fields,
   };

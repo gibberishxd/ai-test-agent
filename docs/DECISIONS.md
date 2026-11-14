@@ -1067,3 +1067,34 @@ numbers are the real test (Needs me).
   clean-build false alarms don't. Holdout didn't rise with either reviewer, so `REVIEWER_*` stays
   empty by default; the tier is there for anyone who sets it (a hosted reviewer is the obvious
   next measurement, which needs an API budget).
+
+## D88. claude-cli made measurable (run 6, L1)
+- **Pinned IDs:** `CLAUDE_CLI_MODEL` / `CLAUDE_CLI_CHEAP_MODEL` (defaults `claude-sonnet-5-5` /
+  `claude-haiku-5-5`); a reviewer on claude-cli takes `REVIEWER_MODEL`. `bench` refuses an alias
+  ("sonnet") before queuing anything. Alternative: keep aliases and log what the CLI reports.
+  Rejected: an alias silently moves to a newer model, so two results with the same label could
+  be different models. The model the CLI reports (`modelUsage[...].canonicalModel`) is stored
+  per step (`steps.model`) and per result (`details.reported_models`).
+- **Tokens and the estimate:** all four token types from `modelUsage` (one entry per model a
+  call used, each priced at its own rate). The recorded Haiku call showed the CLI writes its
+  cache with a **1-hour TTL**, which costs 2x the input price, not 1.25x; `pricing.py` prices
+  those writes apart. With that, our estimate equals the CLI's own `total_cost_usd` for the
+  recorded call; a gap of more than 1% logs a warning (pricing.py out of date). Charged cost
+  stays $0; `estimated_cost_usd` is stored per step, run and reviewer share, and is what
+  `MAX_RUN_COST_USD` and the review budget spend (a provider that charges: the charge).
+- **Stopping:** a usage-limit answer (`is_error` with limit text or HTTP 429, or a non-zero exit
+  whose output mentions the limit) **or a call paid from usage credits** (`usage.fallback_credit`
+  set) latches for the whole process: no claude-cli client calls the CLI again, the run fails, the
+  benchmark stops its queued runs and saves what finished marked `invalid` (off the leaderboard).
+  The credits case is treated as a limit because the owner's rule is "never drain my credits".
+  The limit fixture is synthetic: recording a real one would spend the limit.
+- **Benchmark cost cap:** `BENCH_MAX_COST_USD` (API-equivalent, all runs of one benchmark).
+  The owner set $15 for (b) and $5 for the others.
+- **Per-run cap during the claude-cli benchmarks:** `MAX_RUN_COST_USD=5` (decided without the
+  owner). f6151b32 ran with an effective cap of nothing (its cost was $0); the .env's $1 would
+  now cut Sonnet runs short (estimated $0.70–1.50 a run) and break comparability. $5 still stops
+  a runaway run; the benchmark cap stops a runaway benchmark.
+- **Time limits:** 480 s for (a) and (b) (as f6151b32), 1200 s for (c) and (d) (as run 5's Gemma
+  rows): the owner's answer.
+- **Opus as the agent (e):** not run. The owner asked to be asked first, to check the weekly
+  limit, and was away; it is under "Needs me".

@@ -16,6 +16,9 @@ export type StepView = {
   blocked: boolean;
   blockReason: string | null;
   costUsd: number;
+  /** Run 6: the model the provider reported, and the API-equivalent cost (an estimate for claude-cli). */
+  model: string | null;
+  estimatedCostUsd: number;
   createdAt: string;
 };
 
@@ -54,6 +57,10 @@ export type RunView = {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Run 6: the cached share of inputTokens and the API-equivalent cost (an estimate for claude-cli). */
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  estimatedCostUsd: number;
   error: string | null;
   summary: Record<string, unknown> | null;
   createdAt: string;
@@ -82,6 +89,9 @@ export function serializeRun(run: RunDetail): RunView {
     inputTokens: run.inputTokens,
     outputTokens: run.outputTokens,
     costUsd: run.costUsd,
+    cacheReadTokens: run.cacheReadTokens,
+    cacheWriteTokens: run.cacheWriteTokens,
+    estimatedCostUsd: run.estimatedCostUsd,
     error: run.error,
     summary: (run.summary as Record<string, unknown> | null) ?? null,
     createdAt: run.createdAt.toISOString(),
@@ -98,6 +108,8 @@ export function serializeRun(run: RunDetail): RunView {
       blocked: step.blocked,
       blockReason: step.blockReason,
       costUsd: step.costUsd,
+      model: step.model,
+      estimatedCostUsd: step.estimatedCostUsd,
       createdAt: step.createdAt.toISOString(),
     })),
     bugs: run.bugs.map((bug) => ({
