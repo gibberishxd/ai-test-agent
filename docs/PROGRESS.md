@@ -161,7 +161,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 |---|---|---|
 | K0 Housekeeping | done | `agent-v5` from `agent-v4`; RUN_PLAN_5.md; demos and worker start; baseline `npm test` + `npm run lint` exit 0. PR question asked; nothing done to PRs yet. |
 | K1 Before/after replay | done | `page_state.py` + `verify_bug` judge the change made by the last replayed action (D80); 50+ new tests incl. clock, spinner, polling, toast, dialog. Offline re-check (MISS_ANALYSIS "Run 5, K1"): all 7 rejected bug-8 reports verify; no clean-build report was ever dismissed, so none can become a new false alarm. |
-| K2 Reviewer tier + list → detail | code done, measuring | `REVIEWER_PROVIDER`/`REVIEWER_MODEL` (any provider) decide on flagged steps and the explorer's reports; reviewer tokens/cost in `runs.reviewer_*`; per-list "open one item" reminder + charter item 9 (D81, D82). Benchmarks: see K6 rows. |
+| K2 Reviewer tier + list → detail | done (reviewer optional, D87) | `REVIEWER_PROVIDER`/`REVIEWER_MODEL` (any provider) decide on flagged steps and the explorer's reports; reviewer tokens/cost in `runs.reviewer_*`; per-list "open one item" reminder + charter item 9 (D81, D82). Benchmarks: see K6 rows. |
 | K3 Database rules | done | Roles ata_owner/web/worker (none superuser or BYPASSRLS); every web query through the tenant client, worker per-run tenant; justified bypasses as narrow functions; audit/updated_at/triage triggers, claim/quota/retention functions, two views, CHECKs; tested as each role (D83, D84; DATABASE.md). |
 | K4 Plans and usage | done | `plans`, `usage_events` (trigger, explorer/reviewer apart), plan-aware `consume_quota`, seats, retention cap; /settings/usage and /admin/usage (`worker make-admin`, `set-plan`); ROADMAP "Billing" (D85, placeholders). |
 | K5 First-run path | done | Dashboard "Getting started" (workspace → target → model → run → report, from the database); dev-only "create a test account" sign-up standing in for an email link; the unverified-domain error says where to verify; `e2e/first-run.e2e.ts` covers sign-up to report (9/9 e2e locally, with web and worker on their own database roles); fixed on the way: concurrent first sign-ins, the e2e fake model's script shared between runs, Free-plan limits on the dev demo account. Fresh screenshots via `e2e/screenshots.mjs`. |
@@ -189,9 +189,13 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
-0. **Run 5 (branch `agent-v5`, nothing merged):**
-   - **PRs (answered):** #2 and #3 (`agent-v5` → main) were merged by the owner on 2026-11-12;
-     #4 holds the commits pushed after #3 (measurements, settings UI fixes, docs). Not merged.
+**Merged (2026-11-15):** every run is on `main`: #1 demo v1, #2 runs 2–3, #3 and #4 run 5
+(run 4's commits came in with them), #5 the MIT license. The items below that are still open
+are product and measurement questions, not merges.
+
+0. **Run 5 (branch `agent-v5`, merged):**
+   - **PRs (done):** #2 and #3 merged on 2026-11-12, #4 (measurements, settings UI fixes, docs)
+     merged on 2026-11-13.
    - **Sonnet (K6):** the owner said no for now. To run it later with the same settings as
      f6151b32 plus bug 13: `cd apps/worker && LLM_PROVIDER=claude-cli uv run worker bench
      --holdout-first` (~30 minutes of the Pro limit).
@@ -212,9 +216,8 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
    - **Still yours from earlier runs:** bug 7's hidden code, the cart emptied by a reload,
      quantity 0 → 1, and the matcher offering only bugs listed on a report's own page (bug 9's
      "$NaN" seen on /cart doesn't count).
-0. **Run 4 (branch `agent-v4`, nothing merged):**
-   - **Merge PR #2 (`agent-v3` → main)**, then tell me: I rebase `agent-v4` onto main
-     (`--force-with-lease`, the one allowed exception) and open its PR.
+0. **Run 4 (branch `agent-v4`, merged through run 5's PRs):**
+   - **Done:** PR #2 merged; run 4's commits reached main as part of `agent-v5`.
    - **Your questions from this morning** (DECISIONS D73 and D75 record what I chose, marked
      "decided without owner, revisit"): (1) the Sonnet run: not run today without your yes; to
      run it: `cd apps/worker && LLM_PROVIDER=claude-cli uv run worker bench` (same settings as
@@ -232,8 +235,8 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
    - **Pick a production object store** (S3, R2 or self-run SeaweedFS/MinIO); only `S3_*` change.
    - **Unchanged from run 3:** bug 7's hidden code, the cart emptied by a reload, quantity 0 → 1
      (your product decisions; untouched).
-0. **Run 3 (branch `agent-v3`, nothing merged):**
-   - **Review and merge.** `agent-v3` is based on `agent-v2`; neither is merged into `main`.
+0. **Run 3 (branch `agent-v3`, merged in PR #2):**
+   - **Done:** reviewed and merged (with `agent-v2`) on 2026-11-12.
    - **Bug 7 needs the code `SAVE10`, which the shop never shows.** Sonnet guessed it once in
      three runs (H7); Gemma never does. Choose: show a code on the site (a banner, as real shops
      do) or keep it as a "guess a common code" bug. Either way, compare models on the same

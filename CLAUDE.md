@@ -53,20 +53,21 @@ The owner's plan and ground rules for the second unattended run are in
 [`docs/RUN_PLAN_2.md`](docs/RUN_PLAN_2.md). For that run only, its rules override "wait for a
 go-ahead" and "the AI core is the owner's to write".
 
-## Current phase
-Demo v1 (branch `demo-v1`): milestones M1–M9 done (M4/M5 measured with a local model only).
-Next: re-run M4/M5 and the benchmark with Claude (see "Needs me" in `docs/PROGRESS.md`), then
-review and merge `demo-v1` into `main`.
-
 ## Unattended run 3 (branch `agent-v3`)
 Goals and acceptance checks: [`docs/RUN_PLAN_3.md`](docs/RUN_PLAN_3.md). Same override rules as run 2,
 plus at most one claude-cli benchmark run (H7).
-
-## Run 5 (branch `agent-v5`)
-Goals and acceptance checks: [`docs/RUN_PLAN_5.md`](docs/RUN_PLAN_5.md). Same override rules as run 4;
-the AI core may change in K1 and K2 (explained in `docs/WALKTHROUGH.md`).
 
 ## Run 4 (branch `agent-v4`)
 Goals and acceptance checks: [`docs/RUN_PLAN_4.md`](docs/RUN_PLAN_4.md); the path to a sellable
 product: [`docs/ROADMAP.md`](docs/ROADMAP.md). The owner is around: questions as numbered plain
 text in chat, never blocking. Same override rules as run 3 for the AI core (J1 only).
+
+## Run 5 (branch `agent-v5`)
+Goals and acceptance checks: [`docs/RUN_PLAN_5.md`](docs/RUN_PLAN_5.md). Same override rules as run 4;
+the AI core may change in K1 and K2 (explained in `docs/WALKTHROUGH.md`).
+
+## Current phase
+Demo v1 and runs 2–5 are all merged into `main` (PRs #1–#4, last on 2026-11-13); the MIT license
+followed in PR #5. No run is in progress, so the normal "How to work with me" rules apply.
+Open items for the owner are under "Needs me" in `docs/PROGRESS.md`; the biggest is a Sonnet
+benchmark on the run 5 code (only with the owner's yes).
