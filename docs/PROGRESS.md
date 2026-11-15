@@ -163,7 +163,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | L1 Measurable claude-cli | done | Pinned IDs, reported model per step, four token types, API-equivalent estimate per step/run/reviewer share used by both budgets, usage-limit and credit latch, estimated cost per run and per verified bug in bench output and on the leaderboard (D88). Tests: recorded Haiku CLI JSON (+2 synthetic), `npm test` exit 0 (web 229 + 11 + 4, worker 631 + 1 skipped); the one real Haiku call matched the CLI's own list-price cost exactly. |
 | L2 Measure | done | a) Haiku agent `091936b3`, b) Sonnet agent `2ed718fa`, c) Gemma + Sonnet reviewer `bcd52766`, d) Gemma + Opus reviewer `1a8753c7`: table below, each committed and pushed before the next. No usage limit or credit use in any of them. e) Opus as the agent: not run (the owner wanted to be asked first; away). One crash found and fixed between (c) and (d) (D90). |
 | L3 Analysis | done | MISS_ANALYSIS "Run 6": per setup and all four side by side per bug (found / dropped / reached / never) and what each setup's misses share. DECISIONS D91 "Which model where": Haiku agent as the default, Sonnet as the thorough option, cheap explorer + strong reviewer not recommended; small samples and estimated costs stated. |
-| L4 Wrap-up | done | README results (new rows), BENCHMARKS (run 6 rows and what it taught), WALKTHROUGH (L1 with Q&A), DATABASE, PROGRESS, DEVLOG; `npm test` and `npm run lint` exit 0; demo servers stopped by PID, Ollama left running; PR `agent-v6` → main opened, not merged. |
+| L4 Wrap-up | done | README results (new rows), BENCHMARKS (run 6 rows and what it taught), WALKTHROUGH (L1 with Q&A), DATABASE, PROGRESS, DEVLOG; `npm test` and `npm run lint` exit 0; demo servers stopped by PID, Ollama left running; PR #7 (`agent-v6` → main) opened; merged by the owner on 2026-11-15. |
 
 ### Run 6 measurements (claude-cli, judge pinned to ollama/gemma4:12b, 40 steps; shop 3 + clean, holdout 2 + clean, holdout first)
 Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bugs, 39 slots in all), holdout 4 × 2 = 8 (6 bugs, 12). Estimated cost is the API-equivalent from the CLI's token counts (D88), not a charge.
@@ -209,8 +209,7 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
-0. **Run 6 (branch `agent-v6`, PR open, not merged):**
-   - **Review and merge the PR** (`agent-v6` → main).
+0. **Run 6 (branch `agent-v6`, merged in PR #7 on 2026-11-15):**
    - **Opus as the agent (e):** not run, as you asked. Expect about Sonnet's call count (~300 Opus
      calls, roughly $3 a run at API prices by the run 6 estimates). To run it:
      `cd apps/worker && LLM_PROVIDER=claude-cli CLAUDE_CLI_MODEL=claude-opus-5-5 MAX_RUN_COST_USD=5
