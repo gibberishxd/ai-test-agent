@@ -21,6 +21,8 @@ const TABLE = {
   "run.stop": MEMBERS,
   "run.share": MEMBERS,
   "finding.triage": MEMBERS,
+  // Run 7: targets, their specs and critical flows: test content, so members manage it.
+  "targets.manage": MEMBERS,
   "settings.view": EVERYONE,
   "domains.manage": ADMINS,
   "models.manage": ADMINS,

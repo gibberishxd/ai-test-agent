@@ -5,12 +5,14 @@ finding becomes a bug, and tokens and cost are added to the run as they're spent
 """
 
 import itertools
+import logging
 import time
 from collections import Counter
 from collections.abc import Callable
 from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from worker.agent.lists import lists_from_crawl
@@ -18,8 +20,16 @@ from worker.agent.loop import AgentConfig, AgentRun, StepRecord
 from worker.agent.policy import Budget
 from worker.agent.reviewer import review_candidate
 from worker.config import Settings
-from worker.db.models import Bug, Domain, Run, RunMode, Step
+from worker.db.models import Bug, Domain, Flow, FlowResult, Run, RunMode, Spec, Step
 from worker.findings import findings_from_pages
+from worker.flows import (
+    MAX_FLOW_STEPS,
+    FlowOutcome,
+    flow_task,
+    parse_finish,
+    replay_flow,
+    script_from_steps,
+)
 from worker.llm import LLMClient, Usage
 from worker.login import LoginConfig, login_for_run, sign_in
 from worker.report import BugReport, PageResult
@@ -27,10 +37,14 @@ from worker.review import review_screenshots
 from worker.runner import ExecuteFn
 from worker.safety.network import BlockedError
 from worker.scan import guarded_browser, guarded_context, is_demo_target, passive_scan
+from worker.spec_store import SpecRetriever, chunk_text, sync_target, target_for
+from worker.specs import OllamaEmbedder
 from worker.storage import Storage
 from worker.triage import suppressed_count
 from worker.urls import normalize
 from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
+
+log = logging.getLogger(__name__)
 
 MAX_EVENTS_PER_STEP = 20
 
@@ -185,6 +199,207 @@ def run_limits(settings: Settings, run: Run) -> tuple[int, int]:
     return steps, seconds
 
 
+def _save_agent_step(session: Session, run: Run, first_agent_step: int, step: StepRecord) -> None:
+    """Store an agent step as the run's step `first_agent_step + step.index - 1`."""
+    args = {k: v for k, v in step.args.items() if k != "reasoning"}
+    session.add(
+        Step(
+            run_id=run.id,
+            index=first_agent_step + step.index - 1,
+            action=step.action,
+            args={
+                **args,
+                "result": step.result,
+                "element": step.element,
+                "box": step.box,
+                "viewport": step.viewport,
+            },
+            reasoning=step.reasoning,
+            url=step.url,
+            screenshot=step.screenshot,
+            events=[{"type": "event", "text": e[:300]} for e in step.events][:MAX_EVENTS_PER_STEP],
+            blocked=step.blocked,
+            block_reason=step.block_reason,
+            **usage_fields(step.usage),
+        )
+    )
+    add_usage(run, step.usage)
+    run.step_count += 1
+    session.commit()
+
+
+def flows_for(session: Session, run: Run) -> list[Flow]:
+    """The run's target's critical flows, in the team's order (none without a target)."""
+    target = target_for(session, run.workspace_id, run.target_url)
+    if target is None:
+        return []
+    return (
+        session.query(Flow)
+        .filter_by(target_id=target.id)
+        .order_by(Flow.position, Flow.created_at)
+        .all()
+    )
+
+
+def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> FlowOutcome:
+    """One journey (run 7, M4): replay its script without a model; only if there is none, or a
+    step can't be repeated, give it to the agent (`make_agent(budget, first_step)`) as a short
+    episode. A known failure (a failing script) that still fails is found again for free."""
+    if budget.max_steps <= 0 or budget.max_seconds <= 0 or budget.max_cost_usd <= 0:
+        return FlowOutcome("skipped", "no budget left for this journey")
+    broke = None
+    if flow.script:
+        result, detail = replay_flow(context, flow.script)
+        failing = bool(flow.script.get("failing"))
+        if result == "ok":
+            fixed = " (it failed before: fixed)" if failing else ""
+            return FlowOutcome("replayed", detail + fixed, replayed=True)
+        if result == "checks_failed" and failing:
+            return FlowOutcome(
+                "failed",
+                f"still failing: {detail}",
+                replayed=True,
+                last_url=flow.script["start_url"],
+            )
+        broke = detail
+    first, cost_before = run.step_count, run.estimated_cost_usd
+    episode = make_agent(budget, first).run()
+    passed, checks, detail = parse_finish(episode.summary)
+    common = {
+        "model_calls": len(episode.steps),
+        "estimated_cost_usd": max(run.estimated_cost_usd - cost_before, 0.0),
+        "steps": episode.steps,
+        "last_url": episode.steps[-1].url if episode.steps else run.target_url,
+        "first_step": first,
+    }
+    after_break = f" (the saved replay had broken: {broke})" if broke else ""
+    if passed:
+        script = script_from_steps(run.target_url, episode.steps, checks)
+        return FlowOutcome(
+            "repaired" if broke else "passed", detail + after_break, script=script, **common
+        )
+    why = detail or f"not completed ({episode.stop_reason or 'no answer'})"
+    # A failure the agent pinned down (it quoted what it expected) is saved, so the next run can
+    # check it without the model.
+    script = (
+        script_from_steps(run.target_url, episode.steps, checks, failing=True) if checks else None
+    )
+    return FlowOutcome("failed", why + after_break, script=script, **common)
+
+
+def record_flow(session: Session, run: Run, flow: Flow, outcome: FlowOutcome, agent_bugs) -> None:
+    """Store the journey's result, save or update its script, and file a finding if it failed."""
+    session.add(
+        FlowResult(
+            workspace_id=run.workspace_id,
+            run_id=run.id,
+            flow_id=flow.id,
+            status=outcome.status,
+            replayed=outcome.replayed,
+            model_calls=outcome.model_calls,
+            estimated_cost_usd=outcome.estimated_cost_usd,
+            detail=outcome.detail[:1000],
+        )
+    )
+    flow.last_status, flow.last_run_id = outcome.status, run.id
+    if outcome.script:
+        flow.script, flow.script_saved_at = outcome.script, func.now()
+    if outcome.status == "failed" and (outcome.steps or outcome.replayed):
+        bug = flow_finding(flow, outcome, run.target_url)
+        agent_bugs.append(bug)
+        session.add(Bug(run_id=run.id, **bug.model_dump()))
+    session.commit()
+
+
+def _describe_script_step(step: dict) -> str:
+    element = step.get("element") or {}
+    target = f'{element.get("role", "")} "{element.get("name", "")}"'.strip() if element else ""
+    args = step.get("args") or {}
+    detail = args.get("text") or args.get("option") or args.get("url") or args.get("size") or ""
+    return " ".join(
+        p
+        for p in (
+            step["action"].replace("_", " ").capitalize(),
+            target,
+            f"({detail})" if detail else "",
+        )
+        if p
+    )
+
+
+def flow_finding(flow: Flow, outcome: FlowOutcome, target_url: str) -> BugReport:
+    """A journey the agent couldn't complete, as a finding that replay verifies like any other."""
+    effective = [s for s in outcome.steps if s.action not in ("finish", "note") and not s.blocked]
+    if outcome.replayed:  # found again by replaying the failing script: its steps, no run steps
+        script_steps = (flow.script or {}).get("steps", [])
+        return BugReport(
+            title=f"Critical flow failed: {flow.name}"[:200],
+            severity="high",
+            category="functional",
+            page_url=outcome.last_url or target_url,
+            expected=flow.goal,
+            actual=outcome.detail,
+            repro_steps=[f"Open {target_url}", *[_describe_script_step(s) for s in script_steps]],
+            evidence={
+                "flow": {"id": str(flow.id), "name": flow.name},
+                "observed": outcome.detail,
+                "replayed_script": True,
+            },
+            reasoning=f'Critical flow "{flow.name}" still fails (checked by replay, no model).',
+            step_indexes=[],
+            source="agent",
+            status="confirmed",  # the replay itself is the verification
+        )
+    return BugReport(
+        title=f"Critical flow failed: {flow.name}"[:200],
+        severity="high",
+        category="functional",
+        page_url=outcome.last_url or target_url,
+        expected=flow.goal,
+        actual=outcome.detail,
+        repro_steps=[f"Open {target_url}", *[s.human for s in effective]],
+        evidence={
+            "flow": {"id": str(flow.id), "name": flow.name},
+            "observed": outcome.detail,
+            "reported_at": outcome.first_step + len(outcome.steps),
+            "replay_from": outcome.first_step,
+        },
+        reasoning=f'The team\'s critical flow "{flow.name}" could not be completed.',
+        step_indexes=[outcome.first_step + s.index - 1 for s in effective],
+        source="agent",
+        status="candidate",
+    )
+
+
+def cited_requirement(session: Session, bug: Bug) -> str | None:
+    """The requirement a report cites (evidence.spec, run 7), for the verifier."""
+    spec = (bug.evidence or {}).get("spec") or {}
+    return chunk_text(session, spec["chunk_id"]) if spec.get("chunk_id") else None
+
+
+def spec_source(session: Session, run: Run, settings: Settings):
+    """The run's requirements (run 7, M3): a SpecRetriever when its target has specs and
+    USE_SPECS is on, else None. Changed specs are embedded first. If the embedding model can't
+    be reached, the run goes on without specs (a warning, not a failure)."""
+    if not settings.use_specs:
+        return None
+    target = target_for(session, run.workspace_id, run.target_url)
+    if target is None or not session.query(Spec.id).filter_by(target_id=target.id).first():
+        return None
+    embedder = OllamaEmbedder(settings.ollama_url, settings.embedding_model)
+    try:
+        written = sync_target(session, target.id, embedder)
+    except Exception as error:
+        session.rollback()
+        log.warning(
+            "specs for %s could not be embedded (%s): running without them", target.origin, error
+        )
+        return None
+    if written:
+        log.info("embedded %d spec chunk(s) for %s", written, target.origin)
+    return SpecRetriever(session, target.id, embedder)
+
+
 def run_interactive(
     session: Session,
     run: Run,
@@ -230,46 +445,29 @@ def run_interactive(
         max_cost_usd=remaining_budget(settings, run),
         max_repeats=settings.max_repeated_actions,
     )
-    first_agent_step = run.step_count
     agent_bugs: list[BugReport] = []
 
-    def on_step(step: StepRecord) -> None:
-        args = {k: v for k, v in step.args.items() if k != "reasoning"}
-        session.add(
-            Step(
-                run_id=run.id,
-                index=first_agent_step + step.index - 1,
-                action=step.action,
-                args={
-                    **args,
-                    "result": step.result,
-                    "element": step.element,
-                    "box": step.box,
-                    "viewport": step.viewport,
-                },
-                reasoning=step.reasoning,
-                url=step.url,
-                screenshot=step.screenshot,
-                events=[{"type": "event", "text": e[:300]} for e in step.events][
-                    :MAX_EVENTS_PER_STEP
-                ],
-                blocked=step.blocked,
-                block_reason=step.block_reason,
-                **usage_fields(step.usage),
-            )
-        )
-        add_usage(run, step.usage)
-        run.step_count += 1
-        session.commit()
+    def recorders(first_agent_step: int):
+        """Save an agent's steps and bugs as the run's, numbered from `first_agent_step`
+        (a journey episode and the exploration each number their own steps from 1)."""
 
-    def on_bug(bug: BugReport) -> None:
-        # Step numbers the model used are 1-based within the agent loop; store run step indexes.
-        bug.step_indexes = [first_agent_step + i - 1 for i in bug.step_indexes]
-        reported_at = first_agent_step + bug.evidence.get("reported_at", 1) - 1
-        bug.evidence = {**bug.evidence, "reported_at": reported_at, "replay_from": first_agent_step}
-        agent_bugs.append(bug)
-        session.add(Bug(run_id=run.id, **bug.model_dump()))
-        session.commit()
+        def on_step(step: StepRecord) -> None:
+            _save_agent_step(session, run, first_agent_step, step)
+
+        def on_bug(bug: BugReport) -> None:
+            # Step numbers the model used are 1-based within its loop; store run step indexes.
+            bug.step_indexes = [first_agent_step + i - 1 for i in bug.step_indexes]
+            reported_at = first_agent_step + bug.evidence.get("reported_at", 1) - 1
+            bug.evidence = {
+                **bug.evidence,
+                "reported_at": reported_at,
+                "replay_from": first_agent_step,
+            }
+            agent_bugs.append(bug)
+            session.add(Bug(run_id=run.id, **bug.model_dump()))
+            session.commit()
+
+        return on_step, on_bug
 
     counter = itertools.count(1)
 
@@ -277,27 +475,62 @@ def run_interactive(
         return storage.save(f"{run.id}/agent-{next(counter):03d}-{name}.png", png)
 
     with guarded_context(settings, run.target_url, browser, login) as (context, guard):
-        config = AgentConfig(
-            target_url=run.target_url,
-            mode=run.mode,
-            budget=budget,
-            focus=run.focus,
-            is_demo_target=is_demo_target(settings, run.target_url),
-            login=login,
-            known_lists=lists_from_crawl([(p.url, p.found_on) for p in report.pages]),
-        )
-        agent = AgentRun(
-            context.new_page(),
-            llm,
-            guard,
-            config,
-            save_screenshot=save,
-            on_step=on_step,
-            on_bug=on_bug,
-            should_stop=lambda: _stop_requested(session, run),
-            relogin=(lambda: sign_in(context, login)) if login else None,
-            reviewer=reviewer,
-        )
+        specs = spec_source(session, run, settings)
+
+        def agent_for(focus: str | None, agent_budget: Budget, first_step: int, explore: bool):
+            on_step, on_bug = recorders(first_step)
+            config = AgentConfig(
+                target_url=run.target_url,
+                mode=run.mode,
+                budget=agent_budget,
+                focus=focus,
+                is_demo_target=is_demo_target(settings, run.target_url),
+                login=login,
+                known_lists=lists_from_crawl([(p.url, p.found_on) for p in report.pages]),
+                specs=specs,
+            )
+            return AgentRun(
+                context.new_page(),
+                llm,
+                guard,
+                config,
+                save_screenshot=save,
+                on_step=on_step,
+                on_bug=on_bug,
+                should_stop=lambda: _stop_requested(session, run),
+                relogin=(lambda: sign_in(context, login)) if login else None,
+                reviewer=reviewer if explore else None,  # journeys are judged by replay
+            )
+
+        # 2a. Critical flows first (run 7, M4): replayed without a model when they can be.
+        def remaining_seconds() -> float:
+            return max(max_seconds - (time.monotonic() - started), 0)
+
+        flow_steps = 0
+        if run.mode == "interactive":
+            for flow in flows_for(session, run):
+                budget_left = Budget(
+                    max_steps=min(MAX_FLOW_STEPS, max_steps - flow_steps),
+                    max_seconds=remaining_seconds(),
+                    max_cost_usd=remaining_budget(settings, run),
+                    max_repeats=settings.max_repeated_actions,
+                )
+                task = flow_task(flow.name, flow.goal)
+                outcome = check_flow(
+                    flow,
+                    context,
+                    budget_left,
+                    run,
+                    lambda budget_, first, task=task: agent_for(task, budget_, first, False),
+                )
+                flow_steps += outcome.model_calls
+                record_flow(session, run, flow, outcome, agent_bugs)
+
+        # 2b. Then explore, with what's left.
+        budget.max_steps = max(max_steps - flow_steps, 0)
+        budget.max_seconds = remaining_seconds()
+        budget.max_cost_usd = remaining_budget(settings, run)
+        agent = agent_for(run.focus, budget, run.step_count, True)
         result = agent.run()
     if reviewer is not None:
         _review_candidates(session, run, reviewer, result.reviewer_usage, login, settings)
@@ -516,6 +749,7 @@ def _replay_bug(
                 bug.actual,
                 viewport=(bug.evidence or {}).get("viewport", "desktop"),
                 scrub=login.scrub if login else (lambda text: text),
+                requirement=cited_requirement(session, bug),
             )
         finally:
             context.close()

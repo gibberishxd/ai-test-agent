@@ -94,6 +94,11 @@ model Workspace {
   webhooks     WebhookEndpoint[]
   triage       FindingTriage[]
   invitations  Invitation[]
+  targets      Target[]
+  specs        Spec[]
+  specChunks   SpecChunk[]
+  flows        Flow[]
+  flowResults  FlowResult[]
 
   @@map("workspaces")
 }
@@ -184,6 +189,8 @@ model Run {
   apiKey            ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
   webhookDeliveries WebhookDelivery[]
   usageEvent        UsageEvent?
+
+  flowResults FlowResult[]
 
   @@index([status, createdAt])
   @@index([workspaceId, createdAt])
@@ -356,6 +363,121 @@ model Domain {
 
   @@unique([workspaceId, hostname])
   @@map("domains")
+}
+
+/// Run 7: an app a workspace tests, by origin (scheme://host[:port]). Specs and critical flows
+/// belong to a target; a run's target is the one whose origin matches its URL.
+model Target {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  /// scheme://host[:port], e.g. https://staging.example.com
+  origin      String
+  name        String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  specs     Spec[]
+  chunks    SpecChunk[]
+  flows     Flow[]
+
+  @@unique([workspaceId, origin])
+  @@map("targets")
+}
+
+/// Run 7, M3: a team's own requirements for a target (Markdown or plain text: user stories,
+/// acceptance criteria). The worker chunks and embeds it (spec_chunks) when it changes.
+model Spec {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  targetId       String    @map("target_id") @db.Uuid
+  title          String
+  body           String
+  /// When the worker last chunked and embedded this spec; null or older than updatedAt = pending.
+  chunkedAt      DateTime? @map("chunked_at") @db.Timestamptz(3)
+  embeddingModel String?   @map("embedding_model")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target    Target      @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  chunks    SpecChunk[]
+
+  @@index([targetId])
+  @@map("specs")
+}
+
+/// Run 7, M3: a piece of a spec with its embedding (pgvector, 768 dimensions: nomic-embed-text).
+/// Written by the worker only; the agent and the verifier read the chunks closest to a page.
+model SpecChunk {
+  id          String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String                     @map("workspace_id") @db.Uuid
+  specId      String                     @map("spec_id") @db.Uuid
+  targetId    String                     @map("target_id") @db.Uuid
+  ord         Int
+  heading     String
+  text        String
+  embedding   Unsupported("vector(768)")
+  createdAt   DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  spec      Spec      @relation(fields: [specId], references: [id], onDelete: Cascade)
+  target    Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([targetId])
+  @@map("spec_chunks")
+}
+
+/// Run 7, M4: a critical journey a team wants covered on every run, in plain language ("add two
+/// items, apply a code, pay with the test card"). Once the agent completes it, the steps it took
+/// are saved as `script` and replayed without a model; the model is used only when a replay breaks.
+model Flow {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  targetId      String    @map("target_id") @db.Uuid
+  name          String
+  /// The journey in plain language, as the team wrote it.
+  goal          String
+  position      Int       @default(0)
+  /// The replayable script: { steps: [{action, role, name, css, text, url}], checks: [text], endPath }.
+  script        Json?
+  scriptSavedAt DateTime? @map("script_saved_at") @db.Timestamptz(3)
+  /// The latest result: passed | replayed | repaired | failed | skipped (see FlowResult).
+  lastStatus    String?   @map("last_status")
+  lastRunId     String?   @map("last_run_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target    Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  results   FlowResult[]
+
+  @@index([targetId, position])
+  @@map("flows")
+}
+
+/// Run 7, M4: what happened to one journey in one run.
+model FlowResult {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  runId            String   @map("run_id") @db.Uuid
+  flowId           String   @map("flow_id") @db.Uuid
+  /// passed (the agent completed it, script saved), replayed (the saved script passed, no model),
+  /// repaired (the replay broke, the agent completed it again, script updated),
+  /// failed (the agent couldn't complete it: a finding), skipped (no budget left).
+  status           String
+  /// True when the journey was checked by replaying its script (no model call for it).
+  replayed         Boolean  @default(false)
+  modelCalls       Int      @default(0) @map("model_calls")
+  estimatedCostUsd Float    @default(0) @map("estimated_cost_usd")
+  detail           String?
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  flow      Flow      @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("flow_results")
 }
 
 /// A model a workspace brings: any OpenAI-compatible endpoint, or Anthropic. The API key is

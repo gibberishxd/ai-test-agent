@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # False for a reviewer model that can't read images (qwen3:14b): it gets text only.
     reviewer_vision: bool = True
 
+    # Run 7, M3: a target's specs, embedded locally and retrieved per page (worker/specs.py).
+    use_specs: bool = True
+    embedding_model: str = "nomic-embed-text"
+
     # Run budgets, enforced by the worker
     max_steps: int = 40
     max_run_seconds: int = 480

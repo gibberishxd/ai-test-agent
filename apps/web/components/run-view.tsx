@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ModeBadge, StatusBadge } from "@/components/badges";
 import { BugCard } from "@/components/bug-card";
 import { EmptyState } from "@/components/empty-state";
+import { FlowResults } from "@/components/flow-results";
 import { LivePane } from "@/components/live-pane";
 import { StepTimeline } from "@/components/step-timeline";
 import { Button } from "@/components/ui/button";
@@ -124,6 +125,8 @@ export function RunView({
       )}
 
       <LivePane steps={run.steps} live={!final && !readOnly} filesToken={filesToken} />
+
+      <FlowResults flows={run.flows ?? []} />
 
       <section className="grid gap-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

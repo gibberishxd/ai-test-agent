@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, History, Loader2, ShieldCheck, Sparkles } from "lucide-react";
+import { Check, Copy, FileText, History, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { SeverityBadge } from "@/components/badges";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { evidenceLines, toGitHubIssue, toJira } from "@/lib/export";
+import { violatedSpec } from "@/lib/spec-citation";
 import { fileUrl } from "@/lib/file-url";
 import { formatDate } from "@/lib/format";
 import type { BugView } from "@/lib/serialize";
@@ -30,6 +31,7 @@ const TRIAGE_LABELS = { confirmed: "Confirmed", false_positive: "False positive"
 
 export function BugCard({ bug, runUrl, targetUrl, filesToken = null, change, triage, canTriage = false, seen }: Props) {
   const evidence = evidenceLines(bug.evidence);
+  const spec = violatedSpec(bug.evidence);
   const replay = typeof bug.evidence.replay === "string" ? bug.evidence.replay : null;
   const context = { runUrl, targetUrl };
 
@@ -67,6 +69,15 @@ export function BugCard({ bug, runUrl, targetUrl, filesToken = null, change, tri
         </a>
       </CardHeader>
       <CardContent className="grid gap-4 text-sm">
+        {spec && (
+          <section className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-3" data-testid="violated-spec">
+            <FileText className="size-4 text-muted-foreground" />
+            <span>
+              Breaks your spec <strong>{spec.title}</strong>
+              {spec.heading !== spec.title && <span className="text-muted-foreground"> › {spec.heading.split(" > ").slice(1).join(" › ") || spec.heading}</span>}
+            </span>
+          </section>
+        )}
         {bug.reproSteps.length > 0 && (
           <section>
             <h4 className="mb-1 font-medium">Steps to reproduce</h4>

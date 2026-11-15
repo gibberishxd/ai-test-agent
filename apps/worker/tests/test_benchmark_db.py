@@ -346,3 +346,66 @@ def test_the_leaderboard_keeps_benchmark_versions_apart(sessions):
             .all()
         )
         assert versions == ["v1", "v2"]
+
+
+# --- Run 7, M3: the holdout's specs in the benchmark ------------------------------------------
+
+
+def test_bench_specs_load_the_owners_holdout_specs_onto_both_holdout_builds(sessions, tmp_path):
+    from worker.benchmark import benchmark_workspace
+    from worker.config import Settings
+    from worker.db.models import Spec, Target
+    from worker.main import ensure_bench_specs
+
+    specs_file = tmp_path / "specs.md"
+    specs_file.write_text("## Stay summary\n- The total covers every night of the stay.\n")
+    settings = Settings(
+        _env_file=None, demo2_url="http://h.test:5175", clean_demo2_url="http://h.test:5176"
+    )
+    with sessions() as session:
+        workspace = benchmark_workspace(session)
+        assert ensure_bench_specs(session, workspace, settings, specs_file) is True
+        ensure_bench_specs(session, workspace, settings, specs_file)  # idempotent
+        origins = sorted(t.origin for t in session.query(Target))
+        assert origins == ["http://h.test:5175", "http://h.test:5176"]
+        bodies = [s.body for s in session.query(Spec)]
+        assert len(bodies) == 2 and all("every night" in b for b in bodies)
+
+        # Without --specs the holdout runs get none: the comparison needs a clean "without".
+        assert ensure_bench_specs(session, workspace, settings, None) is False
+        assert session.query(Spec).count() == 0
+
+
+def test_bench_specs_refuse_a_missing_file(sessions, tmp_path):
+    import pytest
+
+    from worker.benchmark import benchmark_workspace
+    from worker.config import Settings
+    from worker.main import ensure_bench_specs
+
+    with sessions() as session:
+        workspace = benchmark_workspace(session)
+        with pytest.raises(FileNotFoundError):
+            ensure_bench_specs(session, workspace, Settings(_env_file=None), tmp_path / "nope.md")
+
+
+def test_bench_flows_give_the_shop_its_three_journeys_and_keep_their_scripts(sessions):
+    from worker.benchmark import benchmark_workspace
+    from worker.config import Settings
+    from worker.db.models import Flow
+    from worker.flows import DEMO_SHOP_FLOWS
+    from worker.main import ensure_bench_flows
+
+    settings = Settings(_env_file=None, demo_url="http://shop.test:5173")
+    with sessions() as session:
+        workspace = benchmark_workspace(session)
+        assert ensure_bench_flows(session, workspace, settings, True) is True
+        flows = session.query(Flow).order_by(Flow.position).all()
+        assert [f.name for f in flows] == [name for name, _ in DEMO_SHOP_FLOWS]
+        flows[0].script = {"start_url": "x", "steps": []}
+        session.commit()
+        ensure_bench_flows(session, workspace, settings, True)  # a later benchmark keeps scripts
+        assert session.query(Flow).count() == 3
+        assert session.query(Flow).filter(Flow.script.is_not(None)).count() == 1
+        assert ensure_bench_flows(session, workspace, settings, False) is False
+        assert session.query(Flow).count() == 0

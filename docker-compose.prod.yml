@@ -25,7 +25,7 @@ x-app-env: &app-env
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:0.8.1-pg17  # Postgres 17 with pgvector (run 7: specs)
     environment:
       POSTGRES_USER: ${PROD_DB_USER:-ata}
       POSTGRES_PASSWORD: ${PROD_DB_PASSWORD:?set PROD_DB_PASSWORD}

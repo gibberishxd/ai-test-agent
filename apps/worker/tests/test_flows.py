@@ -1,0 +1,122 @@
+"""Run 7, M4: critical flows: the episode's answer, the saved script, and replay without a model."""
+
+from types import SimpleNamespace
+
+from worker.flows import flow_task, parse_finish, replay_flow, script_from_steps
+
+
+def step(action, at, element=None, result="ok", blocked=False, **args):
+    """A StepRecord-like step taken on page `at`."""
+    return SimpleNamespace(
+        action=action, url=at, element=element, result=result, blocked=blocked, args=args
+    )
+
+
+def test_the_episode_task_names_the_journey_and_how_to_finish():
+    task = flow_task("Checkout", "Add an item and place the order.")
+    assert 'CRITICAL FLOW "Checkout": Add an item and place the order.' in task
+    assert "PASSED:" in task and "FAILED:" in task
+
+
+def test_a_passed_finish_gives_its_quoted_checks():
+    passed, checks, detail = parse_finish(
+        "PASSED: the page said \"Order confirmed\" and 'Thank you'"
+    )
+    assert passed is True and checks == ["Order confirmed", "Thank you"]
+    assert detail.startswith("the page said")
+
+
+def test_a_failed_or_unclear_finish():
+    assert parse_finish("FAILED: Save did nothing")[:2] == (False, [])
+    # A failure that quotes what it expected keeps it: the next run checks it without a model.
+    assert parse_finish('FAILED: no "Profile saved" after Save')[:2] == (False, ["Profile saved"])
+    assert parse_finish("I tested the site")[0] is None
+    assert parse_finish(None) == (None, [], "")
+
+
+def test_the_script_keeps_effective_actions_with_their_elements():
+    name = {"role": "textbox", "name": "Display name"}
+    save = {"role": "button", "name": "Save changes"}
+    steps = [
+        step("navigate", "http://shop.test/", url="/profile"),
+        step("type", "http://shop.test/profile", name, text="Test User"),
+        step("note", "http://shop.test/profile", text="before"),
+        step(
+            "click",
+            "http://shop.test/profile",
+            {"role": "button", "name": "Gone"},
+            result="error: no such element",
+        ),
+        step("click", "http://shop.test/profile", save, blocked=True),
+        step("click", "http://shop.test/profile", save),
+        step("finish", "http://shop.test/profile", summary="PASSED"),
+    ]
+    script = script_from_steps("http://shop.test/", steps, ["Profile saved."])
+    assert [s["action"] for s in script["steps"]] == ["navigate", "type", "click"]
+    assert script["steps"][1] == {
+        "action": "type",
+        "args": {"text": "Test User"},
+        "element": name,
+        "url": "http://shop.test/profile",
+    }
+    assert script["steps"][0]["args"] == {"url": "/profile"}
+    assert script["checks"] == ["Profile saved."] and script["end_path"] == "/profile"
+    assert script["failing"] is False
+    assert script_from_steps("http://shop.test/", steps, ["x"], failing=True)["failing"] is True
+    assert script_from_steps("http://shop.test/", [step("note", "http://shop.test/")], []) is None
+
+
+def test_a_saved_journey_replays_without_a_model(context, site_url):
+    script = {
+        "start_url": f"{site_url}/form.html",
+        "steps": [
+            {
+                "action": "type",
+                "args": {"text": "Ada"},
+                "element": {"role": "textbox", "name": "Name"},
+                "url": f"{site_url}/form.html",
+            },
+            {
+                "action": "click",
+                "args": {},
+                "element": {"role": "button", "name": "Save"},
+                "url": f"{site_url}/form.html",
+            },
+        ],
+        "checks": ["Saved"],
+        "end_path": "/form.html",
+    }
+    result, detail = replay_flow(context, script)
+    assert result == "ok", detail
+
+
+def test_a_replay_that_breaks_says_where(context, site_url):
+    script = {
+        "start_url": f"{site_url}/form.html",
+        "steps": [
+            {
+                "action": "click",
+                "args": {},
+                "element": {"role": "button", "name": "No such button"},
+                "url": f"{site_url}/form.html",
+            }
+        ],
+        "checks": [],
+        "end_path": "/form.html",
+    }
+    result, detail = replay_flow(context, script)
+    assert result == "broken" and "step 1" in detail and "click" in detail
+
+
+def test_a_replay_whose_check_is_missing_fails(context, site_url):
+    script = {
+        "start_url": f"{site_url}/form.html",
+        "steps": [],
+        "checks": ["Order confirmed"],
+        "end_path": "/form.html",
+    }
+    script["steps"] = [
+        {"action": "reload", "args": {}, "element": None, "url": f"{site_url}/form.html"}
+    ]
+    result, detail = replay_flow(context, script)
+    assert result == "checks_failed" and '"Order confirmed"' in detail

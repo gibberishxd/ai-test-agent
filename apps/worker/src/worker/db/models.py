@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import ForeignKey, Integer, String, event, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import UserDefinedType
 
 
 class RunStatus(StrEnum):
@@ -310,6 +311,114 @@ class Domain(Base):
     hostname: Mapped[str]
     verified_at: Mapped[datetime | None] = mapped_column(_timestamp())
     method: Mapped[str | None]
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Vector(UserDefinedType):
+    """pgvector's `vector(n)` (run 7, M3), without the pgvector package: a list of floats is
+    written as pgvector's text form '[0.1,0.2,...]' and read back the same way."""
+
+    cache_ok = True
+
+    def __init__(self, dims: int):
+        self.dims = dims
+
+    def get_col_spec(self, **_kw) -> str:
+        return f"vector({self.dims})"
+
+    def bind_processor(self, dialect):
+        def process(value):
+            return None if value is None else "[" + ",".join(repr(float(v)) for v in value) + "]"
+
+        return process
+
+    def result_processor(self, dialect, coltype):
+        def process(value):
+            if value is None or isinstance(value, list):
+                return value
+            return [float(v) for v in str(value).strip("[]").split(",") if v]
+
+        return process
+
+
+class Target(Base):
+    """Run 7: an app a workspace tests, by origin. Specs and critical flows belong to it."""
+
+    __tablename__ = "targets"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    origin: Mapped[str]
+    name: Mapped[str | None]
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Spec(Base):
+    """Run 7, M3: a team's requirements for a target (web: lib/specs.ts); chunked by the worker."""
+
+    __tablename__ = "specs"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    target_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("targets.id"))
+    title: Mapped[str]
+    body: Mapped[str]
+    chunked_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    embedding_model: Mapped[str | None]
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class SpecChunk(Base):
+    """Run 7, M3: a piece of a spec and its embedding (worker/specs.py)."""
+
+    __tablename__ = "spec_chunks"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    spec_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("specs.id"))
+    target_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("targets.id"))
+    ord: Mapped[int]
+    heading: Mapped[str]
+    text: Mapped[str]
+    embedding: Mapped[list[float]] = mapped_column(Vector(768))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Flow(Base):
+    """Run 7, M4: a critical journey per target (worker/flows.py). `script` is the replayable
+    form, saved once the agent completes it: {"steps": [...], "checks": [...], "end_path": ...}."""
+
+    __tablename__ = "flows"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    target_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("targets.id"))
+    name: Mapped[str]
+    goal: Mapped[str]
+    position: Mapped[int] = mapped_column(server_default=text("0"))
+    script: Mapped[dict | None] = mapped_column(JSONB)
+    script_saved_at: Mapped[datetime | None] = mapped_column(_timestamp())
+    last_status: Mapped[str | None]
+    last_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class FlowResult(Base):
+    """Run 7, M4: what happened to one journey in one run."""
+
+    __tablename__ = "flow_results"
+
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"))
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id"))
+    flow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("flows.id"))
+    status: Mapped[str]
+    replayed: Mapped[bool] = mapped_column(server_default=text("false"))
+    model_calls: Mapped[int] = mapped_column(server_default=text("0"))
+    estimated_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    detail: Mapped[str | None]
     created_at: Mapped[datetime] = _created_at()
 
 

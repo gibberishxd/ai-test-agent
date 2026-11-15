@@ -41,7 +41,11 @@ export async function getSharedRun(token: string) {
   if (!ref) return null;
   return tenantDb(ref.workspaceId).run.findFirst({
     where: { id: ref.id, shareToken: token },
-    include: { steps: { orderBy: { index: "asc" } }, bugs: { orderBy: { createdAt: "asc" } } },
+    include: {
+      steps: { orderBy: { index: "asc" } },
+      bugs: { orderBy: { createdAt: "asc" } },
+      flowResults: { orderBy: { createdAt: "asc" }, include: { flow: { select: { name: true } } } },
+    },
   });
 }
 
