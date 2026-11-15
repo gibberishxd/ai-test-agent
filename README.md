@@ -124,6 +124,36 @@ A new workspace gets a short path from sign-up to its first report.
 
 ![Getting started](docs/screenshots/getting-started.png)
 
+### Use it from your editor (MCP)
+
+`apps/web/mcp/server.ts` is a small MCP server (Node 24 or later, no dependencies) with three tools,
+each backed by `/api/v1` and a workspace API key (Settings → API keys): **start_run** (a URL, passive
+or interactive, optional focus and limits), **get_run_status**, **get_report** (JSON or JUnit). The
+API's own rules apply: quota, verified domains, rate limits.
+
+Claude Code:
+
+```bash
+claude mcp add ai-test-agent -e ATA_URL=https://your-ata.example.com -e ATA_API_KEY=ata_... \
+  -- node /path/to/ai-test-agent/apps/web/mcp/server.ts
+```
+
+Cursor (`.cursor/mcp.json` in your project, or `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "ai-test-agent": {
+      "command": "node",
+      "args": ["/path/to/ai-test-agent/apps/web/mcp/server.ts"],
+      "env": { "ATA_URL": "https://your-ata.example.com", "ATA_API_KEY": "ata_..." }
+    }
+  }
+}
+```
+
+Then ask, for example: "Test the checkout on https://staging.example.com and tell me what broke."
+
 ## Run it locally
 
 Requirements: Node.js 24+, Python 3.12+ with [uv](https://docs.astral.sh/uv/), Docker Desktop.
