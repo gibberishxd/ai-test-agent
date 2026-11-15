@@ -463,3 +463,53 @@ error (bug 12) are mostly never reached within 40 steps.
 than My orders"; on the clean holdout "booking accepted for dates outside the room's availability
 window". All three were confirmed by replay. They count as false alarms because they aren't
 planted; the two new ones are worth a look as real bugs in the demo apps (owner's call).
+
+## Run 6, (c): Gemma 4 12B explorer + Sonnet 5.5 reviewer
+
+Result `bcd52766` (commit 0366f15; agent code of 123e23e), explorer ollama gemma4:12b (local),
+reviewer claude-cli `claude-sonnet-5-5` (reported), judge ollama/gemma4:12b, 1200 s and 40 steps
+(the run 5 Gemma settings), holdout first. No usage limit. The reviewer was called 0–3 times per
+run (9 calls in all); its estimated cost for the 7 runs was about $0.20 in total.
+Runs: holdout bac4f417, a8009e3f, clean ffc39092; shop ff3c9d7f, 74c17e09, 18bce55e (failed at
+step 39 of 40, D90), clean 60879c48.
+
+| Set | AI-only | All | Precision | False alarms (before replay) | Est. API cost / run |
+|---|---|---|---|---|---|
+| Shop | 11% (3 of 27) | 38% (15 of 39) | 100% | 0.0 (0.0) | $0.010 |
+| Holdout | 0% (0 of 8) | 33% (4 of 12) | 100% | 0.0 (1.0) | $0.054 |
+
+Gemma setups on the same code line (shop AI-only / holdout AI-only): alone (run 5) 7% / 0%;
++ qwen3:14b reviewer (run 5) 19% / 0%; **+ Sonnet reviewer (run 6) 11% / 0%**.
+
+| Bug | found | dropped | reached | never |
+|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0 | 0 | 3 | 0 |
+| Shop 6. Invalid email at checkout | 0 | 0 | 3 | 0 |
+| Shop 7. Discount twice | 0 | 0 | 3 | 0 |
+| Shop 8. Save changes does nothing | 2 | 0 | 0 | 1 |
+| Shop 9. $NaN | 1 | 0 | 2 | 0 |
+| Shop 10. Long name on mobile | 0 | 0 | 0 | 3 |
+| Shop 11. Session after logout + reload | 0 | 0 | 2 | 1 |
+| Shop 12. Wrong-password error placement | 0 | 0 | 0 | 3 |
+| Shop 13. Wrong order opened | 0 | 0 | 3 | 0 |
+| Holdout 3. One night charged | 0 | 0 | 2 | 0 |
+| Holdout 4. Check-out before check-in | 0 | 0 | 2 | 0 |
+| Holdout 5. Double-click Book now | 0 | 0 | 2 | 0 |
+| Holdout 6. Room name on mobile | 0 | 0 | 0 | 2 |
+
+**What the misses have in common: the reviewer only sees what the explorer flags.** Gemma
+reached the cart, checkout, orders and the holdout's booking form in every run (the "reached"
+column is full) but filed no report itself (report_bug 0 in all five buggy runs) and rarely
+produced a flagged mismatch, so Sonnet was asked 0–3 times a run. Where it was asked it said
+"bug" (bug 8 twice, bug 9 once). It never saw bug 13: qwen3:14b found it 3 of 3 in run 5
+because Gemma flagged the order step then; this time it didn't. A strong reviewer can't raise
+recall above what the explorer puts in front of it, and it can't apply the techniques
+(double click, unusual values) that Gemma doesn't try.
+
+**Cost:** the cheapest Claude setup measured: about a cent a shop run, five cents a holdout run,
+because Sonnet sees a handful of calls instead of 40+ decisions. But each Gemma run took ~19
+minutes on this 16 GB Mac, against 3–4 minutes for the Claude agents.
+
+**The crash** (D90): shop run 18bce55e failed at step 39 with `KeyError: 'name'` right after
+Sonnet called a flagged step a bug; that bug and that review's cost were lost. Fixed, with a
+test, before (d).
