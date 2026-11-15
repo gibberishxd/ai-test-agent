@@ -231,9 +231,11 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
      if you want it.
    - **Real behaviour Claude reported that isn't planted.** Confirmed by replay on the clean
      builds (so counted as false alarms): profile "Recent orders" differs from "My orders"; the
-     holdout accepts dates outside the room's availability. Seen on the buggy builds, not yet
-     checked on the clean ones: dates in the past accepted (holdout), a double-clicked "Add to
-     cart" adding twice (shop). Fix them in the demos or plant them (your call, like quantity 0 → 1).
+     holdout accepts dates outside the room's availability. Reported on the buggy builds and, by
+     the source, the same in the clean ones (neither is behind a planted-bug switch): dates in the
+     past accepted (`validate()` in `apps/demo2/src/booking.ts` has no such check), and a
+     double-clicked "Add to cart" adding twice (the shop's button has no guard, unlike the
+     holdout's "Book now"). Fix them in the demos or plant them (your call, like quantity 0 → 1).
 **Merged (2026-11-15):** every run is on `main`: #1 demo v1, #2 runs 2–3, #3 and #4 run 5
 (run 4's commits came in with them), #5 the MIT license. The items below that are still open
 are product and measurement questions, not merges.
