@@ -655,3 +655,43 @@ whole run cost about the same ($0.10), but run 2's 40 steps all went to explorat
 price of a browser; a known failure stays found without the model; a learning run spends most of
 its step budget on the journeys (a team adding flows should expect the first run to explore
 less). Two samples per version: small, as everything in this file.
+
+## Run 7, M6: Haiku 5.5 on benchmark v2 with the shop's critical flows
+
+Result `2f9e0744` (commit 8aa5746), `claude-haiku-5-5`, benchmark v2, `bench --flows` (the shop
+target has the three journeys; specs off: not measured yet, D97), judge ollama/gemma4:12b, 480 s
+and 40 steps, holdout first. No usage limit; $0.72 for the 7 runs. Runs: holdout e4a102b1,
+181f43eb, clean e03c0ac0; shop 64d886d0, edbe935e, c93c162d, clean 9b353008.
+
+| Set | AI-only | All | Precision | False alarms | vs M2 (no flows) |
+|---|---|---|---|---|---|
+| Shop | 30% (8 of 27) | 51% (20 of 39) | 89% | 1.0 | 33% (9 of 27)*, 100%, 2.0 |
+| Holdout (no flows) | 62% (5 of 8) | 75% (9 of 12) | 93% | 1.0 | 75% (6 of 8), 93%, 0.0 |
+
+\* M2's shop lost bug 5 three times to the double-click guard (D96); here bug 5 was found once.
+
+The holdout has no flows, so its difference from M2 (one bug-run: the mobile room name, and one
+clean-build report, "the booking dates break across lines on a phone") is run-to-run variation
+over two runs, not a change.
+
+**The journeys inside the benchmark (shop, signed in with a saved login setup):**
+
+| Run | Sign in | Add to cart and check out | Change profile | Journey model calls |
+|---|---|---|---|---|
+| 1 (learn) | passed (7) | passed (15) | failed: expected "Profile saved" (11) | 33 |
+| 2 | failed (10): the demo credentials showed as "[test account] / [secret]" | repaired (9): the replay ran but "Order confirmed" wasn't on the page | still failing, by replay (0) | 19 |
+| 3 | still failing, by replay (0) | repaired (10): a check from run 2 quoted earlier pages ("Go to checkout") | still failing, by replay (0) | 10 |
+
+Two flaws in my flows code that M4 (a workspace without a login setup) didn't show:
+- **A sign-in journey on a target that has a saved login.** The worker hides the saved
+  credentials from the model (`[test account]`, `[secret]`), and the login page shows the demo
+  account, so the journey's agent saw placeholders, couldn't sign in, and filed "Critical flow
+  failed: Sign in": a false finding (shop precision 89%).
+- **Checks the final page can't show.** A PASSED summary can quote texts from earlier pages of
+  the journey; saved as checks, they fail every replay and force a repair.
+Both are fixed after this benchmark (so Sonnet in M6 runs on the same code as this result):
+a check is kept only if it is on the episode's final page, and a journey's task says when the
+run is already signed in with hidden credentials (D98).
+
+**Flows' own finding:** "Change profile" (planted bug 8) was found in all 3 shop runs, twice by
+replay with no model call.

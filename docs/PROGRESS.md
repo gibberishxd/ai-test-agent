@@ -174,6 +174,7 @@ Counts are bug×run slots (shop 9 judgement bugs × 3 = 27 of 39 in all; holdout
 | Benchmark | Result | Model | Specs / flows | Shop AI-only | Shop all | Holdout AI-only | Holdout all | Precision shop / holdout | False alarms clean shop / holdout | Avg run | Est. API cost / run | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | M2 baseline | `e92d2c6b` (commit 3276fab) | claude-haiku-5-5 | none / none | 33% (9 of 27)* | 54% (21 of 39) | 75% (6 of 8) | 83% (10 of 12) | 100% / 93% | 2.0 / 0.0 | 273 s | $0.104 shop, $0.101 holdout ($0.72 for the 7 runs) | 2026-11-15 |
+| M6 final (Haiku) | `2f9e0744` (commit 8aa5746) | claude-haiku-5-5 | none / shop flows (`--flows`) | 30% (8 of 27) | 51% (20 of 39) | 62% (5 of 8) | 75% (9 of 12) | 89% / 93% | 1.0 / 1.0 | 276 s | $0.105 shop, $0.099 holdout ($0.72 for the 7 runs) | 2026-11-15 |
 
 | Flows | Commit | Run | Journeys covered | Journey model calls | Journey est. cost | Journeys: result | Whole run: model calls / est. cost | Date |
 |---|---|---|---|---|---|---|---|---|
@@ -238,6 +239,26 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
+0. **Run 7 (branch `agent-v7`):**
+   - **PR #10 (FSL license) is still open:** review and merge it when you're ready; run 7 didn't
+     touch it.
+   - **Write the holdout specs** (`apps/demo2/specs.md`, from `docs/specs/TEMPLATE.md`, without
+     looking at `bugs.json`). Then: `cd apps/worker && LLM_PROVIDER=claude-cli
+     CLAUDE_CLI_MODEL=claude-haiku-5-5 DEV_MODE=true MAX_RUN_COST_USD=1 BENCH_MAX_COST_USD=2
+     JUDGE_PROVIDER=ollama JUDGE_MODEL=gemma4:12b uv run worker bench --holdout-first --specs`
+     and compare the holdout with M2 (`e92d2c6b`). Keep `USE_SPECS=true` as the default only if
+     judgement-only recall rises and clean-build false alarms don't (D97). The guard test
+     (`test_spec_guard.py`) checks the file first.
+   - **The real Claude API path** is still untested (no key): one smoke run with
+     `LLM_PROVIDER=claude AGENT_MODEL=claude-haiku-5-5`, then a Haiku benchmark to compare real
+     cost with the claude-cli estimates.
+   - **Revisit, decided without you:** benchmark v2 still names the apps after the double-click
+     guard fix (D96); a failed availability API doesn't block bookings (D93); specs off by
+     default until measured (D97).
+   - **The pgvector image's collation:** `pgvector/pgvector:0.8.1-pg17` is built on an older
+     Debian than `postgres:17`, so an existing data volume warns about a collation version
+     mismatch. Dev is fixed (`REINDEX DATABASE` + `ALTER DATABASE ... REFRESH COLLATION VERSION`
+     on each database); a production volume made with `postgres:17` needs the same once.
 0. **Run 6 (branch `agent-v6`, merged in PR #7 on 2026-11-15):**
    - **Opus as the agent (e):** not run, as you asked. Expect about Sonnet's call count (~300 Opus
      calls, roughly $3 a run at API prices by the run 6 estimates). To run it:

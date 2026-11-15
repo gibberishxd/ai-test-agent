@@ -184,3 +184,22 @@ Talk to 5 QA leads or engineering managers first. Run the product on their own s
 permission, on a staging URL they verify) and show them the report. Ask what they would pay for,
 and reorder this list by their answers. Items 1 and 2 are first only on our reading of the
 benchmark; customers may put 4 or 5 first.
+
+## What moved in run 7
+- **1. Testing against the team's own requirements: built, not yet measured.** Targets, specs per
+  target (Markdown or text, web and `/api/v1`), chunked and embedded locally (`nomic-embed-text`
+  through Ollama) into pgvector in our own Postgres, retrieved per page for the agent and the
+  replay judge; a finding names the requirement it breaks. Off by default until the holdout
+  measurement with the owner's specs shows it helps (D97).
+- **2. Critical flows: built and measured.** Journeys per target in plain language; the agent
+  learns each once, its steps are saved and replayed with no model; a broken replay is repaired,
+  a failing journey is a finding that later runs recheck for free. On the shop: 36 model calls to
+  learn three journeys, 0 to check them on the next run (MISS_ANALYSIS "Run 7, M4").
+- **3. Default model: done in config; the real API path is still untested.** Haiku 5.5 is the
+  default agent (D91, D92); the Claude API client has still never made a live call (no key).
+- **6. MCP server: built.** `apps/web/mcp`, three tools over `/api/v1`, set up in Claude Code or
+  Cursor in one command (README).
+- **Benchmark v2.** Four unplanted behaviours the agents kept reporting were fixed in both builds
+  of the demo apps; results now record which version they were measured on.
+- Not started: 4 (GitHub integration), 5 (issue tracker export), 7 (evaluations in CI and
+  tracing), 8 (hosting). "Before building" still applies: talk to QA leads first.
