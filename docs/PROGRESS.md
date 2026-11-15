@@ -161,9 +161,9 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 |---|---|---|
 | L0 Plan | done | `agent-v6` from main; RUN_PLAN_6.md; L2 matrix sent; owner said yes to a, b, c and d (d after a–c), 480 s for a/b, 1200 s for c/d, caps $15 for b and $5 for the others; e (Opus agent) only after asking. |
 | L1 Measurable claude-cli | done | Pinned IDs, reported model per step, four token types, API-equivalent estimate per step/run/reviewer share used by both budgets, usage-limit and credit latch, estimated cost per run and per verified bug in bench output and on the leaderboard (D88). Tests: recorded Haiku CLI JSON (+2 synthetic), `npm test` exit 0 (web 229 + 11 + 4, worker 631 + 1 skipped); the one real Haiku call matched the CLI's own list-price cost exactly. |
-| L2 Measure | in progress | a) Haiku agent, b) Sonnet agent, c) Gemma + Sonnet reviewer, d) Gemma + Opus reviewer. |
-| L3 Analysis | todo | |
-| L4 Wrap-up | todo | |
+| L2 Measure | done | a) Haiku agent `091936b3`, b) Sonnet agent `2ed718fa`, c) Gemma + Sonnet reviewer `bcd52766`, d) Gemma + Opus reviewer `1a8753c7`: table below, each committed and pushed before the next. No usage limit or credit use in any of them. e) Opus as the agent: not run (the owner wanted to be asked first; away). One crash found and fixed between (c) and (d) (D90). |
+| L3 Analysis | done | MISS_ANALYSIS "Run 6": per setup and all four side by side per bug (found / dropped / reached / never) and what each setup's misses share. DECISIONS D91 "Which model where": Haiku agent as the default, Sonnet as the thorough option, cheap explorer + strong reviewer not recommended; small samples and estimated costs stated. |
+| L4 Wrap-up | done | README results (new rows), BENCHMARKS (run 6 rows and what it taught), WALKTHROUGH (L1 with Q&A), DATABASE, PROGRESS, DEVLOG; `npm test` and `npm run lint` exit 0; demo servers stopped by PID, Ollama left running; PR `agent-v6` → main opened, not merged. |
 
 ### Run 6 measurements (claude-cli, judge pinned to ollama/gemma4:12b, 40 steps; shop 3 + clean, holdout 2 + clean, holdout first)
 Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bugs, 39 slots in all), holdout 4 × 2 = 8 (6 bugs, 12). Estimated cost is the API-equivalent from the CLI's token counts (D88), not a charge.
@@ -209,6 +209,31 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
+0. **Run 6 (branch `agent-v6`, PR open, not merged):**
+   - **Review and merge the PR** (`agent-v6` → main).
+   - **Opus as the agent (e):** not run, as you asked. Expect about Sonnet's call count (~300 Opus
+     calls, roughly $3 a run at API prices by the run 6 estimates). To run it:
+     `cd apps/worker && LLM_PROVIDER=claude-cli CLAUDE_CLI_MODEL=claude-opus-5-5 MAX_RUN_COST_USD=5
+     BENCH_MAX_COST_USD=25 JUDGE_PROVIDER=ollama JUDGE_MODEL=gemma4:12b uv run worker bench
+     --holdout-first` (480 s, as a and b). Check your weekly limit first.
+   - **Switch the default model to Haiku?** (D91) The numbers say yes for the CLI and suggest it
+     for the API, but `AGENT_MODEL` and `CLAUDE_CLI_MODEL` still default to Sonnet: a default
+     customers get is your call.
+   - **The real API path is still untested.** `ClaudeClient` has never made a live call. It needs
+     an `ANTHROPIC_API_KEY` and a budget you set (enforced by `MAX_RUN_COST_USD` per run and
+     `BENCH_MAX_COST_USD` per benchmark, which now spend real charges); then one smoke run with
+     `LLM_PROVIDER=claude AGENT_MODEL=claude-haiku-5-5` (check `cache_read_input_tokens` > 0 from
+     the second step), and a Haiku benchmark to compare the real cost with run 6's estimates
+     (expected about $0.06–0.09 a run).
+   - **"My tools are not available":** one Haiku run (and one Sonnet run in run 3) finished early
+     claiming its tools were unavailable, with no refused native call for D66's correction to
+     catch. A fix (refuse a `finish` whose summary says so, once) would touch the agent loop: say
+     if you want it.
+   - **Real behaviour Claude reported that isn't planted.** Confirmed by replay on the clean
+     builds (so counted as false alarms): profile "Recent orders" differs from "My orders"; the
+     holdout accepts dates outside the room's availability. Seen on the buggy builds, not yet
+     checked on the clean ones: dates in the past accepted (holdout), a double-clicked "Add to
+     cart" adding twice (shop). Fix them in the demos or plant them (your call, like quantity 0 → 1).
 **Merged (2026-11-15):** every run is on `main`: #1 demo v1, #2 runs 2–3, #3 and #4 run 5
 (run 4's commits came in with them), #5 the MIT license. The items below that are still open
 are product and measurement questions, not merges.
@@ -297,6 +322,10 @@ are product and measurement questions, not merges.
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.
 
 ## Spend tonight
+Run 6: $0.00 charged. claude-cli on the owner's Pro plan: one Haiku call (L1 fixture) and four
+benchmarks: (a) Haiku agent est. $0.55, (b) Sonnet agent est. $10.79, (c) Sonnet reviewer est.
+~$0.20, (d) Opus reviewer est. $0.91: about **$12.45 API-equivalent** in all, no usage limit hit
+and no call paid from credits. No Anthropic API call (no key). Ollama local.
 Run 5: $0.00. No Claude API call (`API_BUDGET_USD` = 0), no claude-cli call (no yes for Sonnet). Ollama local: three benchmarks (21 runs), the K1 re-check, one qwen3:14b download (9.3 GB).
 Run 3: $0.00. No API key and no paid calls. claude-cli (owner's Pro login): one Haiku check call and one benchmark (7 runs, ~220 agent decisions), no usage limit hit. Ollama local.
 Earlier: Claude API: $0.00 (no key, no Claude calls made). Ollama: $0 (local): ~12 agent runs + 2 benchmark scorings.

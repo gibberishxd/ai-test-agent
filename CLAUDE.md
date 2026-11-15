@@ -75,4 +75,5 @@ message stops it at once.
 
 ## Current phase
 Demo v1 and runs 2–5 are all merged into `main` (PRs #1–#4, last on 2026-11-13); the MIT license
-followed in PR #5. Run 6 is in progress on `agent-v6`.
+followed in PR #5. Run 6 (`agent-v6`) is done and waits for review in its PR: Haiku 5.5 as the
+agent is the recommended default (D91); open items are under "Needs me" in `docs/PROGRESS.md`.

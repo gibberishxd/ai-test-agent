@@ -86,3 +86,13 @@ Benchmark scores go here too, once Phase 2 exists.
   13 found for the first time), holdout 0% either way, so the reviewer stays optional.
 - Learned: the browser's own form validation looks like "nothing happened" to a DOM diff; a
   dev-only fake model shared between runs breaks the second e2e test; test as the real roles.
+
+## 2026-11-15 (run 6, branch agent-v6)
+- Measurable Claude: claude-cli runs pinned model IDs, record the model the CLI reports and all
+  four token types, and store an API-equivalent cost estimate per step and run that the budgets
+  spend; a usage limit or a credit-paid call stops everything, once.
+- Measured: Haiku 5.5 agent shop 26% / holdout 62% at ~$0.07 a run; Sonnet 5.5 agent 33% / 75%
+  at ~$1.5 a run; Gemma + a Sonnet or Opus reviewer 0% on the holdout. Default recommendation:
+  Haiku as the agent (D91).
+- Learned: a strong reviewer can't see what a weak explorer doesn't flag; the CLI writes 1-hour
+  cache entries (2× input price); a strong reviewer finally reached a code path no test covered.

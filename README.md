@@ -57,6 +57,10 @@ whatever the model). The holdout app is never used to tune the agent. Full histo
 
 | Setup | Shop: judgement-only / all bugs | Holdout: judgement-only / all bugs | False alarms per clean run |
 |---|---|---|---|
+| Claude Sonnet 5.5 agent (run 6, CLI, pinned ID; est. $1.4–1.7 a run) | **33% / 54%** | **75% / 83%** | 2.0 shop, 1.0 holdout (real, unplanted behaviour) |
+| **Claude Haiku 5.5 agent** (run 6, CLI; est. $0.06–0.09 a run, the recommended default) | 26% / 49% | 62% / 75% | 0 |
+| Gemma 4 12B + Claude Sonnet 5.5 reviewer (run 6; est. $0.01–0.05 a run) | 11% / 38% | 0% / 33% | 0 |
+| Gemma 4 12B + Claude Opus 5.5 reviewer (run 6; est. $0.07–0.21 a run) | 7% / 36% | 0% / 33% | 0 |
 | Claude Sonnet (via Claude Code CLI) | **38% / 58%** | **25% / 50%** | 3.0 shop, 1.0 holdout (real, unplanted behaviour) |
 | Gemma 4 12B + qwen3 14B reviewer (local, 16 GB laptop) | 19% / 44% | 0% / 33% | 0 |
 | Gemma 4 12B alone (local) | 7% / 36% | 0% / 33% | 0 |
@@ -64,6 +68,13 @@ whatever the model). The holdout app is never used to tune the agent. Full histo
 Small local models reach most bug states but rarely recognise them; a reviewer on the flagged
 steps helps on the shop, and the holdout shows how far that generalises. Every run cost $0: local
 models, or a Claude subscription through the CLI.
+
+Run 6 measured Claude models through the CLI with an API-equivalent cost estimate (the list-price
+cost of the tokens each run used; nothing was charged). Haiku as the agent finds most of what
+Sonnet finds for a fifteenth of the cost per verified bug; a strong reviewer can't rescue a weak
+explorer, because it only sees what the explorer flags. Samples are small (3 shop and 2 holdout
+runs per setup): see [docs/DECISIONS.md](docs/DECISIONS.md) (D91) and
+[docs/MISS_ANALYSIS.md](docs/MISS_ANALYSIS.md).
 
 ![Benchmark page](docs/screenshots/benchmark.png)
 
