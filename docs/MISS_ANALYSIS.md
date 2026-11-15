@@ -513,3 +513,77 @@ minutes on this 16 GB Mac, against 3–4 minutes for the Claude agents.
 **The crash** (D90): shop run 18bce55e failed at step 39 with `KeyError: 'name'` right after
 Sonnet called a flagged step a bug; that bug and that review's cost were lost. Fixed, with a
 test, before (d).
+
+## Run 6, (d): Gemma 4 12B explorer + Opus 5.5 reviewer
+
+Result `1a8753c7` (commit 19ffd92: (c)'s code plus the D90 crash fix), explorer ollama
+gemma4:12b, reviewer claude-cli `claude-opus-5-5` (reported), judge ollama/gemma4:12b, 1200 s
+and 40 steps, holdout first. No usage limit. Opus was called 1–4 times per run (15 calls);
+estimated $0.91 for the 7 runs. Runs: holdout b7a0a8ca, ba6d81bc, clean aadc9602; shop 14c4a3df,
+e608d19a, 0a65e3ca, clean e1b8f53e.
+
+| Set | AI-only | All | Precision | False alarms (before replay) | Est. API cost / run |
+|---|---|---|---|---|---|
+| Shop | 7% (2 of 27) | 36% (14 of 39) | 100% | 0.0 (0.0) | $0.068 |
+| Holdout | 0% (0 of 8) | 33% (4 of 12) | 80% | 0.0 (0.0) | $0.213 |
+
+| Bug | found | dropped | reached | never |
+|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0 | 0 | 3 | 0 |
+| Shop 6. Invalid email at checkout | 0 | 0 | 3 | 0 |
+| Shop 7. Discount twice | 0 | 0 | 3 | 0 |
+| Shop 8. Save changes does nothing | 2 | 0 | 0 | 1 |
+| Shop 9. $NaN | 0 | 0 | 3 | 0 |
+| Shop 10. Long name on mobile | 0 | 0 | 0 | 3 |
+| Shop 11. Session after logout + reload | 0 | 0 | 2 | 1 |
+| Shop 12. Wrong-password error placement | 0 | 0 | 0 | 3 |
+| Shop 13. Wrong order opened | 0 | 0 | 3 | 0 |
+| Holdout 3. One night charged | 0 | 0 | 2 | 0 |
+| Holdout 4. Check-out before check-in | 0 | 0 | 2 | 0 |
+| Holdout 5. Double-click Book now | 0 | 0 | 2 | 0 |
+| Holdout 6. Room name on mobile | 0 | 0 | 1 | 1 |
+
+Same pattern as (c), slightly lower: Gemma reached the cart, checkout, orders and the booking
+form in every run, filed nothing itself, tried no double click or reload, and flagged a few
+steps; Opus confirmed what it was shown (bug 8 twice, and on the holdout "the booking form accepts
+dates in the past" twice: real, unplanted behaviour, hence holdout precision 80%). The strongest
+reviewer measured can't find what the explorer doesn't put in front of it.
+
+## Run 6: all four setups side by side
+
+Per judgement bug: found in N of the buggy runs (shop 3, holdout 2). R = reached but not found,
+— = never reached in any run. Small samples: 3 shop runs and 2 holdout runs per setup.
+
+| Bug | a) Haiku | b) Sonnet | c) Gemma + Sonnet rev. | d) Gemma + Opus rev. | run 3 Sonnet alias (f6151b32) |
+|---|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0 (R) | **2** | 0 (R) | 0 (R) | 1 |
+| Shop 6. Invalid email at checkout | 0 (R) | 0 (R) | 0 (R) | 0 (R) | 1 |
+| Shop 7. Discount twice | 0 (R) | 1 | 0 (R) | 0 (R) | 1 |
+| Shop 8. Save changes does nothing | 1 | 0 (R) | **2** | **2** | 1 |
+| Shop 9. $NaN | **3** | **3** | 1 | 0 (R) | 3 |
+| Shop 10. Long name on mobile | 0 — | 0 (R) | 0 — | 0 — | 1 |
+| Shop 11. Session after logout + reload | 0 (R) | 0 (R) | 0 (R) | 0 (R) | 0 |
+| Shop 12. Wrong-password error placement | 0 — | 0 (R) | 0 — | 0 — | 1 |
+| Shop 13. Wrong order opened | **3** | **3** | 0 (R) | 0 (R) | not planted yet |
+| Holdout 3. One night charged | **2** | **2** | 0 (R) | 0 (R) | 1 |
+| Holdout 4. Check-out before check-in | 0 (R) | **2** | 0 (R) | 0 (R) | 1 |
+| Holdout 5. Double-click Book now | **2** | 0 (R) | 0 (R) | 0 (R) | 0 |
+| Holdout 6. Room name on mobile | 1 | **2** | 0 — | 0 (R) | 0 |
+| **AI-only, shop / holdout** | 26% / **62%** | **33% / 75%** | 11% / 0% | 7% / 0% | 38% / 25% |
+
+**What each setup's misses have in common.**
+- **Haiku:** coverage. Its shop misses are mostly pages it never got to in 40 steps (cart,
+  checkout, login, the long-name product), while it spent steps on lists, profile and orders. Where
+  it arrives it uses the charter's techniques (double click, reload, phone width), which is why it
+  finds the holdout's double booking that Sonnet missed.
+- **Sonnet:** recognition and triggering on pages it did reach (the profile save, the mobile
+  overflow on the shop, the double-click booking). Its "false alarms" are real behaviour of the
+  clean builds (quantity 0, recent orders differing from My orders, dates outside availability).
+- **Gemma + a Claude reviewer:** the explorer. Gemma reaches nearly every bug's page (the "R"s)
+  but files nothing and rarely tries a technique; the reviewer only sees the few steps Gemma flags
+  (1–4 a run), so Sonnet or Opus there adds 0–2 bug-runs. A stronger reviewer (Opus) did no better
+  than Sonnet, and the local qwen3:14b (run 5, 19% shop) did better than both, because Gemma
+  flagged the order step that time. The reviewer's ceiling is set by what the explorer flags.
+- **Every setup:** bug 11 (log out, then reload) and bug 6 (an invalid email at checkout) were
+  found by no setup in run 6: the first needs a two-step sequence nobody chose in 40 steps, the
+  second an invalid value typed on a page most runs reached late or not at all.

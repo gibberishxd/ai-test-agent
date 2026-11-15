@@ -1117,3 +1117,40 @@ numbers are the real test (Needs me).
   only stops a crash that would cost (d) whole runs of the owner's Opus usage.
 - **Consequence:** (c) is recorded as measured, with one of its three shop runs cut short (noted
   with its result); (d) runs with the fix. Not re-running (c): no retries of a benchmark.
+
+## D91. Which model where (run 6, L3)
+Measured in run 6 (judge pinned to gemma4:12b; shop 3 runs + clean, holdout 2 runs + clean).
+"Est." is the API-equivalent cost from the CLI's token counts at list price (D88), not a charge.
+Per verified judgement bug = the buggy runs' estimate divided by the judgement bugs they verified
+(the deterministic bugs are found for free and left out here).
+
+| Setup | AI-only shop / holdout | False alarms (clean) | Time / run | Est. / run | Est. / verified judgement bug, shop / holdout |
+|---|---|---|---|---|---|
+| a) Haiku 5.5 agent | 26% (7 of 27) / 62% (5 of 8) | 0.0 / 0.0 | ~4 min | $0.06–0.09 | **$0.04 / $0.03** |
+| b) Sonnet 5.5 agent | **33% (9 of 27) / 75% (6 of 8)** | 2.0 / 1.0 (real behaviour) | ~3 min | $1.44–1.68 | $0.53 / $0.56 |
+| c) Gemma 12B + Sonnet reviewer | 11% (3 of 27) / 0% (0 of 8) | 0.0 / 0.0 | ~19 min | $0.01–0.05 | $0.01 / none found |
+| d) Gemma 12B + Opus reviewer | 7% (2 of 27) / 0% (0 of 8) | 0.0 / 0.0 | ~19 min | $0.07–0.21 | $0.11 / none found |
+| Gemma 12B alone (run 5) | 7% / 0% | 0.0 / 0.0 | ~22 min | $0 (local) | — |
+
+- **Recommended default: Haiku 5.5 as the agent, no reviewer.** It finds most of what Sonnet
+  finds (on the holdout, 5 of 8 bug-runs against Sonnet's 6 of 8, and the one technique-driven
+  bug Sonnet missed), with no false alarms, in about four minutes, at roughly a fifteenth of
+  Sonnet's cost per verified judgement bug. That is the product's cost story: a run costs cents,
+  not dollars.
+- **"Thorough" option: Sonnet 5.5 as the agent.** About +7 points on the shop and +13 on the
+  holdout (1–2 more bug-runs per app in these samples) for 16–28× the cost per run. Its extra
+  reports on clean builds were real behaviour, so they cost triage time rather than trust.
+- **Not recommended: a cheap local explorer with a strong Claude reviewer.** The explorer limits
+  it: the reviewer only sees what the explorer flags, so neither Sonnet nor Opus raised Gemma's
+  holdout score above 0%, and Opus did no better than Sonnet. Cheap per run, but a run finds
+  little and takes 5× longer. Keep local Gemma as the free or offline option, with the qwen3:14b
+  reviewer if anything (run 5: 19% shop).
+- **Not changed in code (decided without the owner):** `AGENT_MODEL` (API) and `CLAUDE_CLI_MODEL`
+  stay `claude-sonnet-5-5`. The API path (`ClaudeClient`) has never made a real call; switching a
+  default customers get on the strength of 5 claude-cli runs per model is the owner's product call.
+  Under "Needs me".
+- **Caveats, stated plainly:** samples are small (3 shop and 2 holdout runs per setup; one bug-run
+  is 4–13 points); Haiku's 62% holdout rests on two runs; costs are estimates from claude-cli token
+  counts, and the API client builds its own prompts and cache, so real API cost will differ; one
+  Haiku run was cut short by the "tools not available" failure (D89), so Haiku's shop number is if
+  anything an underestimate.

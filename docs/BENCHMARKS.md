@@ -33,7 +33,8 @@ latest result: it keeps the commit the runs were made on and records its own com
 
 ## All results
 
-Shop: 3 buggy runs + 1 clean run each; holdout: 2 buggy + 1 clean.
+Shop: 3 buggy runs + 1 clean run each; holdout: 2 buggy + 1 clean. Cost is what was charged; run 6 rows add
+the API-equivalent estimate ("est."), computed from the CLI's token counts at list price (D88).
 
 | Provider · model | AI-only recall | Recall | Precision | False alarms / clean run | Cost / run | Time / run | Judge | Commit |
 |---|---|---|---|---|---|---|---|---|
@@ -58,6 +59,12 @@ Shop: 3 buggy runs + 1 clean run each; holdout: 2 buggy + 1 clean.
 | ollama · gemma4:12b + qwen3:14b reviewer, run 5, **holdout** | 0% | 33% | 89% | 0.0 | $0.00 | | gemma4:12b (pinned) | e160a34 |
 | ollama · gemma4:12b alone, run 5 (before/after replay, list reminder), shop | 7% | 36% | 95% | 0.0 | $0.00 | 1302 s | gemma4:12b (pinned) | a72290d |
 | ollama · gemma4:12b alone, run 5, **holdout** | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | a72290d |
+| claude-cli · **claude-haiku-5-5** agent, run 6, shop (pinned ID; est. API $0.093/run) | 26% | 49% | 81% | 0.0 | $0.00 | 246 s | gemma4:12b (pinned) | 123e23e |
+| claude-cli · claude-haiku-5-5 agent, run 6, **holdout** (est. $0.060/run) | **62%** | **75%** | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 123e23e |
+| claude-cli · **claude-sonnet-5-5** agent, run 6, shop (pinned ID; est. API $1.44/run) | **33%** | **54%** | 84% | 2.0 (real unplanted behaviour) | $0.00 | 196 s | gemma4:12b (pinned) | 0079304 (agent code 123e23e) |
+| claude-cli · claude-sonnet-5-5 agent, run 6, **holdout** (est. $1.68/run) | **75%** | **83%** | 100% | 1.0 (real) | $0.00 | | gemma4:12b (pinned) | 0079304 |
+| ollama · gemma4:12b + **claude-sonnet-5-5 reviewer** (claude-cli), run 6, shop (est. $0.010/run) | 11% | 38% | 100% | 0.0 | $0.00 | 1118 s | gemma4:12b (pinned) | 0366f15 (agent code 123e23e) |
+| ollama · gemma4:12b + claude-sonnet-5-5 reviewer, run 6, **holdout** (est. $0.054/run) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 0366f15 |
 | claude · claude-sonnet-5-5 (API) | not run: needs an API key and budget | | | | | | | |
 
 ## What each run taught
