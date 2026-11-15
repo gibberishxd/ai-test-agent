@@ -74,6 +74,7 @@ record it in `docs/DECISIONS.md`. Every claude-cli benchmark needs the owner's y
 message stops it at once.
 
 ## Current phase
-Demo v1 and runs 2–5 are all merged into `main` (PRs #1–#4, last on 2026-11-13); the MIT license
-followed in PR #5. Run 6 (`agent-v6`) is done and waits for review in its PR: Haiku 5.5 as the
-agent is the recommended default (D91); open items are under "Needs me" in `docs/PROGRESS.md`.
+Demo v1 and runs 2–6 are all merged into `main` (PRs #1–#4 and #7, last on 2026-11-15); the MIT
+license followed in PR #5. No run is in progress, so the normal "How to work with me" rules apply.
+Haiku 5.5 as the agent is the recommended default (D91); open items are under "Needs me" in
+`docs/PROGRESS.md`.
