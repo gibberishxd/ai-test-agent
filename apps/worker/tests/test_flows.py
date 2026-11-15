@@ -16,6 +16,19 @@ def test_the_episode_task_names_the_journey_and_how_to_finish():
     task = flow_task("Checkout", "Add an item and place the order.")
     assert 'CRITICAL FLOW "Checkout": Add an item and place the order.' in task
     assert "PASSED:" in task and "FAILED:" in task
+    # Run 7, M4: a bug seen on the way is reported, but the journey still passes.
+    assert "doesn't stop the journey" in task and "still finish with PASSED" in task
+
+
+def test_a_check_matches_whatever_the_numbers_are():
+    from worker.flows import shows
+
+    assert shows(
+        "Thanks! Your order #12345 is on its way", "Thanks! Your order #50524 is on its way"
+    )
+    assert shows("ORDER CONFIRMED", "Order confirmed")
+    assert not shows("Your cart is empty", "Order confirmed")
+    assert shows("Saved: Ada", "Saved")
 
 
 def test_a_passed_finish_gives_its_quoted_checks():
@@ -28,8 +41,14 @@ def test_a_passed_finish_gives_its_quoted_checks():
 
 def test_a_failed_or_unclear_finish():
     assert parse_finish("FAILED: Save did nothing")[:2] == (False, [])
-    # A failure that quotes what it expected keeps it: the next run checks it without a model.
-    assert parse_finish('FAILED: no "Profile saved" after Save')[:2] == (False, ["Profile saved"])
+    # A failure keeps only what it expected (quotes after "expected"): the next run checks it
+    # without a model. Texts it saw along the way aren't checks.
+    assert parse_finish('FAILED: nothing, expected "Profile saved"')[:2] == (
+        False,
+        ["Profile saved"],
+    )
+    seen_only = 'FAILED: the page said "Order confirmed" but order "#1001" showed "#1002"'
+    assert parse_finish(seen_only)[1] == []
     assert parse_finish("I tested the site")[0] is None
     assert parse_finish(None) == (None, [], "")
 

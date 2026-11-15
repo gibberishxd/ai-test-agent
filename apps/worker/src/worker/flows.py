@@ -34,6 +34,7 @@ SCRIPT_ACTIONS = (
     "reload",
     "set_viewport",
 )
+EXPECTED = re.compile(r"\bexpect(?:ed|s|ing)?\b", re.IGNORECASE)
 QUOTED = re.compile(r"[\"“'‘]([^\"”'’]{2,80})[\"”'’]")
 MAX_CHECKS = 3
 
@@ -78,11 +79,12 @@ def flow_task(name: str, goal: str) -> str:
     worker can read (and save as checks)."""
     return (
         f'CRITICAL FLOW "{name}": {goal}\n'
-        "Complete this journey like a real user, step by step, and nothing else. Then call finish "
-        'with a summary that starts with "PASSED:" and quotes the text on the page that shows it '
-        'worked (for example PASSED: "Order confirmed"), or with "FAILED:", what went wrong, and '
-        'the text you expected to see but didn\'t, in quotes (FAILED: no "Profile saved" after '
-        "Save). If the site is wrong along the way, report_bug first, then finish with FAILED."
+        "Complete this journey like a real user, step by step, and nothing else. Then call finish. "
+        'If you completed it, start the summary with "PASSED:" and quote the text on the page that '
+        'shows it worked (PASSED: "Order confirmed"). If the journey itself can\'t be completed, '
+        'start with "FAILED:", say what went wrong and quote what you expected to see after the '
+        'word expected (FAILED: Save did nothing, expected "Profile saved"). A bug you see along '
+        "the way that doesn't stop the journey: report_bug it, then still finish with PASSED."
     )
 
 
@@ -92,13 +94,21 @@ def parse_finish(summary: str | None) -> tuple[bool | None, list[str], str]:
     head = text.upper()
     passed = True if head.startswith("PASSED") else False if head.startswith("FAILED") else None
     detail = re.sub(r"^(PASSED|FAILED)\s*:?\s*", "", text, flags=re.I).strip()
-    # PASSED: the texts that showed it worked. FAILED: the texts it expected and didn't see.
-    checks = (
-        [q.strip() for q in QUOTED.findall(detail) if q.strip()][:MAX_CHECKS]
-        if passed is not None
-        else []
-    )
+    if passed:  # the texts that showed it worked
+        quotes = QUOTED.findall(detail)
+    elif passed is False:  # only what it expected and didn't see: quotes after "expected"
+        quotes = [q for part in EXPECTED.split(detail)[1:] for q in QUOTED.findall(part)[:1]]
+    else:
+        quotes = []
+    checks = [q.strip() for q in quotes if q.strip()][:MAX_CHECKS]
     return passed, checks, detail[:500]
+
+
+def shows(page_text: str, check: str) -> bool:
+    """Is `check` on the page? Case-insensitive, and any number stands for any number: an order
+    number or a date in a quote differs on every run. (Amounts are exploration's job.)"""
+    pattern = r"\d+".join(re.escape(part) for part in re.split(r"\d+", check.strip()))
+    return re.search(pattern, page_text, flags=re.IGNORECASE) is not None
 
 
 def script_from_steps(
@@ -147,7 +157,7 @@ def replay_flow(context: BrowserContext, script: dict) -> tuple[str, str]:
         except ReplayError as error:
             return "broken", f"replay broke at step {error.step} ({error.action}): {error}"
         body = page.evaluate("() => document.body.innerText") or ""
-        missing = [c for c in script.get("checks", []) if c.lower() not in body.lower()]
+        missing = [c for c in script.get("checks", []) if not shows(body, c)]
         if missing:
             shown = ", ".join(f'"{m}"' for m in missing)
             return "checks_failed", f"replayed every step, but the page doesn't show {shown}"

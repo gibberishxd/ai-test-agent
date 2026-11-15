@@ -128,7 +128,7 @@ def test_a_journey_the_agent_cant_complete_becomes_a_finding_and_is_rechecked_fo
     failing = [
         call("type", element_id=NAME, text="Ada"),
         call("click", element_id=SAVE, expect="'Profile saved'"),
-        call("finish", summary='FAILED: no "Profile saved" after Save'),
+        call("finish", summary='FAILED: nothing shown, expected "Profile saved"'),
     ]
     run_id, _ = start_run(sessions, workspace, site_url, settings, tmp_path, browser, failing)
     result = result_of(sessions, run_id)
