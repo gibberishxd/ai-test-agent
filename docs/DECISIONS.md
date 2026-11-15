@@ -1106,3 +1106,14 @@ numbers are the real test (Needs me).
 - **Why:** the point of L2 is to compare models; a code change between them would mix a model
   effect with a code effect, and each benchmark costs the owner's limit. The fix is noted under
   "Needs me" / next steps.
+
+## D90. Fix the reviewer-flag crash before (d) (run 6, L2)
+- **What happened:** in benchmark (c), shop run 18bce55e failed with `KeyError: 'name'` in
+  `AgentRun._review_flag`: the reviewer (Sonnet) called a flagged step a bug, and the step had
+  no named element, so building the report's evidence crashed. The run lost that bug and every
+  step after it (a run-5 bug, reached for the first time because a strong reviewer said "bug").
+- **Decision:** fix it test-first (`test_a_reviewer_bug_on_a_step_without_a_named_element_...`)
+  and commit before (d). An exception to D89: it doesn't change what any model sees or decides,
+  only stops a crash that would cost (d) whole runs of the owner's Opus usage.
+- **Consequence:** (c) is recorded as measured, with one of its three shop runs cut short (noted
+  with its result); (d) runs with the fix. Not re-running (c): no retries of a benchmark.

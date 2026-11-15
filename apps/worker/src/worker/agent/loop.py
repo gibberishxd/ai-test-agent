@@ -586,7 +586,7 @@ class AgentRun:
             )
             return f"{flagged}: reviewer: not a bug ({review.reason})"
         element = outcome.get("element") or {}
-        named = {"element": {"role": element.get("role"), "name": element["name"]}}
+        named = {"element": {"role": element.get("role"), "name": element.get("name")}}
         self._record_bug(
             review.report,
             url=self.page.url,
