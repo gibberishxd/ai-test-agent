@@ -52,6 +52,14 @@ PINNED_ID = re.compile(r"^claude-[a-z]+(-\d+)+$")
 # How the CLI says the plan's limit is reached (checked on errors only, case-insensitive).
 LIMIT_TEXT = re.compile(r"usage limit|hit your limit|limit reached|rate.?limit|weekly limit", re.I)
 
+# A `finish` that says the tools are unavailable: the model tried them natively inside `claude -p`
+# ("No such tool available") without a refused call the CLI reports (run 6, e3eb2b69; run 7, M1).
+TOOLS_UNAVAILABLE = re.compile(
+    r"no such tool|toolsearch|\btools?\b[^.]{0,80}?\b(not available|unavailable|aren't available"
+    r"|are missing|cannot be (called|used))",
+    re.I,
+)
+
 _limit_message: str | None = None  # set once a call reports a usage limit: see _check_latch
 
 
@@ -170,7 +178,7 @@ class ClaudeCliClient(LLMClient):
 
     def __init__(
         self,
-        agent_model: str = "claude-sonnet-5-5",
+        agent_model: str = "claude-haiku-5-5",
         cheap_model: str = "claude-haiku-5-5",
         run: Runner = run_cli,
         temp_dir: Path | None = None,
@@ -189,6 +197,7 @@ class ClaudeCliClient(LLMClient):
             prompt += f"\n\nA screenshot of the current page is at {image_path}. Read it first."
         usage = Usage(model="")  # filled from the CLI's answers
         problem = ""
+        corrected = False
         for _attempt in range(2):  # the first answer, and one retry with the reason
             text, used, denied = self._call_with_denials(
                 self.agent_model, system, prompt, image_path
@@ -201,6 +210,13 @@ class ClaudeCliClient(LLMClient):
                 prompt += native_tool_correction(denied)
                 continue
             call, problem = parse_tool_answer(text, tools)
+            if call and claims_tools_unavailable(call) and not corrected:
+                # Same confusion as a refused native call, reported in the answer instead:
+                # correct it once, then take whatever comes back (never a loop).
+                corrected = True
+                problem = "you finished saying your tools were unavailable"
+                prompt += native_tool_correction(["your tools"])
+                continue
             if call:
                 return Decision(tool_call=call, text=text, usage=usage)
             prompt += (
@@ -290,6 +306,12 @@ def _add(total: Usage, more: Usage) -> Usage:
         cost_usd=total.cost_usd + more.cost_usd,
         estimated_cost_usd=total.estimated_cost_usd + more.estimated_cost_usd,
     )
+
+
+def claims_tools_unavailable(call: ToolCall) -> bool:
+    """A `finish` whose summary says the tools can't be used (see TOOLS_UNAVAILABLE)."""
+    summary = str(call.args.get("summary", ""))
+    return call.name == "finish" and bool(TOOLS_UNAVAILABLE.search(summary))
 
 
 def native_tool_correction(denied: list[str]) -> str:

@@ -4,11 +4,13 @@ import { usePageTitle } from "../App";
 import {
   clearError,
   nights,
+  openWindow,
   saveBooking,
   stayTotal,
   validate,
   type BookingForm,
   type FormErrors,
+  type OpenWindow,
 } from "../booking";
 import { bug } from "../bugs";
 import { formatMoney, ROOMS } from "../rooms";
@@ -20,6 +22,7 @@ export function RoomPage() {
   const room = ROOMS.find((r) => String(r.id) === id);
   usePageTitle(room?.name ?? "Room not found");
   const [availability, setAvailability] = useState("Checking availability…");
+  const [open, setOpen] = useState<OpenWindow | null>(null);
   const [form, setForm] = useState<BookingForm>(EMPTY);
   const [errors, setErrors] = useState<FormErrors>({});
   const [booked, setBooked] = useState(false);
@@ -28,9 +31,10 @@ export function RoomPage() {
   useEffect(() => {
     fetch("/api/availability?room=" + id)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((data: { openFrom: string; openTo: string }) =>
-        setAvailability("Open from " + data.openFrom + " to " + data.openTo),
-      )
+      .then((data: { openFrom: string; openTo: string }) => {
+        setOpen(openWindow(data));
+        setAvailability("Open from " + data.openFrom + " to " + data.openTo);
+      })
       .catch(() => setAvailability("Availability unknown"));
   }, [id]);
 
@@ -47,7 +51,7 @@ export function RoomPage() {
     event.preventDefault();
     // Bug 5: no guard against a second submit while the first is being saved.
     if (!bug(5) && saving.current) return;
-    const found = validate(form);
+    const found = validate(form, { open });
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     saving.current = true;

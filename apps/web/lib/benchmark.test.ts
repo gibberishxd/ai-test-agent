@@ -6,6 +6,7 @@ import {
   judgeLabel,
   leaderboard,
   leaderboardFromView,
+  benchmarkLabel,
   latestPerProvider,
   reviewerLabel,
   perBug,
@@ -39,6 +40,7 @@ function row(fields: Partial<BenchmarkRow>): BenchmarkRow {
     holdoutFalseAlarms: null,
     avgEstimatedCostUsd: null,
     estimatedCostPerVerifiedBug: null,
+    benchmarkVersion: "v1",
     judge: null,
     rescoreCommit: null,
     ...fields,
@@ -198,5 +200,17 @@ describe("validResults", () => {
     const good = row({ provider: "ollama", model: "gemma4:12b" });
     const bad = row({ provider: "fake", model: "fake-agent", details: { invalid: "runs taken by another worker" } });
     expect(validResults([good, bad])).toEqual([good]);
+  });
+});
+
+describe("benchmark versions (run 7)", () => {
+  it("labels each result with the benchmark it was measured on", () => {
+    expect(benchmarkLabel(row({ benchmarkVersion: "v2" }))).toBe("benchmark v2");
+  });
+
+  it("ranks the newest benchmark first, so v1 and v2 scores aren't read as one list", () => {
+    const old = row({ id: "old", aiRecall: 0.9, benchmarkVersion: "v1" });
+    const fresh = row({ id: "new", aiRecall: 0.2, benchmarkVersion: "v2" });
+    expect(leaderboardFromView([old, fresh], ["old", "new"]).map((r) => r.id)).toEqual(["new", "old"]);
   });
 });

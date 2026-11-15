@@ -3,6 +3,7 @@
 import { CheckCircle2, Loader2, Plus, PlugZap, Star, Trash2, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { CLAUDE_MODELS, modelForProvider } from "@/lib/claude-models";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -127,7 +128,7 @@ export function ModelSettings({ models }: { models: ModelConfigView[] }) {
             <select
               id="model-provider"
               value={form.provider}
-              onChange={set("provider")}
+              onChange={(event) => setForm({ ...form, provider: event.target.value, model: modelForProvider(event.target.value, form.model) })}
               className="h-9 w-full min-w-0 truncate rounded-md border bg-transparent px-3 text-sm"
             >
               <option value="openai-compat">OpenAI-compatible (OpenAI, Gemini, OpenRouter, Groq, local…)</option>
@@ -140,7 +141,25 @@ export function ModelSettings({ models }: { models: ModelConfigView[] }) {
             </FormField>
           )}
           <FormField id="model-id" label="Model" error={errors.model}>
-            <Input id="model-id" value={form.model} onChange={set("model")} placeholder="e.g. gpt-5-mini" />
+            <Input
+              id="model-id"
+              value={form.model}
+              onChange={set("model")}
+              placeholder={form.provider === "claude" ? CLAUDE_MODELS[0].id : "e.g. gpt-5-mini"}
+              list={form.provider === "claude" ? "claude-models" : undefined}
+            />
+            {form.provider === "claude" && (
+              <>
+                <datalist id="claude-models">
+                  {CLAUDE_MODELS.map((m) => (
+                    <option key={m.id} value={m.id} label={m.label} />
+                  ))}
+                </datalist>
+                <p className="text-xs text-muted-foreground">
+                  {CLAUDE_MODELS[0].id} is the default (best cost per verified bug in our benchmark); {CLAUDE_MODELS[1].id} is the thorough option.
+                </p>
+              </>
+            )}
           </FormField>
           <FormField id="model-key" label="API key" error={errors.apiKey}>
             <Input id="model-key" type="password" autoComplete="off" value={form.apiKey} onChange={set("apiKey")} placeholder="Stored encrypted, never shown again" />

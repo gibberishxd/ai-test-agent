@@ -31,3 +31,14 @@ def test_sqlalchemy_url_names_the_driver():
 
 def test_api_key_never_appears_in_repr():
     assert "sk-secret" not in repr(settings(anthropic_api_key="sk-secret"))
+
+
+def test_haiku_is_the_default_agent_model_and_sonnet_is_not():
+    # Run 7, the owner's decision from run 6's benchmark (DECISIONS D91).
+    from worker.llm.claude_cli import ClaudeCliClient
+
+    settings = Settings(_env_file=None)
+    assert settings.agent_model == "claude-haiku-5-5"
+    assert settings.claude_cli_model == "claude-haiku-5-5"
+    assert settings.cheap_model == settings.claude_cli_cheap_model == "claude-haiku-5-5"
+    assert ClaudeCliClient().agent_model == "claude-haiku-5-5"

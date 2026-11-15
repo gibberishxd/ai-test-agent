@@ -29,11 +29,11 @@ class Settings(BaseSettings):
     llm_provider: str = ""
     # SecretStr: printing or logging the settings shows '**********', never the key.
     anthropic_api_key: SecretStr = SecretStr("")
-    agent_model: str = "claude-sonnet-5-5"
+    agent_model: str = "claude-haiku-5-5"  # run 7: the default agent (D91); Sonnet is "thorough"
     cheap_model: str = "claude-haiku-5-5"
     # LLM_PROVIDER=claude-cli (run 6): full model IDs, never an alias like "sonnet", so a result
     # says exactly which model ran. The benchmark refuses to start on an alias.
-    claude_cli_model: str = "claude-sonnet-5-5"
+    claude_cli_model: str = "claude-haiku-5-5"
     claude_cli_cheap_model: str = "claude-haiku-5-5"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-vl:8b-instruct"

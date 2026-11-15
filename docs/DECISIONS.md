@@ -1154,3 +1154,37 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   counts, and the API client builds its own prompts and cache, so real API cost will differ; one
   Haiku run was cut short by the "tools not available" failure (D89), so Haiku's shop number is if
   anything an underestimate.
+
+## D92. Haiku 5.5 is the default agent; the early finish is corrected (run 7, M1)
+- **The owner's decision (run 7 Settings):** `AGENT_MODEL` and `CLAUDE_CLI_MODEL` default to
+  `claude-haiku-5-5`; Sonnet is labelled "thorough" in `.env.example`, the README and the web
+  model form (which now suggests both and fills in Haiku when Claude is picked). `PRODUCT_BRIEF.md`
+  still says Sonnet: it is the original brief, kept as written; this entry supersedes it.
+- **The early finish (FIX_EARLY_FINISH = yes):** run 6's Haiku run e3eb2b69 answered with a valid
+  `finish` whose summary said the tools were unavailable (it had tried them natively inside
+  `claude -p`, got "No such tool available", and the CLI reported no refused call, so D66 never
+  fired). Now a `finish` whose summary matches that claim gets D66's corrective message once, and
+  the next answer is taken whatever it is (never a loop). In the claude-cli adapter, not the loop:
+  the confusion comes from the CLI's own tool layer, and other providers have real tool calling.
+  Alternative: refuse any early `finish` in the loop. Rejected: it would also override real
+  decisions to stop, and a provider-specific fault belongs in its adapter.
+
+## D93. Benchmark v2: the four demo behaviours fixed (run 7, M1)
+- **The owner's decision (DEMO_BEHAVIORS = fix), in both builds, with a test each** (unit tests in
+  the demo apps and browser checks in `verify-bugs`):
+  - **Shop, profile "Recent orders":** the profile API served a hard-coded list (#10231, #10457)
+    unrelated to "My orders" (#1001–1003). Both now come from `src/orderData.ts`. The buggy build
+    still can't show them, because its profile API fails on purpose (planted bug 2); bug 13 (an
+    order page showing the next order) is untouched.
+  - **Shop, a double-clicked "Add to cart":** the second click of a double click (within 500 ms)
+    is ignored; a later click adds again. Planted bug 7 (the discount applied twice on a double
+    click, in the cart) is untouched.
+  - **Holdout, past dates:** a check-in before today is refused ("Check-in can't be in the past.").
+  - **Holdout, dates outside the room's availability:** refused when the window is known. Decided
+    without the owner, revisit: when the availability API fails (it does on purpose in the buggy
+    build, planted bug 1) the booking isn't blocked. Blocking it would hide planted bugs 3–5,
+    which are only reachable through a booking.
+- **Labelling:** `BENCHMARK_VERSION = "v2"` in `benchmark.py`, printed in bench output, stored per
+  result (`benchmark_results.benchmark_version`, `v1` for every older row), part of the
+  leaderboard's key, shown on the benchmark page. A benchmark of v1 can no longer be made: the
+  apps are what they are; old v1 rows stay as they were.

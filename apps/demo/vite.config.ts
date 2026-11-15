@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Connect, type Plugin } from "vite";
+import { profileOrders } from "./src/orderData";
 
 /**
  * Two builds from one codebase:
@@ -17,10 +18,6 @@ export default defineConfig(({ mode }) => {
   };
 });
 
-const ORDERS = [
-  { id: 10231, date: "2026-10-02", total: 36 },
-  { id: 10457, date: "2026-10-19", total: 89 },
-];
 
 /** A tiny fake backend inside the dev server, so the shop has real HTTP responses to test. */
 function demoApi(clean: boolean): Plugin {
@@ -35,7 +32,7 @@ function demoApi(clean: boolean): Plugin {
         res.end(JSON.stringify({ error: "Internal Server Error" }));
         return;
       }
-      res.end(JSON.stringify({ orders: ORDERS }));
+      res.end(JSON.stringify({ orders: profileOrders() }));
       return;
     }
 

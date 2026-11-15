@@ -144,7 +144,7 @@ configured, development offers **Sign in as demo user** and **Create a test acco
 | Setting (`.env`) | What it does |
 |---|---|
 | `LLM_PROVIDER` | `claude`, `ollama`, `openai-compat` or `fake` (scripted, for tests). Empty: Claude if a key is set |
-| `ANTHROPIC_API_KEY`, `AGENT_MODEL`, `CHEAP_MODEL` | Claude models for decisions and for dedup/matching |
+| `ANTHROPIC_API_KEY`, `AGENT_MODEL`, `CHEAP_MODEL` | Claude models for decisions and for dedup/matching. `AGENT_MODEL` defaults to `claude-haiku-5-5` (D91); `claude-sonnet-5-5` is the thorough option |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | A local model (needs vision and tool calls), e.g. `gemma4:12b` |
 | `REVIEWER_PROVIDER`, `REVIEWER_MODEL`, `REVIEWER_VISION` | Optional reviewer tier; `REVIEWER_VISION=false` for text-only models |
 | `MAX_STEPS`, `MAX_RUN_SECONDS`, `MAX_RUN_COST_USD` | Budgets per run, enforced by the worker |

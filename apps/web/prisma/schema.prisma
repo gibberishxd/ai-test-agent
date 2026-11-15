@@ -270,6 +270,8 @@ model BenchmarkResult {
   /// claude-cli); null = not measured (older results).
   avgEstimatedCostUsd         Float?   @map("avg_estimated_cost_usd")
   estimatedCostPerVerifiedBug Float?   @map("estimated_cost_per_verified_bug")
+  /// Run 7: the version of the demo apps the result was measured on ("v1" for runs 1-6).
+  benchmarkVersion            String   @default("v1") @map("benchmark_version")
   /// Recall over the planted bugs that need judgement (not findable by deterministic checks).
   aiRecall                    Float?   @map("ai_recall")
   /// The same scores on the holdout app (apps/demo2), which prompts are never tuned against.

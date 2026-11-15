@@ -245,6 +245,8 @@ class BenchmarkResult(Base):
     # Run 6, L1: API-equivalent cost (an estimate for claude-cli); null = not measured.
     avg_estimated_cost_usd: Mapped[float | None]
     estimated_cost_per_verified_bug: Mapped[float | None]
+    # Run 7: the demo apps' version the result was measured on (benchmark.BENCHMARK_VERSION).
+    benchmark_version: Mapped[str] = mapped_column(server_default=text("'v1'"))
     ai_recall: Mapped[float | None]
     holdout_runs_buggy: Mapped[int | None]
     holdout_recall: Mapped[float | None]

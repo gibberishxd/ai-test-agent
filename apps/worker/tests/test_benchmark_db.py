@@ -324,3 +324,25 @@ def test_a_benchmark_records_the_models_its_calls_reported(sessions, monkeypatch
         latest = session.query(BenchmarkResult).order_by(BenchmarkResult.created_at.desc()).first()
         assert latest.details["reported_models"] == ["claude-haiku-5-5"]
         assert "invalid" not in latest.details
+
+
+def test_saved_result_records_the_benchmark_version(sessions):
+    with sessions() as session:
+        row = save_scores(session, scores(), {"buggy": [], "clean": []})
+        assert row.benchmark_version == "v2"
+
+
+def test_the_leaderboard_keeps_benchmark_versions_apart(sessions):
+    from sqlalchemy import text
+
+    with sessions() as session:
+        save_scores(session, scores(benchmark_version="v1"), {"buggy": [], "clean": []})
+        save_scores(session, scores(benchmark_version="v2"), {"buggy": [], "clean": []})
+        versions = (
+            session.execute(
+                text("SELECT benchmark_version FROM model_leaderboard ORDER BY benchmark_version")
+            )
+            .scalars()
+            .all()
+        )
+        assert versions == ["v1", "v2"]

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseModelInput } from "./model-configs";
+import { CLAUDE_MODELS, modelForProvider, parseModelInput } from "./model-configs";
 
 describe("parseModelInput", () => {
   it("accepts an OpenAI-compatible endpoint", () => {
@@ -22,5 +22,19 @@ describe("parseModelInput", () => {
   it("rejects negative or non-numeric prices", () => {
     const parsed = parseModelInput({ label: "x", provider: "openai-compat", baseUrl: "https://a.test/v1", model: "m", inputPrice: "-1" });
     expect(parsed).toMatchObject({ ok: false, errors: { inputPrice: expect.any(String) } });
+  });
+});
+
+describe("Claude model suggestions (run 7: Haiku is the default, D91)", () => {
+  it("offers Haiku first as the recommended default and Sonnet as the thorough option", () => {
+    expect(CLAUDE_MODELS.map((m) => m.id)).toEqual(["claude-haiku-5-5", "claude-sonnet-5-5"]);
+    expect(CLAUDE_MODELS[0].label).toMatch(/default/i);
+    expect(CLAUDE_MODELS[1].label).toMatch(/thorough/i);
+  });
+
+  it("fills in Haiku when Claude is picked and no model was typed, and keeps a typed one", () => {
+    expect(modelForProvider("claude", "")).toBe("claude-haiku-5-5");
+    expect(modelForProvider("claude", "claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
+    expect(modelForProvider("openai-compat", "")).toBe("");
   });
 });

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from worker.llm import ToolCall, ToolSpec
 from worker.llm.claude_cli import ClaudeCliClient
 
@@ -48,7 +50,7 @@ def test_decide_asks_for_strict_json_and_reads_the_tool_call():
     assert decision.usage.cost_usd == 0 and decision.usage.input_tokens == 900
     command = cli.calls[0]["command"]
     assert command[:2] == ["claude", "-p"]
-    assert command[command.index("--model") + 1] == "claude-sonnet-5-5"  # pinned, run 6
+    assert command[command.index("--model") + 1] == "claude-haiku-5-5"  # the default since run 7
     assert command[command.index("--system-prompt") + 1] == "SYSTEM"
     assert "--no-session-persistence" in command
     stdin = cli.calls[0]["stdin"]
@@ -173,3 +175,48 @@ def test_an_answer_without_denials_is_taken_as_it_is():
     decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
     assert decision.tool_call == ToolCall("finish", {"summary": "done"})
     assert len(cli.calls) == 1
+
+
+# Run 7, M1: run 6 shop run e3eb2b69 (Haiku) answered with a valid `finish` whose summary said the
+# tools were unavailable: it had tried them natively, got "No such tool available", and no
+# permission denial was reported, so the run-4 correction (D66) never fired.
+RUN6_EARLY_FINISH = (
+    "Run stopped at step 15. The browser tools (click, double_click, type, navigate, report_bug, "
+    'finish) are not available in this session: calls return "No such tool available" and '
+    "ToolSearch finds no matching tools. No further actions on the site were possible."
+)
+
+
+def test_a_finish_claiming_the_tools_are_unavailable_gets_one_correction():
+    cli = FakeCli(
+        json.dumps({"name": "finish", "arguments": {"summary": RUN6_EARLY_FINISH}}),
+        '{"name": "click", "arguments": {"element_id": 2, "reasoning": "go on"}}',
+    )
+    decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
+    assert decision.tool_call == ToolCall("click", {"element_id": 2, "reasoning": "go on"})
+    retry = cli.calls[1]["stdin"]
+    assert "you do have" in retry.lower() and "JSON" in retry
+
+
+def test_a_second_unavailable_claim_is_taken_as_the_answer():
+    cli = FakeCli(
+        json.dumps({"name": "finish", "arguments": {"summary": RUN6_EARLY_FINISH}}),
+        json.dumps({"name": "finish", "arguments": {"summary": RUN6_EARLY_FINISH}}),
+    )
+    decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
+    assert decision.tool_call.name == "finish"  # one correction only: never a loop
+    assert len(cli.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "Tested the cart and checkout; reported 3 bugs. Done.",
+        "All main flows work; no bugs found on the profile page.",
+        "The discount code field is not available on the cart page, so it was skipped.",
+    ],
+)
+def test_an_ordinary_finish_is_taken_as_it_is(summary):
+    cli = FakeCli(json.dumps({"name": "finish", "arguments": {"summary": summary}}))
+    decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
+    assert decision.tool_call.name == "finish" and len(cli.calls) == 1

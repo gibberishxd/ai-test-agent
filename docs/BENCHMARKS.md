@@ -27,6 +27,14 @@ Nothing is ever tuned against it, and a unit test fails if anything from either 
 `bugs.json` appears in the prompt or tool descriptions. A holdout score close to the shop score
 means the techniques are general.
 
+**Benchmark versions.** Every result records the version of the demo apps it was measured on.
+**v1** is runs 1–6. **v2** (run 7) fixed, in both builds, four unplanted behaviours that run 6's
+agents reported: the profile's "Recent orders" listed orders "My orders" never showed; a
+double-clicked "Add to cart" added twice; the holdout accepted check-in dates in the past and
+dates outside a room's availability. The planted bugs didn't change. Scores of different versions
+aren't directly comparable (v2 removes real behaviour that v1 counted as false alarms), so the
+leaderboard keeps them apart.
+
 The judge (`JUDGE_PROVIDER` / `JUDGE_MODEL`) is kept the same while the agent model changes, so
 two models are graded by the same judge. `bench --rescore` re-matches the saved runs of the
 latest result: it keeps the commit the runs were made on and records its own commit separately.

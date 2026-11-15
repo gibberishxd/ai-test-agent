@@ -12,6 +12,7 @@ import {
   holdout,
   holdoutPerBug,
   judgeLabel,
+  benchmarkLabel,
   latestPerProvider,
   validResults,
   leaderboardFromView,
@@ -69,8 +70,9 @@ export default async function BenchmarkPage() {
             Model leaderboard
           </h2>
           <p className="text-sm text-muted-foreground">
-            Bring any model, and see how it performs here before you trust it. One row per model (its newest
-            result), ranked by AI-only recall.
+            Bring any model, and see how it performs here before you trust it. One row per model and benchmark
+            version (its newest result), newest benchmark first, then ranked by AI-only recall. Benchmark v2 (run 7)
+            fixed four unplanted behaviours of the demo apps, so v1 and v2 scores aren&apos;t directly comparable.
           </p>
         </div>
         <div className="overflow-x-auto rounded-xl border">
@@ -100,6 +102,7 @@ export default async function BenchmarkPage() {
                   <TableCell>
                     {row.provider} <span className="text-muted-foreground">· {row.model}</span>
                     {reviewerLabel(row) && <span className="block text-xs text-muted-foreground">+ reviewer {reviewerLabel(row)}</span>}
+                    <span className="block text-xs text-muted-foreground">{benchmarkLabel(row)}</span>
                   </TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.recall)}</TableCell>
@@ -139,7 +142,7 @@ export default async function BenchmarkPage() {
                   {row.provider} <span className="text-muted-foreground">· {row.model}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {formatDate(row.createdAt)} · <span className="font-mono">{commitLabel(row)}</span>
+                  {formatDate(row.createdAt)} · {benchmarkLabel(row)} · <span className="font-mono">{commitLabel(row)}</span>
                 </p>
               </div>
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -252,7 +255,10 @@ export default async function BenchmarkPage() {
                     {row.provider} · {row.model}
                     {reviewerLabel(row) && <span className="block text-xs text-muted-foreground">+ reviewer {reviewerLabel(row)}</span>}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{commitLabel(row)}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {commitLabel(row)}
+                    <span className="block font-sans text-muted-foreground">{row.benchmarkVersion}</span>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.recall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percentOrDash(holdout(row)?.aiRecall)}</TableCell>
