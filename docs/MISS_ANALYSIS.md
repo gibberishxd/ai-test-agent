@@ -625,3 +625,33 @@ unaffected.
 
 **Misses:** checkout (bug 6), the long-name product (10) and the login page (12) never reached
 in 40 steps; logout + reload (11) reached in all 3 runs but never the two-step sequence.
+
+## Run 7, M4: critical flows on the shop (Haiku 5.5)
+
+`scripts/flows_measure.py`: a fresh workspace, the shop as a target with three journeys (sign in;
+add to cart and check out; change profile: plain product journeys, `flows.DEMO_SHOP_FLOWS`), two
+runs (480 s, 40 steps). Run 1 learns, run 2 replays. Judge-free: no benchmark scoring.
+
+**First version (commit 8263e2c).** Run 1: 3 journeys covered in 34 model calls ($0.093);
+sign in passed, "add to cart and check out" FAILED because, after the order was placed, the agent
+opened an order and saw planted bug 13 (the checkout itself worked), "change profile" failed
+(planted bug 8). Run 2: the two failing journeys were rechecked by replay with no model, but sign
+in's replay didn't match and the agent, re-doing it, failed it for planted bug 2 (the profile's
+orders don't load). Two flaws: a journey's verdict absorbed bugs that don't stop the journey, and
+a failure's checks mixed what the agent saw (an order number that changes every run) with what it
+expected.
+
+**Fixed (e49bce8):** a bug that doesn't stop the journey is reported and the journey passes;
+on FAILED only quotes after "expected" become checks; a check matches whatever its numbers are.
+
+**Second measurement (commit a6b4a22).** Run 1: 36 model calls ($0.083): sign in passed,
+checkout passed, change profile failed with `expected "Profile saved"`. Run 2: **0 model calls
+for the journeys**: both passing journeys replayed with every check passing, and the profile
+journey's failing script replayed and found bug 8 again, confirmed by the replay itself. The
+whole run cost about the same ($0.10), but run 2's 40 steps all went to exploration, where run
+1 had about 4 left after learning the journeys.
+
+**What it shows.** Journeys are learned once (≈12 model calls each) and then checked for the
+price of a browser; a known failure stays found without the model; a learning run spends most of
+its step budget on the journeys (a team adding flows should expect the first run to explore
+less). Two samples per version: small, as everything in this file.

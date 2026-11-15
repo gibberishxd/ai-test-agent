@@ -1249,3 +1249,15 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   with this caveat in PROGRESS and MISS_ANALYSIS: its shop number undercounts bug 5 (3 correct
   reports lost to the guard). Holdout numbers are unaffected. Alternative: call the fixed apps
   v3. Rejected: one bad guard in my code, not a change of what the benchmark asks.
+
+## D97. Flows after measuring; specs off by default until measured (run 7, M4 and M3)
+- **Flows (measured, kept):** the second two-run measurement checked all three shop journeys in
+  run 2 with no model call and re-found the profile failure for free (MISS_ANALYSIS "Run 7, M4").
+  Flows are on whenever a target has them; the benchmark uses them only with `bench --flows`.
+- **Specs (not measured yet, decided without the owner, revisit):** the owner's rule keeps specs
+  on by default only if the holdout measurement shows judgement-only recall rising without more
+  clean-build false alarms. `apps/demo2/specs.md` isn't written yet, so that measurement couldn't
+  run: `USE_SPECS` now defaults to **false**, and `bench --specs` turns it on for its own runs. A
+  team can still add specs; a worker with `USE_SPECS=true` uses them. Alternative: on by
+  default, since specs only matter where a team adds them. Rejected: the owner's rule says
+  "only if it helps", and that isn't shown yet.

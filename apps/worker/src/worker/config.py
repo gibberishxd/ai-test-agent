@@ -63,7 +63,8 @@ class Settings(BaseSettings):
     reviewer_vision: bool = True
 
     # Run 7, M3: a target's specs, embedded locally and retrieved per page (worker/specs.py).
-    use_specs: bool = True
+    # Off until the holdout measurement shows specs help (D97); `bench --specs` turns it on.
+    use_specs: bool = False
     embedding_model: str = "nomic-embed-text"
 
     # Run budgets, enforced by the worker

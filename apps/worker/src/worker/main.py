@@ -161,6 +161,7 @@ def main(argv: list[str] | None = None) -> None:
             log.info("fingerprinted %d older finding(s)", backfill_fingerprints(session))
         return
 
+    settings = settings_for(settings, args)
     llm = make_client(settings)
     # The benchmark queues and scores runs in its own workspace and reads them all back: an
     # operator's command on the admin connection. The worker loop uses its own role.
@@ -233,6 +234,13 @@ def main(argv: list[str] | None = None) -> None:
         busy = process_next(sessions, llm, execute, client_for, skip_benchmark=True)
         if not busy and not checked:
             time.sleep(POLL_INTERVAL_S)
+
+
+def settings_for(settings: Settings, args) -> Settings:
+    """The settings this command runs with: `bench --specs` turns specs on for its own runs."""
+    if getattr(args, "command", None) == "bench" and getattr(args, "specs", False):
+        return settings.model_copy(update={"use_specs": True})
+    return settings
 
 
 def reverify(settings: Settings, run_prefix: str, use_judge: bool) -> None:

@@ -163,8 +163,8 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | M1 Decisions | done | Haiku the default (config, claude-cli, web model form, `.env.example`, README; D92); the early finish corrected once in the claude-cli adapter (test from run 6's e3eb2b69 summary); the 4 demo behaviours fixed in both builds with unit tests and `verify-bugs` checks; benchmark v2 in bench output, `benchmark_results.benchmark_version` and the leaderboard key (D93). |
 | M2 Baseline | done | Haiku benchmark v2 `e92d2c6b` (table below). It exposed a flaw in M1's double-click guard (replays lost a second "Add to cart"); fixed by click detail (D96). |
 | M3 Specs | code done; measurement waits for the owner's `apps/demo2/specs.md` | |
-| M4 Flows | code done; measuring | |
-| M5 MCP | todo | |
+| M4 Flows | done | Two measurements on the shop (Haiku, three journeys, table below). The first exposed two flaws (a journey failed for an unrelated bug; checks that can't match next time), fixed in e49bce8. The second: run 1 learned the journeys in 36 model calls (~$0.08), run 2 checked all three by replay with **0 model calls** and found the same failure (Save does nothing) again for free (D95, D97). |
+| M5 MCP | done | `apps/web/mcp`: start_run, get_run_status, get_report over stdio, backed by `/api/v1`; tests with a stand-in API; README setup for Claude Code and Cursor. Done before M3's measurement because that one waits for the owner's specs. |
 | M6 Final measurement | todo | |
 | M7 Wrap-up | todo | |
 
@@ -174,6 +174,13 @@ Counts are bug×run slots (shop 9 judgement bugs × 3 = 27 of 39 in all; holdout
 | Benchmark | Result | Model | Specs / flows | Shop AI-only | Shop all | Holdout AI-only | Holdout all | Precision shop / holdout | False alarms clean shop / holdout | Avg run | Est. API cost / run | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | M2 baseline | `e92d2c6b` (commit 3276fab) | claude-haiku-5-5 | none / none | 33% (9 of 27)* | 54% (21 of 39) | 75% (6 of 8) | 83% (10 of 12) | 100% / 93% | 2.0 / 0.0 | 273 s | $0.104 shop, $0.101 holdout ($0.72 for the 7 runs) | 2026-11-15 |
+
+| Flows | Commit | Run | Journeys covered | Journey model calls | Journey est. cost | Journeys: result | Whole run: model calls / est. cost | Date |
+|---|---|---|---|---|---|---|---|---|
+| first version | 8263e2c | 1 learn `792f8d98` | 3 of 3 | 34 | $0.093 | sign in passed; checkout "failed" (bug 13 seen on the way); profile failed (bug 8) | 42 / $0.110 | 2026-11-15 |
+| first version | 8263e2c | 2 replay `099f3ba2` | 3 of 3 | 12 | $0.029 | checkout and profile rechecked by replay (0 calls); sign in replay didn't match, the agent then "failed" it for an unrelated bug | 42 / $0.099 | 2026-11-15 |
+| fixed (e49bce8) | a6b4a22 | 1 learn `6f6a2eb6` | 3 of 3 | 36 | $0.083 | sign in passed; checkout passed; profile failed: expected "Profile saved" (bug 8) | 43 / $0.098 | 2026-11-15 |
+| fixed (e49bce8) | a6b4a22 | 2 replay `7688b1da` | 3 of 3 | **0** | **$0** | all three by replay: two passed, profile still failing (bug 8 found again, free) | 41 / $0.104 (all exploration) | 2026-11-15 |
 
 \* Undercounts bug 5: reported in all 3 shop runs, dismissed by replay because M1's double-click guard swallowed the replay's second "Add to cart" (D96, fixed after this run).
 

@@ -42,3 +42,17 @@ def test_haiku_is_the_default_agent_model_and_sonnet_is_not():
     assert settings.claude_cli_model == "claude-haiku-5-5"
     assert settings.cheap_model == settings.claude_cli_cheap_model == "claude-haiku-5-5"
     assert ClaudeCliClient().agent_model == "claude-haiku-5-5"
+
+
+def test_specs_are_off_by_default_until_measured_and_bench_specs_turns_them_on():
+    # Run 7, D97: the owner's rule keeps specs on by default only once the holdout shows they help.
+    from types import SimpleNamespace
+
+    from worker.main import settings_for
+
+    settings = Settings(_env_file=None)
+    assert settings.use_specs is False
+    on = settings_for(settings, SimpleNamespace(command="bench", specs=True))
+    assert on.use_specs is True and settings.use_specs is False  # a copy, not a change
+    assert settings_for(settings, SimpleNamespace(command="bench", specs=False)).use_specs is False
+    assert settings_for(settings, SimpleNamespace(command="run")).use_specs is False
