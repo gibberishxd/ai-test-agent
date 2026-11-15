@@ -26,7 +26,7 @@ import {
   type Verification,
 } from "@/lib/benchmark";
 import { db } from "@/lib/db";
-import { formatCost, formatDate } from "@/lib/format";
+import { formatCost, formatDate, formatEstimate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Benchmark" };
 
@@ -87,6 +87,8 @@ export default async function BenchmarkPage() {
                 <TableHead className="text-right">Reported → verified</TableHead>
                 <TableHead className="text-right">Correct but discarded</TableHead>
                 <TableHead className="text-right">Cost / run</TableHead>
+                <TableHead className="text-right">Est. API cost / run</TableHead>
+                <TableHead className="text-right">Est. cost / verified bug</TableHead>
                 <TableHead className="text-right">Time / run</TableHead>
                 <TableHead>Date</TableHead>
               </TableRow>
@@ -109,6 +111,8 @@ export default async function BenchmarkPage() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{verification(row)?.correctButDiscarded ?? "—"}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCost(row.avgCostUsd)}</TableCell>
+                  <TableCell className="text-right tabular-nums whitespace-nowrap">{formatEstimate(row.avgEstimatedCostUsd)}</TableCell>
+                  <TableCell className="text-right tabular-nums whitespace-nowrap">{formatEstimate(row.estimatedCostPerVerifiedBug)}</TableCell>
                   <TableCell className="text-right tabular-nums">{Math.round(row.avgDurationS)} s</TableCell>
                   <TableCell className="whitespace-nowrap">{formatDate(row.createdAt)}</TableCell>
                 </TableRow>
@@ -116,6 +120,11 @@ export default async function BenchmarkPage() {
             </TableBody>
           </Table>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Cost is what was charged. Est. is an estimate: what the same calls would cost on the model&apos;s API at list
+          price, computed from the token counts the provider reports (claude-cli runs are charged nothing on a
+          subscription). Per verified bug: the buggy runs&apos; estimate over the planted bugs they verified.
+        </p>
       </section>
 
       <section className="grid gap-4" aria-labelledby="latest-heading">
@@ -145,6 +154,13 @@ export default async function BenchmarkPage() {
                 <Tile label="False alarms" value={row.falseAlarms.toFixed(1)} hint="per clean run" />
                 <Tile label="Holdout AI-only" value={percentOrDash(holdout(row)?.aiRecall)} hint="app never tuned for" />
                 <Tile label="Cost / run" value={formatCost(row.avgCostUsd)} hint={`${Math.round(row.avgDurationS)} s avg`} />
+                {row.avgEstimatedCostUsd != null && (
+                  <Tile
+                    label="Est. API cost / run"
+                    value={formatEstimate(row.avgEstimatedCostUsd)}
+                    hint={"per verified bug " + formatEstimate(row.estimatedCostPerVerifiedBug)}
+                  />
+                )}
               </dl>
               <VerificationSummary funnel={verification(row)} />
               <p className="text-xs text-muted-foreground">
@@ -224,6 +240,7 @@ export default async function BenchmarkPage() {
                 <TableHead className="text-right">Precision</TableHead>
                 <TableHead className="text-right">False alarms</TableHead>
                 <TableHead className="text-right">Cost / run</TableHead>
+                <TableHead className="text-right">Est. API cost / run</TableHead>
                 <TableHead>Judge</TableHead>
               </TableRow>
             </TableHeader>
@@ -242,6 +259,7 @@ export default async function BenchmarkPage() {
                   <TableCell className="text-right tabular-nums">{percent(row.precision)}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.falseAlarms.toFixed(1)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCost(row.avgCostUsd)}</TableCell>
+                  <TableCell className="text-right tabular-nums whitespace-nowrap">{formatEstimate(row.avgEstimatedCostUsd)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{judgeLabel(row)}</TableCell>
                 </TableRow>
               ))}

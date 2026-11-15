@@ -6,6 +6,26 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/**
+ * An API-equivalent cost estimate (run 6): what a run's calls would cost on the model's API at
+ * list price, computed from token counts. Always labelled, so it is never read as a charge.
+ */
+export function formatEstimate(usd: number | null | undefined): string {
+  if (usd == null) return "—";
+  if (usd === 0) return "$0 est.";
+  if (usd < 0.001) return "< $0.001 est.";
+  return "≈ $" + usd.toFixed(usd < 1 ? 3 : 2) + " est.";
+}
+
+type CostedRun = { provider: string | null; model: string | null; costUsd: number; estimatedCostUsd: number };
+
+/** The hint under a run's cost: provider · model, plus the estimate when it was charged less. */
+export function costHint(run: CostedRun): string | undefined {
+  const parts = run.model ? [run.provider + " · " + run.model] : [];
+  if (run.estimatedCostUsd > run.costUsd) parts.push("API price " + formatEstimate(run.estimatedCostUsd));
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
 export function formatDuration(
   start: Date | string | null,
   end: Date | string | null,

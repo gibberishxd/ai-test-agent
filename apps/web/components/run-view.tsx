@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SEVERITIES } from "@/lib/contracts/types";
-import { formatCost, formatDuration, isFinal } from "@/lib/format";
+import { costHint, formatCost, formatDuration, isFinal } from "@/lib/format";
 import type { BugView, RunView as Run } from "@/lib/serialize";
 
 const POLL_MS = 1500;
@@ -100,7 +100,7 @@ export function RunView({
         <Stat label="Pages visited" value={String(run.pagesVisited)} />
         <Stat label="Steps" value={String(run.stepCount)} />
         <Stat label="Duration" value={formatDuration(run.startedAt, run.finishedAt, now)} />
-        <Stat label="Cost" value={formatCost(run.costUsd)} hint={run.model ? `${run.provider} · ${run.model}` : undefined} />
+        <Stat label="Cost" value={formatCost(run.costUsd)} hint={costHint(run)} />
       </section>
 
       {run.status === "queued" && (

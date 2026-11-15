@@ -29,17 +29,20 @@ from worker.benchmark import (
     BenchmarkScores,
     all_reports,
     benchmark_workspace,
+    check_pinned_models,
     git_commit,
     judge_name,
     load_planted,
     print_scores,
     queue_runs,
     report_bugs,
+    reported_models,
     reviewer_of,
     save_scores,
     score,
     staged_match,
-    wait_for,
+    stop_queued,
+    stop_reason,
 )
 from worker.config import REPO_ROOT, Settings, get_settings
 from worker.db.models import BenchmarkResult, Run
@@ -49,7 +52,7 @@ from worker.llm import LLMClient, make_client, make_judge, make_reviewer
 from worker.login_checks import process_login_check
 from worker.logs import JsonFormatter
 from worker.model_configs import client_for_run
-from worker.queue import recover_expired_leases, recover_stale_runs
+from worker.queue import FINAL, recover_expired_leases, recover_stale_runs
 from worker.report import write_report
 from worker.retention import apply_retention
 from worker.runner import LEASE_S, ExecuteFn, process_next
@@ -191,6 +194,7 @@ def main(argv: list[str] | None = None) -> None:
             args.mode,
             args.holdout_runs,
             holdout_first=args.holdout_first,
+            reviewer=reviewer,
         )
         return
     if args.once:
@@ -242,6 +246,7 @@ def run_benchmark(
     mode: str,
     holdout_runs: int = 0,
     holdout_first: bool = False,
+    reviewer: LLMClient | None = None,
 ) -> None:
     """Queue the benchmark runs, process them with `llm`, then score them with `judge`.
 
@@ -250,7 +255,13 @@ def run_benchmark(
 
     The commit is read before the runs start: the runs use the code loaded now, and new
     commits made while a long benchmark runs must not relabel it.
+
+    Run 6: a claude-cli model must be a full ID (refused before anything is queued), and the
+    benchmark stops at once on a claude-cli usage limit or when its runs' API-equivalent cost
+    reaches BENCH_MAX_COST_USD: runs not started are stopped, and the finished ones are scored
+    and saved marked incomplete (off the leaderboard).
     """
+    check_pinned_models([llm, reviewer])
     commit = git_commit()
     with sessions() as session:
         workspace = benchmark_workspace(session)
@@ -274,8 +285,43 @@ def run_benchmark(
             queue()
     every_run = [run_id for ids in run_ids.values() for run_id in ids]
     log.info("benchmark: %d runs queued (%s)", len(every_run), mode)
-    wait_for(sessions, every_run, lambda: process_next(sessions, llm, execute, only=every_run))
-    score_runs(sessions, judge, run_ids, commit)
+    reason = process_until_done(
+        sessions,
+        every_run,
+        lambda: process_next(sessions, llm, execute, only=every_run),
+        settings.bench_max_cost_usd,
+    )
+    if reason is None:
+        score_runs(sessions, judge, run_ids, commit)
+        return
+    log.error("benchmark stopped: %s", reason)
+    with sessions() as session:
+        done = {
+            str(r.id)
+            for r in session.query(Run).filter(Run.id.in_(every_run))
+            if r.status == "done"
+        }
+    finished = {kind: [i for i in ids if i in done] for kind, ids in run_ids.items()}
+    extra = {
+        "invalid": reason,
+        "incomplete": {"finished": len(done), "planned": len(every_run), "runs_planned": run_ids},
+    }
+    score_runs(sessions, judge, finished, commit, extra=extra)
+
+
+def process_until_done(sessions, run_ids: list[str], process, cap_usd: float) -> str | None:
+    """Process the benchmark's runs one at a time until all are final; returns None, or why it
+    stopped early (stop_reason), after stopping the runs that hadn't started."""
+    while True:
+        with sessions() as session:
+            runs = [session.get(Run, run_id) for run_id in run_ids]
+            if all(run.status in FINAL for run in runs):
+                return None
+            if reason := stop_reason(session, run_ids, cap_usd):
+                stop_queued(session, run_ids, reason)
+                return reason
+        if not process():
+            time.sleep(1)
 
 
 # The demo shop's own test account, shown on its login page (apps/demo/src/store.tsx): not a secret.
@@ -340,11 +386,17 @@ def score_runs(
     run_ids: dict[str, list[str]],
     commit: str,
     rescore_commit: str | None = None,
+    extra: dict | None = None,
 ) -> None:
     """Match every reported bug to its app's bugs.json, compute the scores, print and save."""
     with sessions() as session:
         scores = _score_set(
-            session, judge, run_ids["buggy"], run_ids["clean"], load_planted(), commit
+            session,
+            judge,
+            run_ids.get("buggy", []),
+            run_ids.get("clean", []),
+            load_planted(),
+            commit,
         )
         if run_ids.get("holdout_buggy"):
             scores.holdout = _score_set(
@@ -356,7 +408,9 @@ def score_runs(
                 commit,
             )
         scores.rescore_commit = rescore_commit
-        save_scores(session, scores, run_ids)
+        every = [i for ids in run_ids.values() for i in ids]
+        scores.reported_models = reported_models(session, every)
+        save_scores(session, scores, run_ids, extra)
     print_scores(scores)
 
 
@@ -389,6 +443,7 @@ def _score_set(session, judge, buggy_ids, clean_ids, planted, commit) -> Benchma
         judge=judge_name(judge),
         clean_before=clean_before,
         reviewer=reviewer_of(finished),
+        estimated_costs={str(run.id): run.estimated_cost_usd for run in finished},
     )
 
 

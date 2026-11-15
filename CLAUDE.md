@@ -66,8 +66,14 @@ text in chat, never blocking. Same override rules as run 3 for the AI core (J1 o
 Goals and acceptance checks: [`docs/RUN_PLAN_5.md`](docs/RUN_PLAN_5.md). Same override rules as run 4;
 the AI core may change in K1 and K2 (explained in `docs/WALKTHROUGH.md`).
 
+## Run 6 (branch `agent-v6`)
+Goals and acceptance checks: [`docs/RUN_PLAN_6.md`](docs/RUN_PLAN_6.md). Measure stronger Claude
+models through claude-cli. Ask only about the owner's decisions (Pro limit or credits, product
+behaviour, anything hard to undo), as numbered plain text, never blocking; decide the rest and
+record it in `docs/DECISIONS.md`. Every claude-cli benchmark needs the owner's yes; a usage-limit
+message stops it at once.
+
 ## Current phase
 Demo v1 and runs 2–5 are all merged into `main` (PRs #1–#4, last on 2026-11-13); the MIT license
-followed in PR #5. No run is in progress, so the normal "How to work with me" rules apply.
-Open items for the owner are under "Needs me" in `docs/PROGRESS.md`; the biggest is a Sonnet
-benchmark on the run 5 code (only with the owner's yes).
+followed in PR #5. Run 6 (`agent-v6`) is done and waits for review in its PR: Haiku 5.5 as the
+agent is the recommended default (D91); open items are under "Needs me" in `docs/PROGRESS.md`.

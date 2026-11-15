@@ -91,6 +91,10 @@ class BenchmarkScores:
     correct_but_discarded: int = 0
     reviewer: str = ""  # "provider/model" of the reviewer tier, "" when the runs had none
     verification: dict = field(default_factory=dict)
+    # Run 6, L1: API-equivalent cost (an estimate for claude-cli), None when not measured.
+    avg_estimated_cost_usd: float | None = None
+    estimated_cost_per_verified_bug: float | None = None
+    reported_models: list[str] = field(default_factory=list)  # what the providers said ran
 
 
 def load_planted(path: Path = BUGS_JSON) -> list[PlantedBug]:
@@ -185,6 +189,7 @@ def score(
     judge: str = "",
     clean_before: dict[str, int] | None = None,
     reviewer: str = "",
+    estimated_costs: dict[str, float] | None = None,
 ) -> BenchmarkScores:
     """Compute the scores from match decisions (one list per buggy run).
 
@@ -199,6 +204,10 @@ def score(
     duplicates; correct_but_discarded is how many discarded reports matched a planted bug (if
     it's high, verification is too strict); false_alarms_before uses `clean_before` (reports
     per clean run before verification); `verification` holds the counts per stage.
+
+    `estimated_costs` (run id → API-equivalent cost, buggy and clean runs): the average per run,
+    and the buggy runs' total over the planted bugs they verified (each run's distinct bugs
+    counted, as recall does). None when not measured or nothing was verified.
     """
     kept = {run: [d for d in ds if d.stage == "verified"] for run, ds in buggy.items()}
     seen = {run: [d for d in ds if d.stage != "duplicate"] for run, ds in buggy.items()}
@@ -243,6 +252,7 @@ def score(
         "bugs_lost": bugs_lost,
     }
     clean_before = clean_reports if clean_before is None else clean_before
+    avg_estimate, per_bug_estimate = estimated_cost(estimated_costs, kept, planted)
     return BenchmarkScores(
         provider=provider,
         model=model,
@@ -263,7 +273,75 @@ def score(
         false_alarms_before=mean(clean_before.values()),
         correct_but_discarded=sum(1 for d in discarded if d.matched is not None),
         verification=verification,
+        avg_estimated_cost_usd=avg_estimate,
+        estimated_cost_per_verified_bug=per_bug_estimate,
     )
+
+
+def estimated_cost(
+    costs: dict[str, float] | None, kept: dict[str, list], planted: list[PlantedBug]
+) -> tuple[float | None, float | None]:
+    """(average API-equivalent cost per run, buggy runs' cost per verified planted bug)."""
+    if not costs:
+        return None, None
+    ids = {b.id for b in planted}
+    verified = sum(len({d.matched for d in ds} & ids) for ds in kept.values())
+    buggy_cost = sum(costs.get(run, 0.0) for run in kept)
+    return sum(costs.values()) / len(costs), (buggy_cost / verified if verified else None)
+
+
+def check_pinned_models(clients: list) -> None:
+    """A claude-cli benchmark must name its models by full ID: an alias ("sonnet") moves to a
+    newer model without notice, and the result would no longer say which model ran (run 6)."""
+    from worker.llm.claude_cli import is_pinned_model_id
+
+    for client in clients:
+        if client is None or client.provider != "claude-cli":
+            continue
+        for model in (client.agent_model, client.cheap_model):
+            if not is_pinned_model_id(model):
+                raise ValueError(
+                    f"claude-cli model {model!r} is an alias: set CLAUDE_CLI_MODEL / "
+                    "CLAUDE_CLI_CHEAP_MODEL (or REVIEWER_MODEL) to a full ID like claude-sonnet-5-5"
+                )
+
+
+def stop_reason(session: Session, run_ids: list[str], cap_usd: float) -> str | None:
+    """Why a benchmark must stop now, or None: a claude-cli usage limit (or a call paid from
+    credits) in this process, or the runs' API-equivalent cost reaching BENCH_MAX_COST_USD."""
+    from worker.llm.claude_cli import limit_reached
+
+    if why := limit_reached():
+        return f"claude-cli stopped: {why}"
+    spent = sum(r.estimated_cost_usd for r in session.query(Run).filter(Run.id.in_(run_ids)))
+    if cap_usd > 0 and spent >= cap_usd:
+        return f"estimated cost cap reached (${spent:.2f} of ${cap_usd:.2f}, API-equivalent)"
+    return None
+
+
+def stop_queued(session: Session, run_ids: list[str], reason: str) -> int:
+    """Stop the benchmark's runs that haven't started; returns how many."""
+    from worker.db.models import RunStatus
+    from worker.queue import transition
+
+    queued = session.query(Run).filter(Run.id.in_(run_ids), Run.status == RunStatus.QUEUED).all()
+    for run in queued:
+        transition(run, RunStatus.STOPPED, error=f"not started: benchmark stopped ({reason})")
+    session.commit()
+    return len(queued)
+
+
+def reported_models(session: Session, run_ids: list[str]) -> list[str]:
+    """Every model the providers reported for these runs' calls (steps.model), sorted."""
+    from worker.db.models import Step
+
+    rows = (
+        session.query(Step.model)
+        .filter(Step.run_id.in_(run_ids), Step.model.is_not(None))
+        .distinct()
+        .all()
+    )
+    return sorted(model for (model,) in rows)
 
 
 def stage_of(bug) -> tuple[str, str | None]:
@@ -350,8 +428,22 @@ def print_scores(scores: BenchmarkScores) -> None:
     _print_set("demo shop", scores)
     if scores.holdout:
         _print_set("holdout app (apps/demo2, never tuned against)", scores.holdout)
-    print(f"  avg cost       ${scores.avg_cost_usd:.3f}")
+    print(f"  avg cost       ${scores.avg_cost_usd:.3f}  (charged)")
+    if scores.reported_models:
+        print(f"  models (as reported by the provider) {', '.join(scores.reported_models)}")
     print(f"  avg duration   {scores.avg_duration_s:.0f} s")
+
+
+def _print_estimates(scores: BenchmarkScores) -> None:
+    if scores.avg_estimated_cost_usd is None:
+        return
+    per_bug = scores.estimated_cost_per_verified_bug
+    print(f"  est. API cost / run           ${scores.avg_estimated_cost_usd:.3f}")
+    print(
+        "  est. API cost / verified bug  "
+        + (f"${per_bug:.3f}" if per_bug is not None else "- (no verified planted bug)")
+    )
+    print("  (estimates: list-price cost of the calls' token counts, not a charge)")
 
 
 def _print_set(name: str, scores: BenchmarkScores) -> None:
@@ -379,6 +471,7 @@ def _print_set(name: str, scores: BenchmarkScores) -> None:
             f" AI-only {scores.ai_recall_before:.0%}"
         )
         print(f"  false alarms before verification {scores.false_alarms_before:.1f}")
+    _print_estimates(scores)
     print("  per bug (found in N of the buggy runs):")
     for bug_id, info in scores.per_bug.items():
         mark = "✓" if info["found_runs"] else "·"
@@ -416,7 +509,11 @@ def staged_match(llm: LLMClient, run_id: str, report: Bug, planted: list[Planted
     return decision
 
 
-def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> BenchmarkResult:
+def save_scores(
+    session: Session, scores: BenchmarkScores, run_ids: dict, extra: dict | None = None
+) -> BenchmarkResult:
+    """Save a result. `extra` goes into details (an incomplete benchmark: "invalid", which
+    keeps it off the leaderboard, and "incomplete")."""
     data = asdict(scores)
     holdout = scores.holdout
     details = {
@@ -426,12 +523,16 @@ def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> Ben
         "judge": scores.judge,
         "reviewer": scores.reviewer or None,
         "verification": verification_details(scores),
+        "reported_models": scores.reported_models,
+        **(extra or {}),
     }
     if holdout:
         details["holdout"] = {
             "per_bug": {str(k): v for k, v in asdict(holdout)["per_bug"].items()},
             "decisions": asdict(holdout)["decisions"],
             "verification": verification_details(holdout),
+            "avg_estimated_cost_usd": holdout.avg_estimated_cost_usd,
+            "estimated_cost_per_verified_bug": holdout.estimated_cost_per_verified_bug,
         }
     result = BenchmarkResult(
         provider=scores.provider,
@@ -451,6 +552,8 @@ def save_scores(session: Session, scores: BenchmarkScores, run_ids: dict) -> Ben
         holdout_false_alarms=holdout.false_alarms if holdout else None,
         judge=scores.judge or None,
         rescore_commit=scores.rescore_commit,
+        avg_estimated_cost_usd=scores.avg_estimated_cost_usd,
+        estimated_cost_per_verified_bug=scores.estimated_cost_per_verified_bug,
         details=details,
     )
     session.add(result)

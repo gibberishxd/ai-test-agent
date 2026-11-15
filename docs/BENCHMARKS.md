@@ -33,7 +33,8 @@ latest result: it keeps the commit the runs were made on and records its own com
 
 ## All results
 
-Shop: 3 buggy runs + 1 clean run each; holdout: 2 buggy + 1 clean.
+Shop: 3 buggy runs + 1 clean run each; holdout: 2 buggy + 1 clean. Cost is what was charged; run 6 rows add
+the API-equivalent estimate ("est."), computed from the CLI's token counts at list price (D88).
 
 | Provider · model | AI-only recall | Recall | Precision | False alarms / clean run | Cost / run | Time / run | Judge | Commit |
 |---|---|---|---|---|---|---|---|---|
@@ -58,6 +59,14 @@ Shop: 3 buggy runs + 1 clean run each; holdout: 2 buggy + 1 clean.
 | ollama · gemma4:12b + qwen3:14b reviewer, run 5, **holdout** | 0% | 33% | 89% | 0.0 | $0.00 | | gemma4:12b (pinned) | e160a34 |
 | ollama · gemma4:12b alone, run 5 (before/after replay, list reminder), shop | 7% | 36% | 95% | 0.0 | $0.00 | 1302 s | gemma4:12b (pinned) | a72290d |
 | ollama · gemma4:12b alone, run 5, **holdout** | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | a72290d |
+| claude-cli · **claude-haiku-5-5** agent, run 6, shop (pinned ID; est. API $0.093/run) | 26% | 49% | 81% | 0.0 | $0.00 | 246 s | gemma4:12b (pinned) | 123e23e |
+| claude-cli · claude-haiku-5-5 agent, run 6, **holdout** (est. $0.060/run) | **62%** | **75%** | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 123e23e |
+| claude-cli · **claude-sonnet-5-5** agent, run 6, shop (pinned ID; est. API $1.44/run) | **33%** | **54%** | 84% | 2.0 (real unplanted behaviour) | $0.00 | 196 s | gemma4:12b (pinned) | 0079304 (agent code 123e23e) |
+| claude-cli · claude-sonnet-5-5 agent, run 6, **holdout** (est. $1.68/run) | **75%** | **83%** | 100% | 1.0 (real) | $0.00 | | gemma4:12b (pinned) | 0079304 |
+| ollama · gemma4:12b + **claude-sonnet-5-5 reviewer** (claude-cli), run 6, shop (est. $0.010/run) | 11% | 38% | 100% | 0.0 | $0.00 | 1118 s | gemma4:12b (pinned) | 0366f15 (agent code 123e23e) |
+| ollama · gemma4:12b + claude-sonnet-5-5 reviewer, run 6, **holdout** (est. $0.054/run) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 0366f15 |
+| ollama · gemma4:12b + **claude-opus-5-5 reviewer** (claude-cli), run 6, shop (est. $0.068/run) | 7% | 36% | 100% | 0.0 | $0.00 | 1143 s | gemma4:12b (pinned) | 19ffd92 |
+| ollama · gemma4:12b + claude-opus-5-5 reviewer, run 6, **holdout** (est. $0.213/run) | 0% | 33% | 80% | 0.0 | $0.00 | | gemma4:12b (pinned) | 19ffd92 |
 | claude · claude-sonnet-5-5 (API) | not run: needs an API key and budget | | | | | | | |
 
 ## What each run taught
@@ -89,6 +98,15 @@ recognises what the 12B explorer reaches: the shop's judgement-only recall goes 
 alone) → 19% (with the reviewer), and bug 13 is found for the first time. The holdout stays at
 0% for every local setup, so the reviewer isn't the default yet (the rule: it must lift the
 holdout); a stronger model is the next measurement.
+
+**Run 6.** Claude through the CLI, now on pinned model IDs, with every token counted and an
+API-equivalent cost estimate per run. **Haiku 5.5 as the agent** finds 26% of the shop's
+judgement bugs and **62% of the holdout's**, with no false alarms, for about $0.06–0.09 a run
+(estimated). **Sonnet 5.5** finds 33% and 75% for about $1.4–1.7 a run; its extra reports on the
+clean builds were real behaviour. A local Gemma explorer with a **Sonnet or Opus reviewer** stays
+at 0% on the holdout: the reviewer only judges the few steps the explorer flags, so the explorer
+sets the ceiling. Recommended default: Haiku as the agent (D91). Small samples: 3 shop and 2
+holdout runs per setup.
 
 **Note on the first three rows.** AI-only recall for them is computed from their per-bug results (bug 9, "$NaN" price, was
 the only AI bug found, by Gemma in 3 of 3 runs); they predate the holdout app. Bugs 1–4 were

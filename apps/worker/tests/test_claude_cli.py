@@ -48,7 +48,7 @@ def test_decide_asks_for_strict_json_and_reads_the_tool_call():
     assert decision.usage.cost_usd == 0 and decision.usage.input_tokens == 900
     command = cli.calls[0]["command"]
     assert command[:2] == ["claude", "-p"]
-    assert command[command.index("--model") + 1] == "sonnet"
+    assert command[command.index("--model") + 1] == "claude-sonnet-5-5"  # pinned, run 6
     assert command[command.index("--system-prompt") + 1] == "SYSTEM"
     assert "--no-session-persistence" in command
     stdin = cli.calls[0]["stdin"]
@@ -93,12 +93,12 @@ def test_without_a_screenshot_no_tools_are_allowed():
     assert "--allowedTools" not in cli.calls[0]["command"]
 
 
-def test_complete_uses_haiku():
+def test_complete_uses_the_cheap_model():
     cli = FakeCli('{"match": 5}')
     result = ClaudeCliClient(run=cli).complete("prompt", system="judge")
     assert result.text == '{"match": 5}'
     command = cli.calls[0]["command"]
-    assert command[command.index("--model") + 1] == "haiku"
+    assert command[command.index("--model") + 1] == "claude-haiku-5-5"
 
 
 def test_the_cli_runs_outside_the_repo_and_restricted(tmp_path):

@@ -1067,3 +1067,90 @@ numbers are the real test (Needs me).
   clean-build false alarms don't. Holdout didn't rise with either reviewer, so `REVIEWER_*` stays
   empty by default; the tier is there for anyone who sets it (a hosted reviewer is the obvious
   next measurement, which needs an API budget).
+
+## D88. claude-cli made measurable (run 6, L1)
+- **Pinned IDs:** `CLAUDE_CLI_MODEL` / `CLAUDE_CLI_CHEAP_MODEL` (defaults `claude-sonnet-5-5` /
+  `claude-haiku-5-5`); a reviewer on claude-cli takes `REVIEWER_MODEL`. `bench` refuses an alias
+  ("sonnet") before queuing anything. Alternative: keep aliases and log what the CLI reports.
+  Rejected: an alias silently moves to a newer model, so two results with the same label could
+  be different models. The model the CLI reports (`modelUsage[...].canonicalModel`) is stored
+  per step (`steps.model`) and per result (`details.reported_models`).
+- **Tokens and the estimate:** all four token types from `modelUsage` (one entry per model a
+  call used, each priced at its own rate). The recorded Haiku call showed the CLI writes its
+  cache with a **1-hour TTL**, which costs 2x the input price, not 1.25x; `pricing.py` prices
+  those writes apart. With that, our estimate equals the CLI's own `total_cost_usd` for the
+  recorded call; a gap of more than 1% logs a warning (pricing.py out of date). Charged cost
+  stays $0; `estimated_cost_usd` is stored per step, run and reviewer share, and is what
+  `MAX_RUN_COST_USD` and the review budget spend (a provider that charges: the charge).
+- **Stopping:** a usage-limit answer (`is_error` with limit text or HTTP 429, or a non-zero exit
+  whose output mentions the limit) **or a call paid from usage credits** (`usage.fallback_credit`
+  set) latches for the whole process: no claude-cli client calls the CLI again, the run fails, the
+  benchmark stops its queued runs and saves what finished marked `invalid` (off the leaderboard).
+  The credits case is treated as a limit because the owner's rule is "never drain my credits".
+  The limit fixture is synthetic: recording a real one would spend the limit.
+- **Benchmark cost cap:** `BENCH_MAX_COST_USD` (API-equivalent, all runs of one benchmark).
+  The owner set $15 for (b) and $5 for the others.
+- **Per-run cap during the claude-cli benchmarks:** `MAX_RUN_COST_USD=5` (decided without the
+  owner). f6151b32 ran with an effective cap of nothing (its cost was $0); the .env's $1 would
+  now cut Sonnet runs short (estimated $0.70–1.50 a run) and break comparability. $5 still stops
+  a runaway run; the benchmark cap stops a runaway benchmark.
+- **Time limits:** 480 s for (a) and (b) (as f6151b32), 1200 s for (c) and (d) (as run 5's Gemma
+  rows): the owner's answer.
+- **Opus as the agent (e):** not run. The owner asked to be asked first, to check the weekly
+  limit, and was away; it is under "Needs me".
+
+## D89. No code changes between the run 6 benchmarks (run 6, L2)
+- **Decision:** benchmarks a–d all run on commit 123e23e's agent code (later commits only add
+  docs), even though (a) showed a fixable weakness (a `finish` claiming the tools are
+  unavailable, without a refused native call).
+- **Why:** the point of L2 is to compare models; a code change between them would mix a model
+  effect with a code effect, and each benchmark costs the owner's limit. The fix is noted under
+  "Needs me" / next steps.
+
+## D90. Fix the reviewer-flag crash before (d) (run 6, L2)
+- **What happened:** in benchmark (c), shop run 18bce55e failed with `KeyError: 'name'` in
+  `AgentRun._review_flag`: the reviewer (Sonnet) called a flagged step a bug, and the step had
+  no named element, so building the report's evidence crashed. The run lost that bug and every
+  step after it (a run-5 bug, reached for the first time because a strong reviewer said "bug").
+- **Decision:** fix it test-first (`test_a_reviewer_bug_on_a_step_without_a_named_element_...`)
+  and commit before (d). An exception to D89: it doesn't change what any model sees or decides,
+  only stops a crash that would cost (d) whole runs of the owner's Opus usage.
+- **Consequence:** (c) is recorded as measured, with one of its three shop runs cut short (noted
+  with its result); (d) runs with the fix. Not re-running (c): no retries of a benchmark.
+
+## D91. Which model where (run 6, L3)
+Measured in run 6 (judge pinned to gemma4:12b; shop 3 runs + clean, holdout 2 runs + clean).
+"Est." is the API-equivalent cost from the CLI's token counts at list price (D88), not a charge.
+Per verified judgement bug = the buggy runs' estimate divided by the judgement bugs they verified
+(the deterministic bugs are found for free and left out here).
+
+| Setup | AI-only shop / holdout | False alarms (clean) | Time / run | Est. / run | Est. / verified judgement bug, shop / holdout |
+|---|---|---|---|---|---|
+| a) Haiku 5.5 agent | 26% (7 of 27) / 62% (5 of 8) | 0.0 / 0.0 | ~4 min | $0.06–0.09 | **$0.04 / $0.03** |
+| b) Sonnet 5.5 agent | **33% (9 of 27) / 75% (6 of 8)** | 2.0 / 1.0 (real behaviour) | ~3 min | $1.44–1.68 | $0.53 / $0.56 |
+| c) Gemma 12B + Sonnet reviewer | 11% (3 of 27) / 0% (0 of 8) | 0.0 / 0.0 | ~19 min | $0.01–0.05 | $0.01 / none found |
+| d) Gemma 12B + Opus reviewer | 7% (2 of 27) / 0% (0 of 8) | 0.0 / 0.0 | ~19 min | $0.07–0.21 | $0.11 / none found |
+| Gemma 12B alone (run 5) | 7% / 0% | 0.0 / 0.0 | ~22 min | $0 (local) | — |
+
+- **Recommended default: Haiku 5.5 as the agent, no reviewer.** It finds most of what Sonnet
+  finds (on the holdout, 5 of 8 bug-runs against Sonnet's 6 of 8, and the one technique-driven
+  bug Sonnet missed), with no false alarms, in about four minutes, at roughly a fifteenth of
+  Sonnet's cost per verified judgement bug. That is the product's cost story: a run costs cents,
+  not dollars.
+- **"Thorough" option: Sonnet 5.5 as the agent.** About +7 points on the shop and +13 on the
+  holdout (1–2 more bug-runs per app in these samples) for 16–28× the cost per run. Its extra
+  reports on clean builds were real behaviour, so they cost triage time rather than trust.
+- **Not recommended: a cheap local explorer with a strong Claude reviewer.** The explorer limits
+  it: the reviewer only sees what the explorer flags, so neither Sonnet nor Opus raised Gemma's
+  holdout score above 0%, and Opus did no better than Sonnet. Cheap per run, but a run finds
+  little and takes 5× longer. Keep local Gemma as the free or offline option, with the qwen3:14b
+  reviewer if anything (run 5: 19% shop).
+- **Not changed in code (decided without the owner):** `AGENT_MODEL` (API) and `CLAUDE_CLI_MODEL`
+  stay `claude-sonnet-5-5`. The API path (`ClaudeClient`) has never made a real call; switching a
+  default customers get on the strength of 5 claude-cli runs per model is the owner's product call.
+  Under "Needs me".
+- **Caveats, stated plainly:** samples are small (3 shop and 2 holdout runs per setup; one bug-run
+  is 4–13 points); Haiku's 62% holdout rests on two runs; costs are estimates from claude-cli token
+  counts, and the API client builds its own prompts and cache, so real API cost will differ; one
+  Haiku run was cut short by the "tools not available" failure (D89), so Haiku's shop number is if
+  anything an underestimate.

@@ -1299,3 +1299,50 @@ brand-new team.
    like the demo account.
 3. *What did writing the e2e test find?* Concurrent first sign-ins raced on the unique email;
    the fake model's script was shared between runs; the dev demo account would hit Free's limits.
+
+## Run 6: claude-cli runs made measurable (`llm/claude_cli.py: usage_from_cli, _check_answer`, `llm/pricing.py`, `execute.py: over_budget`, `benchmark.py: check_pinned_models, stop_reason, estimated_cost`, D88)
+
+**What.** Claude through the `claude` command line (the owner's Pro plan, no API key) now
+1. runs pinned model IDs (`CLAUDE_CLI_MODEL`, `CLAUDE_CLI_CHEAP_MODEL`; a reviewer on claude-cli
+   uses `REVIEWER_MODEL`), and a benchmark refuses an alias like "sonnet" before queuing anything;
+2. records, per call, the model the CLI itself reports (`modelUsage → canonicalModel`) and all four
+   token types: uncached input, output, cache reads, cache writes (and which writes were 1-hour);
+3. stores an **API-equivalent cost estimate** per step, run and reviewer share, next to the
+   charged cost (still $0), and spends budgets in it: `MAX_RUN_COST_USD` per run,
+   `BENCH_MAX_COST_USD` per benchmark;
+4. stops for good on a usage limit, or on the first call paid from usage credits: a latch in the
+   process refuses every later claude-cli call, the run fails, the benchmark stops its queued runs
+   and saves what finished, marked incomplete (off the leaderboard).
+
+The benchmark prints and stores estimated cost per run and per verified planted bug, and the
+benchmark page shows them, always labelled "est.".
+
+**How the estimate is computed.** `usage_from_cli` reads `modelUsage` (one entry per model a call
+used: a screenshot call can use two turns) and prices each entry with `pricing.py`. The one real
+Haiku call recorded as a fixture showed the CLI writes its prompt cache with a 1-hour TTL, which
+costs 2× the input price instead of 1.25×; with that line in the price table our number equals
+the CLI's own `total_cost_usd` for that call (a test checks it). If they ever differ by more than
+1%, a warning says `pricing.py` is out of date.
+
+**Why.** Run 3's best result said "sonnet": an alias that moves to whatever model is newest, so the
+row didn't say which model ran, and its $0 cost said nothing about what a customer would pay on
+the API. A budget measured in charges also never stops a flat-rate run: a looping Sonnet run would
+spend the owner's weekly limit and then their credits.
+
+**Weak spots.** The estimate assumes the API would see the same tokens the CLI sends; the API
+path (`ClaudeClient`) builds its own prompt and caching, so real API cost will differ somewhat.
+The usage-limit fixture is synthetic (recording one would spend the limit), so the detector keys
+on several signals (`is_error` with limit text, HTTP 429, a failing exit whose output mentions the
+limit, `fallback_credit`). Samples are small: 3 shop runs and 2 holdout runs per benchmark.
+
+**Interview Q&A**
+1. *Why record the model the provider reports instead of the one you asked for?* What you ask for
+   and what runs can differ (aliases, fallbacks, a CLI that routes a sub-task to a smaller model).
+   A measurement is only as good as its label.
+2. *Your Claude calls cost $0. Why have a cost budget at all?* The $0 is a flat-rate plan, not a
+   free model. The estimate is the price a customer would pay, which is what the product has to
+   be priced on; and the budget is the only thing that stops a runaway loop from draining the plan.
+3. *How do you make sure a rate limit doesn't turn into a retry storm?* A process-wide latch: the
+   first limit answer sets it, every later call (any client, the reviewer too) is refused before
+   the CLI starts, the loop doesn't treat it as an ordinary model error, and the benchmark stops
+   its queue and saves what finished.

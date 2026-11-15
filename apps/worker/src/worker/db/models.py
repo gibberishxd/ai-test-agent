@@ -130,12 +130,20 @@ class Run(Base):
     input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    # Run 6, L1: the cached share of input_tokens, and the API-equivalent cost (an estimate
+    # for claude-cli, charged $0; equal to cost_usd for a provider that charges).
+    cache_read_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    cache_write_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    estimated_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
     # The reviewer tier's share of the tokens and cost above (run 5, K2); null model = none.
     reviewer_provider: Mapped[str | None]
     reviewer_model: Mapped[str | None]
     reviewer_input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     reviewer_output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     reviewer_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    reviewer_cache_read_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    reviewer_cache_write_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    reviewer_estimated_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
     error: Mapped[str | None]
     summary: Mapped[dict | None] = mapped_column(JSONB)
     share_token: Mapped[str | None] = mapped_column(unique=True)
@@ -176,6 +184,12 @@ class Step(Base):
     input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
+    # Run 6, L1: the model the provider reports for this call, the cached share of
+    # input_tokens, and the API-equivalent cost (see Run).
+    model: Mapped[str | None]
+    cache_read_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    cache_write_tokens: Mapped[int] = mapped_column(server_default=text("0"))
+    estimated_cost_usd: Mapped[float] = mapped_column(server_default=text("0"))
     created_at: Mapped[datetime] = _created_at()
 
     run: Mapped[Run] = relationship(back_populates="steps")
@@ -228,6 +242,9 @@ class BenchmarkResult(Base):
     false_alarms: Mapped[float]
     avg_cost_usd: Mapped[float]
     avg_duration_s: Mapped[float]
+    # Run 6, L1: API-equivalent cost (an estimate for claude-cli); null = not measured.
+    avg_estimated_cost_usd: Mapped[float | None]
+    estimated_cost_per_verified_bug: Mapped[float | None]
     ai_recall: Mapped[float | None]
     holdout_runs_buggy: Mapped[int | None]
     holdout_recall: Mapped[float | None]

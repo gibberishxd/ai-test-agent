@@ -30,7 +30,7 @@ from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.reviewer import review_mismatch
 from worker.agent.tools import TOOL_NAMES, TOOLS
 from worker.browser import VIEWPORTS, listen, viewport_label, wait_until_quiet
-from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage
+from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage, UsageLimitReached
 from worker.login import LoginConfig, SignInResult, on_login_page
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
@@ -170,7 +170,7 @@ class AgentRun:
                 self.result.stop_reason = f"the model call failed: {error}"
                 break
             loop_reason = budget.record(
-                step.action, step.args, step.usage.cost_usd, changed=step.changed
+                step.action, step.args, step.usage.api_cost_usd, changed=step.changed
             )
             if step.action == "finish" and not step.blocked:
                 self.result.stop_reason = "finished"
@@ -205,6 +205,8 @@ class AgentRun:
         except ModelTimeout:
             # A long observation is what makes a local model slow: one more try, shorter.
             decision = self._decide(observation(trimmed=True), None)
+        except UsageLimitReached:
+            raise  # never carry on (run 6): the run fails and a benchmark stops
         except Exception as error:  # connection refused, provider error...
             raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
         index = len(self.result.steps) + 1
@@ -229,6 +231,8 @@ class AgentRun:
     def _decide(self, observation: str, image: bytes | None):
         try:
             return self.llm.decide(SYSTEM_PROMPT, observation, TOOLS, image)
+        except UsageLimitReached:
+            raise
         except Exception as error:
             raise ModelCallFailed(f"{type(error).__name__}: {_first_line(error)}") from error
 
@@ -582,7 +586,7 @@ class AgentRun:
             )
             return f"{flagged}: reviewer: not a bug ({review.reason})"
         element = outcome.get("element") or {}
-        named = {"element": {"role": element.get("role"), "name": element["name"]}}
+        named = {"element": {"role": element.get("role"), "name": element.get("name")}}
         self._record_bug(
             review.report,
             url=self.page.url,
@@ -602,7 +606,7 @@ class AgentRun:
         if usage is None:
             return
         self.result.reviewer_usage.append(usage)
-        self.config.budget.cost_usd += usage.cost_usd
+        self.config.budget.cost_usd += usage.api_cost_usd
 
     def _field_values(self) -> dict[str, str]:
         try:

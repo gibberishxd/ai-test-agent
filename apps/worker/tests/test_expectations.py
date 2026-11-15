@@ -303,3 +303,13 @@ def test_reviewer_cost_counts_against_the_run_budget(tiered):
     result = run.run()
     assert run.config.budget.cost_usd >= 0.25
     assert result.reviewer_usage[0].cost_usd == 0.25
+
+
+def test_a_reviewer_bug_on_a_step_without_a_named_element_is_recorded_not_a_crash(tiered):
+    # Run 6, (c): a flagged reload (no element) that the reviewer called a bug raised
+    # KeyError: 'name' and failed the whole run, losing the bug and every step after it.
+    run, _, _ = tiered([call("reload", expect="Total: $36.00")], [BUG_ANSWER])
+    result = run.run()
+    [bug] = result.bugs
+    assert bug.title == "Total ignores quantity"
+    assert "element" not in bug.evidence

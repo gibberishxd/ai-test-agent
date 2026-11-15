@@ -12,9 +12,17 @@ step ends with a clear error (the loop counts it as a step with no action).
 The CLI runs in a temporary folder outside the repo with --restricted: started inside the repo
 it would load CLAUDE.md and could read the demo apps' bugs.json, which would spoil the
 benchmark. A screenshot is written to that folder for the Read tool; without one, no tools.
+
+Run 6 (L1) made these runs measurable: models are pinned by full ID (CLAUDE_CLI_MODEL,
+CLAUDE_CLI_CHEAP_MODEL), every call records the model the CLI reports and all four token
+types, and an API-equivalent cost estimate is computed from them with llm/pricing.py (the
+charged cost stays $0). A usage-limit answer, or a call paid from usage credits, latches: no
+claude-cli client in this process calls the CLI again (the owner's credits are never drained
+by a loop).
 """
 
 import json
+import logging
 import re
 import subprocess
 import tempfile
@@ -23,10 +31,36 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from worker.llm.base import Decision, LLMClient, TextResult, ToolCall, ToolSpec, Usage
+from worker.llm.base import (
+    Decision,
+    LLMClient,
+    TextResult,
+    ToolCall,
+    ToolSpec,
+    Usage,
+    UsageLimitReached,
+)
+from worker.llm.pricing import cost_usd
+
+log = logging.getLogger(__name__)
 
 Runner = Callable[[list[str], str, Path], str]  # (command, stdin, working directory) -> stdout
 TIMEOUT_S = 300
+
+# A full model ID ("claude-sonnet-5-5", "claude-sonnet-4-5-20250929"), not an alias ("sonnet").
+PINNED_ID = re.compile(r"^claude-[a-z]+(-\d+)+$")
+# How the CLI says the plan's limit is reached (checked on errors only, case-insensitive).
+LIMIT_TEXT = re.compile(r"usage limit|hit your limit|limit reached|rate.?limit|weekly limit", re.I)
+
+_limit_message: str | None = None  # set once a call reports a usage limit: see _check_latch
+
+
+class CliFailed(RuntimeError):
+    """The `claude` command exited with an error (its stderr and stdout are in the message)."""
+
+    def __init__(self, code: int, output: str):
+        super().__init__(f"claude exited with {code}: {output[:300]}")
+        self.output = output
 
 
 def run_cli(command: list[str], stdin: str, cwd: Path) -> str:
@@ -40,8 +74,95 @@ def run_cli(command: list[str], stdin: str, cwd: Path) -> str:
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"claude exited with {result.returncode}: {result.stderr[:300]}")
+        raise CliFailed(result.returncode, f"{result.stderr} {result.stdout}".strip())
     return result.stdout
+
+
+def is_pinned_model_id(model: str) -> bool:
+    return bool(PINNED_ID.match(model or ""))
+
+
+def limit_reached() -> str | None:
+    """Why claude-cli calls stopped in this process, or None while they may still run."""
+    return _limit_message
+
+
+def reset_limit_latch() -> None:
+    """For tests only: a real process never un-latches."""
+    global _limit_message
+    _limit_message = None
+
+
+def _latch(message: str) -> UsageLimitReached:
+    global _limit_message
+    _limit_message = _limit_message or message
+    log.error("claude-cli stopped: %s", message)
+    return UsageLimitReached(message)
+
+
+def usage_from_cli(data: dict, requested: str) -> Usage:
+    """Tokens, the model the CLI reports and the API-equivalent cost of one CLI answer.
+
+    `modelUsage` (one entry per model the call used) is preferred: it names the model exactly
+    and lets each be priced at its own rate. Without it, `usage` and the requested model.
+    """
+    per_model = data.get("modelUsage") or {}
+    if not per_model:
+        u = data.get("usage") or {}
+        per_model = {
+            requested: {
+                "inputTokens": u.get("input_tokens"),
+                "outputTokens": u.get("output_tokens"),
+                "cacheReadInputTokens": u.get("cache_read_input_tokens"),
+                "cacheCreationInputTokens": u.get("cache_creation_input_tokens"),
+                "cacheCreationEphemeral1hInputTokens": (u.get("cache_creation") or {}).get(
+                    "ephemeral_1h_input_tokens"
+                ),
+            }
+        }
+    total = Usage(model="+".join(m.get("canonicalModel") or name for name, m in _items(per_model)))
+    for name, m in _items(per_model):
+        part = Usage(
+            model=m.get("canonicalModel") or name,
+            input_tokens=int(m.get("inputTokens") or 0),
+            output_tokens=int(m.get("outputTokens") or 0),
+            cache_read_tokens=int(m.get("cacheReadInputTokens") or 0),
+            cache_write_tokens=int(m.get("cacheCreationInputTokens") or 0),
+            cache_write_1h_tokens=int(m.get("cacheCreationEphemeral1hInputTokens") or 0),
+        )
+        total.input_tokens += part.input_tokens
+        total.output_tokens += part.output_tokens
+        total.cache_read_tokens += part.cache_read_tokens
+        total.cache_write_tokens += part.cache_write_tokens
+        total.cache_write_1h_tokens += part.cache_write_1h_tokens
+        total.estimated_cost_usd += cost_usd(part.model, part)
+    reported = data.get("total_cost_usd")
+    if isinstance(reported, int | float) and reported > 0:
+        if abs(reported - total.estimated_cost_usd) > 0.01 * reported:
+            # The CLI prices its own calls at list price: a gap means pricing.py is out of date.
+            log.warning(
+                "claude-cli estimate $%.6f differs from the CLI's own $%.6f (%s): check pricing.py",
+                total.estimated_cost_usd,
+                reported,
+                total.model,
+            )
+    return total  # cost_usd stays 0: the Pro plan charges nothing per call
+
+
+def _items(per_model: dict) -> list[tuple[str, dict]]:
+    return [(name, m) for name, m in per_model.items() if isinstance(m, dict)]
+
+
+def _check_answer(data: dict) -> None:
+    """Raise on an error answer: UsageLimitReached for a limit or credits, else RuntimeError."""
+    usage = data.get("usage") or {}
+    if usage.get("fallback_credit"):
+        raise _latch("the call was paid from usage credits (the weekly limit is used up)")
+    if data.get("is_error"):
+        text = f"{data.get('result') or ''} {data.get('api_error_status') or ''}"
+        if LIMIT_TEXT.search(text) or data.get("api_error_status") == 429:
+            raise _latch(f"usage limit: {text.strip()[:200]}")
+        raise RuntimeError(f"claude-cli error: {text.strip()[:300]}")
 
 
 class ClaudeCliClient(LLMClient):
@@ -49,8 +170,8 @@ class ClaudeCliClient(LLMClient):
 
     def __init__(
         self,
-        agent_model: str = "sonnet",
-        cheap_model: str = "haiku",
+        agent_model: str = "claude-sonnet-5-5",
+        cheap_model: str = "claude-haiku-5-5",
         run: Runner = run_cli,
         temp_dir: Path | None = None,
     ):
@@ -66,14 +187,13 @@ class ClaudeCliClient(LLMClient):
         image_path = self._write_image(image) if image else None
         if image_path:
             prompt += f"\n\nA screenshot of the current page is at {image_path}. Read it first."
-        usage = Usage(model=self.agent_model)
+        usage = Usage(model="")  # filled from the CLI's answers
         problem = ""
         for _attempt in range(2):  # the first answer, and one retry with the reason
             text, used, denied = self._call_with_denials(
                 self.agent_model, system, prompt, image_path
             )
-            usage.input_tokens += used.input_tokens
-            usage.output_tokens += used.output_tokens
+            usage = _add(usage, used)
             if denied:
                 # The model tried to call a tool natively, was refused by the CLI and may have
                 # concluded it has no tools (run 3, H7). Don't take that answer; correct it once.
@@ -135,11 +255,19 @@ class ClaudeCliClient(LLMClient):
             command += ["--system-prompt", system]
         if image_path:
             command += ["--allowedTools", "Read", "--add-dir", str(image_path.parent)]
+        if _limit_message:
+            raise UsageLimitReached(f"claude-cli stopped earlier: {_limit_message}")
         for folder in (self._temp_dir, image_path.parent if image_path else None):
             if folder is not None:
                 outside_repo(folder)
-        data = json.loads(self._run(command, prompt, self._temp_dir))
-        usage = data.get("usage") or {}
+        try:
+            out = self._run(command, prompt, self._temp_dir)
+        except CliFailed as error:
+            if LIMIT_TEXT.search(error.output):
+                raise _latch(f"usage limit: {error.output.strip()[:200]}") from error
+            raise
+        data = json.loads(out)
+        _check_answer(data)
         denied = list(
             dict.fromkeys(
                 str(d.get("tool_name") or "?")
@@ -147,16 +275,21 @@ class ClaudeCliClient(LLMClient):
                 if isinstance(d, dict)
             )
         )
-        return (
-            str(data.get("result") or ""),
-            Usage(
-                model=model,
-                input_tokens=usage.get("input_tokens", 0) or 0,
-                output_tokens=usage.get("output_tokens", 0) or 0,
-                cost_usd=0.0,  # the Pro plan: no per-call charge
-            ),
-            denied,
-        )
+        return str(data.get("result") or ""), usage_from_cli(data, requested=model), denied
+
+
+def _add(total: Usage, more: Usage) -> Usage:
+    """Two calls' usage as one (a decision retried once); the reported model is kept."""
+    return Usage(
+        model=total.model or more.model,
+        input_tokens=total.input_tokens + more.input_tokens,
+        output_tokens=total.output_tokens + more.output_tokens,
+        cache_read_tokens=total.cache_read_tokens + more.cache_read_tokens,
+        cache_write_tokens=total.cache_write_tokens + more.cache_write_tokens,
+        cache_write_1h_tokens=total.cache_write_1h_tokens + more.cache_write_1h_tokens,
+        cost_usd=total.cost_usd + more.cost_usd,
+        estimated_cost_usd=total.estimated_cost_usd + more.estimated_cost_usd,
+    )
 
 
 def native_tool_correction(denied: list[str]) -> str:

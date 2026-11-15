@@ -78,7 +78,7 @@ def run_passive(
     bugs = list(report.bugs)
 
     if settings.review_pages > 0 and not run.stop_requested:
-        budget = max(settings.max_run_cost_usd - run.cost_usd, 0)
+        budget = remaining_budget(settings, run)
         review = review_screenshots(report.pages, llm, storage, settings.review_pages, budget)
         for usage in review.usages:
             index = next(step_numbers)
@@ -116,10 +116,16 @@ def page_events(page: PageResult) -> list[dict]:
 
 
 def usage_fields(usage: Usage) -> dict:
+    """A model call as step columns: `input_tokens` counts every input token (cached or not),
+    `cache_*` the cached share; `estimated_cost_usd` is the API-equivalent cost (run 6)."""
     return {
+        "model": usage.model or None,
         "input_tokens": usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens,
         "output_tokens": usage.output_tokens,
+        "cache_read_tokens": usage.cache_read_tokens,
+        "cache_write_tokens": usage.cache_write_tokens,
         "cost_usd": usage.cost_usd,
+        "estimated_cost_usd": usage.api_cost_usd,
     }
 
 
@@ -127,7 +133,21 @@ def add_usage(run: Run, usage: Usage) -> None:
     fields = usage_fields(usage)
     run.input_tokens += fields["input_tokens"]
     run.output_tokens += fields["output_tokens"]
+    run.cache_read_tokens += fields["cache_read_tokens"]
+    run.cache_write_tokens += fields["cache_write_tokens"]
     run.cost_usd += fields["cost_usd"]
+    run.estimated_cost_usd += fields["estimated_cost_usd"]
+
+
+def over_budget(settings: Settings, run: Run, pending: list[Usage] = ()) -> bool:
+    """Has the run (plus `pending` calls not stored yet) spent MAX_RUN_COST_USD? Counted in
+    API-equivalent cost, so a run on a flat-rate plan (claude-cli) still stops (run 6)."""
+    spent = run.estimated_cost_usd + sum(u.api_cost_usd for u in pending)
+    return spent >= settings.max_run_cost_usd
+
+
+def remaining_budget(settings: Settings, run: Run) -> float:
+    return max(settings.max_run_cost_usd - run.estimated_cost_usd, 0)
 
 
 def summarize(pages: list[PageResult], bugs: list[BugReport]) -> dict:
@@ -207,7 +227,7 @@ def run_interactive(
     budget = Budget(
         max_steps=max_steps,
         max_seconds=max(max_seconds - (time.monotonic() - started), 0),
-        max_cost_usd=max(settings.max_run_cost_usd - run.cost_usd, 0),
+        max_cost_usd=remaining_budget(settings, run),
         max_repeats=settings.max_repeated_actions,
     )
     first_agent_step = run.step_count
@@ -327,7 +347,7 @@ def _review_candidates(
     for bug in explorer_reports:
         if "reviewer" in (bug.evidence or {}):
             continue
-        if run.cost_usd + sum(u.cost_usd for u in usages) >= settings.max_run_cost_usd:
+        if over_budget(settings, run, pending=usages):
             break  # out of budget: replay still checks the rest
         review = review_candidate(
             reviewer,
@@ -357,7 +377,10 @@ def _review_candidates(
         fields = usage_fields(usage)
         run.reviewer_input_tokens += fields["input_tokens"]
         run.reviewer_output_tokens += fields["output_tokens"]
+        run.reviewer_cache_read_tokens += fields["cache_read_tokens"]
+        run.reviewer_cache_write_tokens += fields["cache_write_tokens"]
         run.reviewer_cost_usd += fields["cost_usd"]
+        run.reviewer_estimated_cost_usd += fields["estimated_cost_usd"]
     session.commit()
 
 
@@ -415,7 +438,7 @@ def verify_and_dedupe(
     if candidates and not run.stop_requested:
         with guarded_browser(settings, run.target_url, browser, login) as (new_context, _guard):
             for bug in candidates:
-                if run.cost_usd >= settings.max_run_cost_usd:
+                if over_budget(settings, run):
                     break  # out of budget: leave the rest as unverified candidates
                 verdict, start_url = _replay_bug(
                     session, run, llm, settings, new_context, bug, steps, login
@@ -497,7 +520,7 @@ def _replay_bug(
         finally:
             context.close()
         _log_model_step(session, run, "verify_bug", {"bug": bug.title}, verdict.usage)
-        if verdict.reproduced or run.cost_usd >= settings.max_run_cost_usd:
+        if verdict.reproduced or over_budget(settings, run):
             break
     return verdict, start_url
 

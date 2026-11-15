@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr = SecretStr("")
     agent_model: str = "claude-sonnet-5-5"
     cheap_model: str = "claude-haiku-5-5"
+    # LLM_PROVIDER=claude-cli (run 6): full model IDs, never an alias like "sonnet", so a result
+    # says exactly which model ran. The benchmark refuses to start on an alias.
+    claude_cli_model: str = "claude-sonnet-5-5"
+    claude_cli_cheap_model: str = "claude-haiku-5-5"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-vl:8b-instruct"
     # Any OpenAI-style chat completions API (OpenAI, Gemini, OpenRouter, Groq, LM Studio, vLLM,
@@ -63,6 +67,9 @@ class Settings(BaseSettings):
     max_run_seconds: int = 480
     max_run_cost_usd: float = 1.00
     max_repeated_actions: int = 3
+    # A benchmark stops when its runs' API-equivalent cost reaches this (run 6): a guard against
+    # a runaway loop on the owner's plan, not a measurement setting. 0 = no cap.
+    bench_max_cost_usd: float = 5.00
 
     # Passive scan
     max_pages: int = 30

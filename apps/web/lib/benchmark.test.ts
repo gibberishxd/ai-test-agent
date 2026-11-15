@@ -37,6 +37,8 @@ function row(fields: Partial<BenchmarkRow>): BenchmarkRow {
     holdoutAiRecall: null,
     holdoutPrecision: null,
     holdoutFalseAlarms: null,
+    avgEstimatedCostUsd: null,
+    estimatedCostPerVerifiedBug: null,
     judge: null,
     rescoreCommit: null,
     ...fields,
