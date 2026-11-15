@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { acceptAdd } from "../addToCart";
 import { bug } from "../bugs";
@@ -31,7 +31,6 @@ export function ProductPage() {
 
 function ProductDetails({ product }: { product: Product }) {
   const { addToCart } = useStore();
-  const lastAdd = useRef<number | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
@@ -56,10 +55,8 @@ function ProductDetails({ product }: { product: Product }) {
           <button
             type="button"
             className="button"
-            onClick={() => {
-              const now = Date.now();
-              if (!acceptAdd(lastAdd.current, now)) return;
-              lastAdd.current = now;
+            onClick={(event) => {
+              if (!acceptAdd(event.detail)) return; // the second click of a double click
               addToCart({ productId: product.id, name: product.name, price: product.price, quantity });
               setAdded(true);
             }}

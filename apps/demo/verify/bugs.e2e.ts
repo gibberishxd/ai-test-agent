@@ -169,3 +169,14 @@ test("fixed (v2): the profile's recent orders are the orders on My orders", asyn
   const mine = await page.getByRole("link", { name: /Order #\d+/ }).allTextContents();
   expect(recentIds).toEqual(mine.map((t) => t.match(/#(\d+)/)?.[1]).sort());
 });
+
+// Separate clicks still add each time, however fast: a replay repeats a user's clicks faster than
+// the user made them, and must reach the same cart (the first v2 guard, a 500 ms window, didn't).
+test("fixed (v2): two separate clicks on Add to cart add twice", async ({ page }) => {
+  await page.goto("/products/1");
+  await page.getByLabel("Quantity").fill("1");
+  const add = page.getByRole("button", { name: "Add to cart" });
+  await add.click();
+  await add.click();
+  await expect(page.getByRole("link", { name: /Cart \(2\)/ })).toBeVisible();
+});

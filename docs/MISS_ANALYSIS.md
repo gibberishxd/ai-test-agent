@@ -587,3 +587,41 @@ Per judgement bug: found in N of the buggy runs (shop 3, holdout 2). R = reached
 - **Every setup:** bug 11 (log out, then reload) and bug 6 (an invalid email at checkout) were
   found by no setup in run 6: the first needs a two-step sequence nobody chose in 40 steps, the
   second an invalid value typed on a page most runs reached late or not at all.
+
+## Run 7, M2: Haiku 5.5 on benchmark v2 (the baseline)
+
+Result `e92d2c6b` (commit 3276fab), `claude-haiku-5-5`, benchmark **v2** (the four unplanted
+behaviours fixed, D93), judge ollama/gemma4:12b, 480 s and 40 steps, holdout first. No usage
+limit. $0.72 estimated for the 7 runs. Runs: holdout 004ae115, 4d761dd0, clean c0cd6ae3; shop
+9288c7a3, 5989e6a9, 04a98fc6, clean dc157d67.
+
+| Bug | found | dropped | reached | never |
+|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0 | **3** | 0 | 0 |
+| Shop 6. Invalid email at checkout | 0 | 0 | 0 | 3 |
+| Shop 7. Discount twice | 1 | 0 | 2 | 0 |
+| Shop 8. Save changes does nothing | 3 | 0 | 0 | 0 |
+| Shop 9. $NaN | 2 | 0 | 1 | 0 |
+| Shop 10. Long name on mobile | 0 | 0 | 0 | 3 |
+| Shop 11. Session after logout + reload | 0 | 0 | 3 | 0 |
+| Shop 12. Wrong-password error placement | 0 | 0 | 0 | 3 |
+| Shop 13. Wrong order opened | 3 | 0 | 0 | 0 |
+| Holdout 3. One night charged | 2 | 0 | 0 | 0 |
+| Holdout 4. Check-out before check-in | 2 | 0 | 0 | 0 |
+| Holdout 5. Double-click Book now | 1 | 0 | 1 | 0 |
+| Holdout 6. Room name on mobile | 1 | 0 | 1 | 0 |
+
+Against run 6's Haiku (v1, `091936b3`): shop 26% → 33%, holdout 62% → 75%; no run ended early
+(the early-finish correction, D92, had nothing to correct this time). Clean-shop false alarms
+2.0: "quantity 0 is added as 1" (the owner's open product question) and "a long special-character
+search closes the search panel with no message" (new; real behaviour of the clean build).
+
+**Bug 5 was lost to my own guard (D96).** Haiku found it in all 3 shop runs (quantity 2, line
+$24.00, total $12.00); replay dismissed all three, seeing quantity 1. The agent had clicked "Add
+to cart" twice, seconds apart; replay repeats steps back to back and M1's 500 ms double-click
+guard swallowed the second click. With the guard keyed on the click's `detail` instead, the shop
+would have read 12 of 27 (44%) if replay had confirmed them, as it did in run 6. The holdout is
+unaffected.
+
+**Misses:** checkout (bug 6), the long-name product (10) and the login page (12) never reached
+in 40 steps; logout + reload (11) reached in all 3 runs but never the two-step sequence.

@@ -155,6 +155,28 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Run 7 (branch `agent-v7`, plan in `docs/RUN_PLAN_7.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| M0 Plan | done | PR #9 merged, PR #10 (FSL license) still open (not merged by us; branched from main anyway); `agent-v7`; RUN_PLAN_7.md; `docs/specs/TEMPLATE.md`; the owner asked to write `apps/demo2/specs.md`. |
+| M1 Decisions | done | Haiku the default (config, claude-cli, web model form, `.env.example`, README; D92); the early finish corrected once in the claude-cli adapter (test from run 6's e3eb2b69 summary); the 4 demo behaviours fixed in both builds with unit tests and `verify-bugs` checks; benchmark v2 in bench output, `benchmark_results.benchmark_version` and the leaderboard key (D93). |
+| M2 Baseline | done | Haiku benchmark v2 `e92d2c6b` (table below). It exposed a flaw in M1's double-click guard (replays lost a second "Add to cart"); fixed by click detail (D96). |
+| M3 Specs | code done; measurement waits for the owner's `apps/demo2/specs.md` | |
+| M4 Flows | code done; measuring | |
+| M5 MCP | todo | |
+| M6 Final measurement | todo | |
+| M7 Wrap-up | todo | |
+
+### Run 7 measurements (benchmark v2; claude-cli, judge pinned to ollama/gemma4:12b, 480 s and 40 steps; shop 3 + clean, holdout 2 + clean, holdout first)
+Counts are bug×run slots (shop 9 judgement bugs × 3 = 27 of 39 in all; holdout 4 × 2 = 8 of 12). Estimated cost = API-equivalent from the CLI's token counts (D88), not a charge.
+
+| Benchmark | Result | Model | Specs / flows | Shop AI-only | Shop all | Holdout AI-only | Holdout all | Precision shop / holdout | False alarms clean shop / holdout | Avg run | Est. API cost / run | Date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M2 baseline | `e92d2c6b` (commit 3276fab) | claude-haiku-5-5 | none / none | 33% (9 of 27)* | 54% (21 of 39) | 75% (6 of 8) | 83% (10 of 12) | 100% / 93% | 2.0 / 0.0 | 273 s | $0.104 shop, $0.101 holdout ($0.72 for the 7 runs) | 2026-11-15 |
+
+\* Undercounts bug 5: reported in all 3 shop runs, dismissed by replay because M1's double-click guard swallowed the replay's second "Add to cart" (D96, fixed after this run).
+
 ## Run 6 (branch `agent-v6`, plan in `docs/RUN_PLAN_6.md`)
 
 | Goal | Status | Check |

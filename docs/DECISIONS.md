@@ -1188,3 +1188,64 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   result (`benchmark_results.benchmark_version`, `v1` for every older row), part of the
   leaderboard's key, shown on the benchmark page. A benchmark of v1 can no longer be made: the
   apps are what they are; old v1 rows stay as they were.
+
+## D94. Specs: a team's requirements, embedded locally and retrieved per page (run 7, M3)
+- **Storage:** `targets` (an app by origin, per workspace), `specs` (Markdown or text per
+  target), `spec_chunks` (a spec split at its headings, each piece with a `vector(768)`), all
+  under row-level security. pgvector in our own Postgres (`pgvector/pgvector:0.8.1-pg17` in dev,
+  CI and the production compose file); an HNSW index with cosine distance. Alternatives: a
+  separate vector database (one more service to run, back up and secure, for a few hundred rows
+  per customer); IVFFlat (needs rebuilding as specs grow).
+- **Embedding model: `nomic-embed-text` through Ollama** (decided without the owner). 274 MB,
+  768 dimensions, an 8k-token context, ~28 ms per call warm on this 16 GB Mac (0.9 s cold); it
+  wants task prefixes (`search_document:` / `search_query:`), which `OllamaEmbedder` adds.
+  Considered: `mxbai-embed-large` (1024 dims, 2.5× the size, no need at this scale),
+  `embeddinggemma` / `qwen3-embedding` (larger downloads, no measured gain for short English
+  requirements). The model's name is stored per spec; a different model re-embeds everything.
+- **Chunking:** at Markdown headings, each chunk keeps its heading path ("Booking > Dates"); a
+  long section splits between lines at 800 characters. Requirements are short and their headings
+  carry meaning, so no overlap and no token-based splitter.
+- **When embedding happens:** in the worker, at the start of a run on the target, for specs that
+  are new, edited (the web clears `chunked_at`) or embedded with another model. One place that
+  embeds, one model, and no Ollama connection from the web app. If Ollama is down, the run goes
+  on without specs and logs a warning.
+- **Retrieval:** per page, the query is its path, title and the start of its text (400
+  characters). The 8 nearest chunks are fetched; at most 3 within cosine distance 0.55 and 1,500
+  characters (~400 tokens) are shown. One embedding call per distinct page, cached for the run.
+- **In the prompt:** a REQUIREMENTS section in the observation, fenced as `<spec_content>`, and
+  a task line saying to cite a broken requirement with its label ([S2]), only when the target has
+  specs. The system prompt and the tools don't change, so a run without specs is the M2 run.
+  A cited requirement is stored in `evidence.spec` and given to the replay judge.
+- **Kept on by default (`USE_SPECS=true`)** only if the holdout measurement says so (D96).
+
+## D95. Critical flows: journeys learned once, replayed without a model (run 7, M4)
+- **Storage:** `flows` (name, the journey in plain language, the saved script as JSON, the last
+  status) and `flow_results` (one per journey per run), under row-level security; at most 10
+  flows per target (a trigger; the roadmap's 3–10).
+- **A journey is an episode, not a new tool.** The agent gets the journey as its focus, at most
+  15 steps, and finishes with "PASSED: <quoted text that shows it worked>" or "FAILED: ...". No
+  new tool and no system prompt change, so exploration is unchanged. Alternative: begin_flow /
+  end_flow tools. Rejected: a tool every run carries, for something only some targets have.
+- **The script** is the episode's effective actions (clicks, typing, selects, navigation; not
+  notes, blocked or failed steps) with the elements they acted on, plus the quoted texts as
+  checks. Replay uses the same code as bug verification (`verify.replay`: role and name, nearby
+  text, CSS path, position), then each check must be on the page.
+- **Order in a run:** after the deterministic scan, before exploration; journeys spend from the
+  run's step, time and cost budgets. A replayed journey costs no model call. A broken replay goes
+  to the agent: repaired → the script is replaced; not → a "Critical flow failed" finding,
+  verified by replay like any other.
+- **Editing the wording drops the script** (the old steps may not match the new journey).
+
+## D96. The first v2 double-click guard broke replays; fixed by click detail (run 7, M2)
+- **What M2 showed:** bug 5 (cart total ignores quantity) was reported in all 3 shop runs and
+  dismissed by replay all 3 times: replay saw quantity 1, not 2. The agent had clicked "Add to
+  cart" twice, seconds apart; replay repeats steps back to back, under 500 ms apart, and M1's
+  guard (ignore a click within 500 ms of the last) swallowed the second. My bug, not the agent's.
+- **Fix:** ignore only the later clicks of a multi-click (`event.detail >= 2`): a double click
+  adds once, two separate clicks add twice however fast they come. Unit test and a `verify-bugs`
+  check that two separate clicks add twice, in both builds.
+- **Labelling (decided without the owner, revisit):** still "benchmark v2": the intended
+  behaviour is the same (a double click adds once); the M2 result `e92d2c6b` stays as measured,
+  with this caveat in PROGRESS and MISS_ANALYSIS: its shop number undercounts bug 5 (3 correct
+  reports lost to the guard). Holdout numbers are unaffected. Alternative: call the fixed apps
+  v3. Rejected: one bad guard in my code, not a change of what the benchmark asks.
