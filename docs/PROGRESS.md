@@ -166,7 +166,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | M4 Flows | done | Two measurements on the shop (Haiku, three journeys, table below). The first exposed two flaws (a journey failed for an unrelated bug; checks that can't match next time), fixed in e49bce8. The second: run 1 learned the journeys in 36 model calls (~$0.08), run 2 checked all three by replay with **0 model calls** and found the same failure (Save does nothing) again for free (D95, D97). |
 | M5 MCP | done | `apps/web/mcp`: start_run, get_run_status, get_report over stdio, backed by `/api/v1`; tests with a stand-in API; README setup for Claude Code and Cursor. Done before M3's measurement because that one waits for the owner's specs. |
 | M6 Final measurement | done | Haiku benchmark v2 with the shop's flows `2f9e0744` and one Sonnet benchmark on the same code `5e64c8fc` (table below). It showed two flow flaws inside a signed-in benchmark, fixed after with tests (D98). No usage limit in any run. |
-| M7 Wrap-up | done | README (what it does now, results rows), WALKTHROUGH (specs, embeddings and retrieval, flows, MCP with Q&A), DATABASE (new tables, pgvector, RLS), ROADMAP (what moved), BENCHMARKS, DEPLOY (pgvector upgrade), DECISIONS D92–D98, DEVLOG; `npm test` and `npm run lint` exit 0; demo servers stopped by PID, Ollama running; PR `agent-v7` → main opened, not merged. |
+| M7 Wrap-up | done | README (what it does now, results rows), WALKTHROUGH (specs, embeddings and retrieval, flows, MCP with Q&A), DATABASE (new tables, pgvector, RLS), ROADMAP (what moved), BENCHMARKS, DEPLOY (pgvector upgrade), DECISIONS D92–D98, DEVLOG; `npm test` and `npm run lint` exit 0; demo servers stopped by PID, Ollama running; PR #11 (`agent-v7` → main) opened; merged by the owner on 2026-11-16. |
 
 ### Run 7 measurements (benchmark v2; claude-cli, judge pinned to ollama/gemma4:12b, 480 s and 40 steps; shop 3 + clean, holdout 2 + clean, holdout first)
 Counts are bug×run slots (shop 9 judgement bugs × 3 = 27 of 39 in all; holdout 4 × 2 = 8 of 12). Estimated cost = API-equivalent from the CLI's token counts (D88), not a charge.
@@ -240,9 +240,7 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
-0. **Run 7 (branch `agent-v7`):**
-   - **PR #10 (FSL license) is still open:** review and merge it when you're ready; run 7 didn't
-     touch it.
+0. **Run 7 (branch `agent-v7`, merged in PR #11 on 2026-11-16; the FSL license, PR #10, the same day):**
    - **Write the holdout specs** (`apps/demo2/specs.md`, from `docs/specs/TEMPLATE.md`, without
      looking at `bugs.json`). Then: `cd apps/worker && LLM_PROVIDER=claude-cli
      CLAUDE_CLI_MODEL=claude-haiku-5-5 DEV_MODE=true MAX_RUN_COST_USD=1 BENCH_MAX_COST_USD=2
@@ -292,8 +290,9 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
      past accepted (`validate()` in `apps/demo2/src/booking.ts` has no such check), and a
      double-clicked "Add to cart" adding twice (the shop's button has no guard, unlike the
      holdout's "Book now"). Fix them in the demos or plant them (your call, like quantity 0 → 1).
-**Merged (2026-11-15):** every run is on `main`: #1 demo v1, #2 runs 2–3, #3 and #4 run 5
-(run 4's commits came in with them), #5 the MIT license. The items below that are still open
+**Merged (2026-11-16):** every run is on `main`: #1 demo v1, #2 runs 2–3, #3 and #4 run 5
+(run 4's commits came in with them), #5 the MIT license, #11 run 7, #10 the switch to the FSL
+license (FSL-1.1-ALv2). The items below that are still open
 are product and measurement questions, not merges.
 
 0. **Run 5 (branch `agent-v5`, merged):**
