@@ -139,3 +139,24 @@ def test_a_replay_whose_check_is_missing_fails(context, site_url):
     ]
     result, detail = replay_flow(context, script)
     assert result == "checks_failed" and '"Order confirmed"' in detail
+
+
+def test_a_signed_in_run_tells_the_journey_its_credentials_are_hidden():
+    # Run 7, M6: a sign-in journey on a target with a saved login saw "[test account]" and failed.
+    assert "[test account]" not in flow_task("Sign in", "Sign in.")
+    note = flow_task("Sign in", "Sign in.", signed_in=True)
+    assert "already signed in" in note and "[test account]" in note
+
+
+def test_checks_are_kept_only_if_the_final_page_agrees():
+    from worker.flows import checks_for_final_page
+
+    final = "Order confirmed. Thanks! Your order #123 is on its way"
+    # A PASSED quote from an earlier page ("Go to checkout") would fail every replay.
+    assert checks_for_final_page(True, ["Order confirmed", "Go to checkout"], final) == [
+        "Order confirmed"
+    ]
+    # An expected-but-missing FAILED check must really be missing from the final page.
+    assert checks_for_final_page(False, ["Profile saved", "Order confirmed"], final) == [
+        "Profile saved"
+    ]

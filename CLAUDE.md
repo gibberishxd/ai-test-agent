@@ -80,6 +80,6 @@ Ask only about what the Settings don't cover, as numbered plain text, never bloc
 
 ## Current phase
 Demo v1 and runs 2–6 are all merged into `main` (PRs #1–#4 and #7, last on 2026-11-15); the MIT
-license followed in PR #5. No run is in progress, so the normal "How to work with me" rules apply.
-Haiku 5.5 as the agent is the recommended default (D91); open items are under "Needs me" in
-`docs/PROGRESS.md`.
+license followed in PR #5. Run 7 (`agent-v7`) is done and waits for review in its PR; open items (the
+holdout specs to write, the API path, the failing-journey recheck) are under "Needs me".
+Haiku 5.5 is the default agent (D91, D92); details in `docs/PROGRESS.md`.

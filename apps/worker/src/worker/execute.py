@@ -25,6 +25,7 @@ from worker.findings import findings_from_pages
 from worker.flows import (
     MAX_FLOW_STEPS,
     FlowOutcome,
+    checks_for_final_page,
     flow_task,
     parse_finish,
     replay_flow,
@@ -263,8 +264,11 @@ def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> Flo
             )
         broke = detail
     first, cost_before = run.step_count, run.estimated_cost_usd
-    episode = make_agent(budget, first).run()
+    agent = make_agent(budget, first)
+    episode = agent.run()
     passed, checks, detail = parse_finish(episode.summary)
+    if passed is not None:  # checks must agree with the page the journey ended on
+        checks = checks_for_final_page(passed, checks, _page_text(agent.page))
     common = {
         "model_calls": len(episode.steps),
         "estimated_cost_usd": max(run.estimated_cost_usd - cost_before, 0.0),
@@ -285,6 +289,13 @@ def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> Flo
         script_from_steps(run.target_url, episode.steps, checks, failing=True) if checks else None
     )
     return FlowOutcome("failed", why + after_break, script=script, **common)
+
+
+def _page_text(page) -> str:
+    try:
+        return page.evaluate("() => document.body.innerText") or ""
+    except Exception:  # the page closed or navigated away: no text to check against
+        return ""
 
 
 def record_flow(session: Session, run: Run, flow: Flow, outcome: FlowOutcome, agent_bugs) -> None:
@@ -515,7 +526,7 @@ def run_interactive(
                     max_cost_usd=remaining_budget(settings, run),
                     max_repeats=settings.max_repeated_actions,
                 )
-                task = flow_task(flow.name, flow.goal)
+                task = flow_task(flow.name, flow.goal, signed_in=login is not None)
                 outcome = check_flow(
                     flow,
                     context,

@@ -1261,3 +1261,20 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   team can still add specs; a worker with `USE_SPECS=true` uses them. Alternative: on by
   default, since specs only matter where a team adds them. Rejected: the owner's rule says
   "only if it helps", and that isn't shown yet.
+
+## D98. Two flow fixes found by the benchmark (run 7, after M6)
+- **A journey on a signed-in run is told its credentials are hidden.** The benchmark's shop
+  runs sign in with a saved login, and the worker shows the saved email and password to the model
+  only as "[test account]" and "[secret]" (run 4's rule: secrets never reach a model). The
+  "Sign in" journey's agent read those placeholders on the login page, couldn't sign in, and filed
+  a false "Critical flow failed". Now the journey's task says the run is already signed in, its
+  credentials can't be typed, and a sign-in journey passes if the run is signed in. Alternative:
+  skip sign-in journeys on targets with a saved login. Rejected: guessing which journey is
+  "about signing in" from its wording is fragile; the agent can see that it is signed in.
+- **A check must agree with the page the journey ended on.** PASSED quotes from earlier pages
+  ("Go to checkout") became checks the final page can't show, so every replay "broke" and the
+  journey was re-learned each run. Now a PASSED check is kept only if it is on the final page,
+  and a FAILED check (what was expected) only if it is missing from it.
+- **Measured?** Not separately: the Sonnet benchmark in M6 ran on the code before these fixes, so
+  Haiku and Sonnet compare on the same code. The fixes have tests; their effect on a benchmark is
+  the next measurement ("Needs me").

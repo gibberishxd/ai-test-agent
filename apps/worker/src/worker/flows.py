@@ -74,9 +74,17 @@ class FlowOutcome:
     first_step: int = 0  # the run step index of the episode's first step
 
 
-def flow_task(name: str, goal: str) -> str:
+SIGNED_IN_NOTE = (
+    "\nThis run is already signed in with the team's saved test account. Its email and password "
+    "are hidden from you (shown as [test account] and [secret]) and can't be typed: if the "
+    "journey is about signing in, check that you are signed in and pass it."
+)
+
+
+def flow_task(name: str, goal: str, signed_in: bool = False) -> str:
     """The focus line for a journey episode: complete it, then say how it went, in a form the
-    worker can read (and save as checks)."""
+    worker can read (and save as checks). `signed_in`: the run signed in with a saved login,
+    whose credentials the model never sees (run 7, M6: a sign-in journey failed on them)."""
     return (
         f'CRITICAL FLOW "{name}": {goal}\n'
         "Complete this journey like a real user, step by step, and nothing else. Then call finish. "
@@ -85,7 +93,13 @@ def flow_task(name: str, goal: str) -> str:
         'start with "FAILED:", say what went wrong and quote what you expected to see after the '
         'word expected (FAILED: Save did nothing, expected "Profile saved"). A bug you see along '
         "the way that doesn't stop the journey: report_bug it, then still finish with PASSED."
-    )
+    ) + (SIGNED_IN_NOTE if signed_in else "")
+
+
+def checks_for_final_page(passed: bool, checks: list[str], final_text: str) -> list[str]:
+    """Keep only checks the final page agrees with: a PASSED check must be on it (a quote from an
+    earlier page would fail every replay), an expected-but-missing FAILED check must not be."""
+    return [c for c in checks if shows(final_text, c) == passed]
 
 
 def parse_finish(summary: str | None) -> tuple[bool | None, list[str], str]:

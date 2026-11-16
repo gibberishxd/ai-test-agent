@@ -96,3 +96,15 @@ Benchmark scores go here too, once Phase 2 exists.
   Haiku as the agent (D91).
 - Learned: a strong reviewer can't see what a weak explorer doesn't flag; the CLI writes 1-hour
   cache entries (2× input price); a strong reviewer finally reached a code path no test covered.
+
+## 2026-11-16 (run 7, branch agent-v7)
+- Haiku 5.5 is the default agent; the "my tools are unavailable" finish gets one correction;
+  four unplanted demo behaviours fixed in both builds as benchmark v2 (and my own double-click
+  guard broke replays until it was keyed on the click's detail).
+- Built: specs per target (pgvector in Postgres, nomic-embed-text locally, per-page retrieval for
+  the agent and the judge; off by default until the owner's holdout specs are measured), critical
+  flows (learned once, replayed with no model: 36 calls to learn three shop journeys, 0 to check
+  them next run), and an MCP server for Claude Code and Cursor.
+- Measured on v2: Haiku shop 30–33%, holdout 62–75%; Sonnet shop 48%, holdout 50% at ~16× the
+  cost. Learned: measure a feature inside the real benchmark setup too (a signed-in run hid the
+  credentials a sign-in journey needed), and a saved failure needs a way to be rechecked.

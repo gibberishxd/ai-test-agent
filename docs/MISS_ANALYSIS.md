@@ -695,3 +695,44 @@ run is already signed in with hidden credentials (D98).
 
 **Flows' own finding:** "Change profile" (planted bug 8) was found in all 3 shop runs, twice by
 replay with no model call.
+
+## Run 7, M6: Sonnet 5.5 on benchmark v2 with the shop's critical flows
+
+Result `5e64c8fc` (commit dde46e0: the same code as the Haiku row `2f9e0744`), `claude-sonnet-5-5`
+(cheap calls `claude-haiku-5-5`), `bench --flows` with the journeys' scripts kept from the Haiku
+benchmark, judge ollama/gemma4:12b, 480 s and 40 steps, holdout first. No usage limit; $10.63 for
+the 7 runs (cap $15). Runs: holdout 95ffc528, 84da4309, clean 3db8703e; shop 8e1afa9c, e9cef00a,
+82896fd7, clean 3ea8dda3.
+
+| Bug | Haiku M6 (found / runs) | Sonnet M6 |
+|---|---|---|
+| Shop 5. Cart total ignores quantity | 1 / 3 | 2 / 3 |
+| Shop 6. Invalid email at checkout | 0 | 0 (never reached) |
+| Shop 7. Discount twice | 0 | 2 / 3 |
+| Shop 8. Save changes does nothing | 3 / 3 | 3 / 3 |
+| Shop 9. $NaN | 1 / 3 | 3 / 3 |
+| Shop 10. Long name on mobile | 0 | 0 (reached twice) |
+| Shop 11. Session after logout + reload | 0 | 0 (reached, never the sequence) |
+| Shop 12. Wrong-password error placement | 0 | 0 (never reached) |
+| Shop 13. Wrong order opened | 3 / 3 | 3 / 3 |
+| Holdout 3. One night charged | 2 / 2 | 0 (reached twice) |
+| Holdout 4. Check-out before check-in | 2 / 2 | 2 / 2 |
+| Holdout 5. Double-click Book now | 1 / 2 | 2 / 2 |
+| Holdout 6. Room name on mobile | 0 | 0 (reached twice) |
+| **AI-only, shop / holdout** | 30% / 62% | **48%** / 50% |
+
+**The journeys:** all three replayed with no model call in every shop run (Haiku had learned and
+repaired them). Checkout passed by replay 3/3; "Change profile" was re-found failing (bug 8) by
+replay 3/3. "Sign in" was also "still failing" by replay 3/3: the false failure Haiku's run saved
+(D98's first flaw) kept being re-found. **A failing script is never rechecked by the agent**, so a
+wrong failure sticks until someone edits the journey: the next fix (recheck a failing journey with
+the agent every few runs) is in "Needs me".
+
+**What separates the models.** On the shop Sonnet triggers more (double clicks on the discount,
+2/3; the $NaN price every run) and reports the cart total twice; on the holdout it missed the
+one-night total that Haiku found 2/2, and found the double booking 2/2. Two holdout runs per model
+move the number by 12 points per bug-run: the holdout difference is inside the noise. Sonnet costs
+~16× Haiku per run ($1.65 against $0.105 on the shop), as in run 6.
+
+**Clean-build reports (2.0 on the shop):** "quantity 0 is added as 1" and "the cart is emptied
+by a reload": both the owner's open product questions, real behaviour of the clean build.
