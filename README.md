@@ -257,4 +257,9 @@ planted bug list are the owner's.
 
 ## License
 
-[MIT](LICENSE): use, change and share it freely, keeping the copyright notice.
+AI Test Agent is source-available under the [Functional Source License, FSL-1.1-ALv2](LICENSE).
+In plain words: you may read, use, modify and run the code for anything except offering a
+competing product or service. Each version becomes available under the Apache License 2.0 two
+years after its release.
+
+Versions up to commit 5faa299 were published under the MIT license.
