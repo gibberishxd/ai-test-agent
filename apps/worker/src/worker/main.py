@@ -94,6 +94,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     bench.add_argument("--mode", choices=["interactive", "passive"], default="interactive")
     bench.add_argument(
+        "--specs",
+        action="store_true",
+        help="give the holdout app's runs the owner's specs (apps/demo2/specs.md; run 7, M3)",
+    )
+    bench.add_argument(
+        "--flows",
+        action="store_true",
+        help="give the shop's runs its three critical flows (run 7, M4)",
+    )
+    bench.add_argument(
         "--holdout-first",
         action="store_true",
         help="run the holdout app before the shop (judge a change on the holdout first)",
@@ -151,6 +161,7 @@ def main(argv: list[str] | None = None) -> None:
             log.info("fingerprinted %d older finding(s)", backfill_fingerprints(session))
         return
 
+    settings = settings_for(settings, args)
     llm = make_client(settings)
     # The benchmark queues and scores runs in its own workspace and reads them all back: an
     # operator's command on the admin connection. The worker loop uses its own role.
@@ -195,6 +206,8 @@ def main(argv: list[str] | None = None) -> None:
             args.holdout_runs,
             holdout_first=args.holdout_first,
             reviewer=reviewer,
+            specs_file=HOLDOUT_SPECS if args.specs else None,
+            flows=args.flows,
         )
         return
     if args.once:
@@ -223,6 +236,13 @@ def main(argv: list[str] | None = None) -> None:
             time.sleep(POLL_INTERVAL_S)
 
 
+def settings_for(settings: Settings, args) -> Settings:
+    """The settings this command runs with: `bench --specs` turns specs on for its own runs."""
+    if getattr(args, "command", None) == "bench" and getattr(args, "specs", False):
+        return settings.model_copy(update={"use_specs": True})
+    return settings
+
+
 def reverify(settings: Settings, run_prefix: str, use_judge: bool) -> None:
     from sqlalchemy import String, cast
 
@@ -247,6 +267,8 @@ def run_benchmark(
     holdout_runs: int = 0,
     holdout_first: bool = False,
     reviewer: LLMClient | None = None,
+    specs_file: Path | None = None,
+    flows: bool = False,
 ) -> None:
     """Queue the benchmark runs, process them with `llm`, then score them with `judge`.
 
@@ -266,6 +288,8 @@ def run_benchmark(
     with sessions() as session:
         workspace = benchmark_workspace(session)
         ensure_demo_sign_in(session, workspace, settings)
+        with_specs = ensure_bench_specs(session, workspace, settings, specs_file)
+        with_flows = ensure_bench_flows(session, workspace, settings, flows)
         run_ids: dict[str, list[str]] = {}
 
         def queue_shop() -> None:
@@ -291,8 +315,9 @@ def run_benchmark(
         lambda: process_next(sessions, llm, execute, only=every_run),
         settings.bench_max_cost_usd,
     )
+    settings_note = {"specs": with_specs, "flows": with_flows}
     if reason is None:
-        score_runs(sessions, judge, run_ids, commit)
+        score_runs(sessions, judge, run_ids, commit, extra=settings_note)
         return
     log.error("benchmark stopped: %s", reason)
     with sessions() as session:
@@ -303,6 +328,7 @@ def run_benchmark(
         }
     finished = {kind: [i for i in ids if i in done] for kind, ids in run_ids.items()}
     extra = {
+        **settings_note,
         "invalid": reason,
         "incomplete": {"finished": len(done), "planned": len(every_run), "runs_planned": run_ids},
     }
@@ -362,6 +388,84 @@ def ensure_demo_sign_in(session: Session, workspace, settings: Settings) -> None
             )
         )
     session.commit()
+
+
+# The owner's holdout specs (run 7, M3): written from the app's intended behaviour, never from its
+# bug list (tests/test_spec_guard.py checks).
+HOLDOUT_SPECS = REPO_ROOT / "apps" / "demo2" / "specs.md"
+BENCH_SPEC_TITLE = "Holdout specs (owner)"
+
+
+def ensure_bench_specs(
+    session: Session, workspace, settings: Settings, specs_file: Path | None
+) -> bool:
+    """With `specs_file`: the holdout's two builds are targets with that one spec (replaced if it
+    changed). Without: their specs are removed, so the holdout runs have none. Returns whether
+    the runs have specs. The shop never gets specs here."""
+    from worker.db.models import Spec, Target
+    from worker.spec_store import origin_of
+
+    body = specs_file.read_text(encoding="utf-8") if specs_file else None  # raises if missing
+    for url in (settings.demo2_url, settings.clean_demo2_url):
+        origin = origin_of(url)
+        target = (
+            session.query(Target).filter_by(workspace_id=workspace.id, origin=origin).one_or_none()
+        )
+        if target is None:
+            if body is None:
+                continue
+            target = Target(workspace_id=workspace.id, origin=origin, name="Holdout")
+            session.add(target)
+            session.flush()
+        specs = session.query(Spec).filter_by(target_id=target.id).all()
+        if body is None:
+            for spec in specs:
+                session.delete(spec)
+            continue
+        if len(specs) == 1 and specs[0].body == body:
+            continue
+        for spec in specs:
+            session.delete(spec)
+        session.flush()
+        session.add(
+            Spec(workspace_id=workspace.id, target_id=target.id, title=BENCH_SPEC_TITLE, body=body)
+        )
+    session.commit()
+    return body is not None
+
+
+def ensure_bench_flows(session: Session, workspace, settings: Settings, enabled: bool) -> bool:
+    """With `enabled`: the shop (DEMO_URL) is a target with the three demo journeys (kept with their
+    saved scripts between benchmarks, as a team's would be). Without: the shop has no flows."""
+    from worker.db.models import Flow, Target
+    from worker.flows import DEMO_SHOP_FLOWS
+    from worker.spec_store import origin_of
+
+    origin = origin_of(settings.demo_url)
+    target = session.query(Target).filter_by(workspace_id=workspace.id, origin=origin).one_or_none()
+    if not enabled:
+        if target is not None:
+            session.query(Flow).filter_by(target_id=target.id).delete()
+            session.commit()
+        return False
+    if target is None:
+        target = Target(workspace_id=workspace.id, origin=origin, name="Shop")
+        session.add(target)
+        session.flush()
+    have = {f.name for f in session.query(Flow).filter_by(target_id=target.id)}
+    for position, (name, goal) in enumerate(DEMO_SHOP_FLOWS):
+        if name not in have:
+            session.add(
+                Flow(
+                    workspace_id=workspace.id,
+                    target_id=target.id,
+                    name=name,
+                    goal=goal,
+                    position=position,
+                )
+            )
+    session.commit()
+    return True
 
 
 def rescore_latest(sessions: sessionmaker[Session], judge: LLMClient) -> None:

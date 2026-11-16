@@ -19,6 +19,13 @@ on a benchmark with planted bugs before you trust it.
   axe-core), then an agent that follows a QA charter: boundary values, invalid input,
   arithmetic, doing things twice, sessions, small screens, list → detail pages.
 - Tests apps behind a login with a test account it never shows the model.
+- **Critical flows:** list the journeys that must never break ("add an item, check out, place
+  the order"); the agent learns each once, and later runs replay it with Playwright and no model,
+  using the model only when the page changed. A failing journey is a finding.
+- **Your own requirements (specs):** add user stories and acceptance criteria per app; they are
+  embedded locally (pgvector, a local embedding model) and the agent tests each page against the
+  parts that match it. A finding names the requirement it breaks. (Built; off by default until
+  measured on the holdout app.)
 
 **Verdicts you can trust**
 - Every model-reported bug is replayed in a fresh browser. Replay compares the page just before
@@ -35,6 +42,8 @@ on a benchmark with planted bugs before you trust it.
 **Built for teams and CI**
 - `POST /api/v1/runs` with API keys, results as JSON or **JUnit XML**, signed webhooks, and a
   GitHub Actions example that fails the build on a chosen severity ([docs/API.md](docs/API.md)).
+- An **MCP server** for Claude Code and Cursor: start a run, check it, read the report from your
+  editor (below).
 - Findings have fingerprints: each run shows what is **new**, **still present** and **fixed**
   since the last release; triage a finding once and it follows into later runs.
 - Workspaces with owner/admin/member/viewer roles, invitations, an audit log, and plans with
@@ -57,6 +66,9 @@ whatever the model). The holdout app is never used to tune the agent. Full histo
 
 | Setup | Shop: judgement-only / all bugs | Holdout: judgement-only / all bugs | False alarms per clean run |
 |---|---|---|---|
+| Claude Sonnet 5.5 agent, benchmark v2 + critical flows (run 7; est. $1.4–1.7 a run) | **48% / 64%** | 50% / 67% | 2.0 shop (real behaviour), 0 holdout |
+| **Claude Haiku 5.5 agent**, benchmark v2 + critical flows (run 7, the default; est. ~$0.10 a run) | 30% / 51% | 62% / 75% | 1.0 shop, 1.0 holdout |
+| Claude Haiku 5.5 agent, benchmark v2 baseline (run 7) | 33% / 54% | **75% / 83%** | 2.0 shop, 0 holdout |
 | Claude Sonnet 5.5 agent (run 6, CLI, pinned ID; est. $1.4–1.7 a run) | **33% / 54%** | **75% / 83%** | 2.0 shop, 1.0 holdout (real, unplanted behaviour) |
 | **Claude Haiku 5.5 agent** (run 6, CLI; est. $0.06–0.09 a run, the recommended default) | 26% / 49% | 62% / 75% | 0 |
 | Gemma 4 12B + Claude Sonnet 5.5 reviewer (run 6; est. $0.01–0.05 a run) | 11% / 38% | 0% / 33% | 0 |
@@ -68,6 +80,10 @@ whatever the model). The holdout app is never used to tune the agent. Full histo
 Small local models reach most bug states but rarely recognise them; a reviewer on the flagged
 steps helps on the shop, and the holdout shows how far that generalises. Every run cost $0: local
 models, or a Claude subscription through the CLI.
+
+Run 7's rows are **benchmark v2**: four unplanted behaviours of the demo apps were fixed, so they
+compare with each other, not directly with the v1 rows below them. Two holdout runs per setup move a
+number by 12 points per bug found.
 
 Run 6 measured Claude models through the CLI with an API-equivalent cost estimate (the list-price
 cost of the tokens each run used; nothing was charged). Haiku as the agent finds most of what
@@ -124,6 +140,36 @@ A new workspace gets a short path from sign-up to its first report.
 
 ![Getting started](docs/screenshots/getting-started.png)
 
+### Use it from your editor (MCP)
+
+`apps/web/mcp/server.ts` is a small MCP server (Node 24 or later, no dependencies) with three tools,
+each backed by `/api/v1` and a workspace API key (Settings → API keys): **start_run** (a URL, passive
+or interactive, optional focus and limits), **get_run_status**, **get_report** (JSON or JUnit). The
+API's own rules apply: quota, verified domains, rate limits.
+
+Claude Code:
+
+```bash
+claude mcp add ai-test-agent -e ATA_URL=https://your-ata.example.com -e ATA_API_KEY=ata_... \
+  -- node /path/to/ai-test-agent/apps/web/mcp/server.ts
+```
+
+Cursor (`.cursor/mcp.json` in your project, or `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "ai-test-agent": {
+      "command": "node",
+      "args": ["/path/to/ai-test-agent/apps/web/mcp/server.ts"],
+      "env": { "ATA_URL": "https://your-ata.example.com", "ATA_API_KEY": "ata_..." }
+    }
+  }
+}
+```
+
+Then ask, for example: "Test the checkout on https://staging.example.com and tell me what broke."
+
 ## Run it locally
 
 Requirements: Node.js 24+, Python 3.12+ with [uv](https://docs.astral.sh/uv/), Docker Desktop.
@@ -144,7 +190,7 @@ configured, development offers **Sign in as demo user** and **Create a test acco
 | Setting (`.env`) | What it does |
 |---|---|
 | `LLM_PROVIDER` | `claude`, `ollama`, `openai-compat` or `fake` (scripted, for tests). Empty: Claude if a key is set |
-| `ANTHROPIC_API_KEY`, `AGENT_MODEL`, `CHEAP_MODEL` | Claude models for decisions and for dedup/matching |
+| `ANTHROPIC_API_KEY`, `AGENT_MODEL`, `CHEAP_MODEL` | Claude models for decisions and for dedup/matching. `AGENT_MODEL` defaults to `claude-haiku-5-5` (D91); `claude-sonnet-5-5` is the thorough option |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | A local model (needs vision and tool calls), e.g. `gemma4:12b` |
 | `REVIEWER_PROVIDER`, `REVIEWER_MODEL`, `REVIEWER_VISION` | Optional reviewer tier; `REVIEWER_VISION=false` for text-only models |
 | `MAX_STEPS`, `MAX_RUN_SECONDS`, `MAX_RUN_COST_USD` | Budgets per run, enforced by the worker |

@@ -5,8 +5,16 @@
     "version": "1.0.0",
     "description": "Start test runs from CI, wait for them, and get the findings as JSON or JUnit XML. Authenticate with a workspace API key (Settings → API keys): `Authorization: Bearer ata_…`. Each key may make 60 requests per minute; runs count against the workspace's monthly quota. Examples: docs/API.md."
   },
-  "servers": [{ "url": "/api/v1" }],
-  "security": [{ "apiKey": [] }],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
   "paths": {
     "/runs": {
       "post": {
@@ -14,17 +22,37 @@
         "operationId": "startRun",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StartRun" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRun"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "Queued. Poll the `self` link until `finished` is true.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunStatus" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
           },
-          "400": { "$ref": "#/components/responses/Invalid" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Invalid" },
-          "429": { "$ref": "#/components/responses/TooMany" }
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
         }
       }
     },
@@ -32,15 +60,31 @@
       "get": {
         "summary": "A run's status and bug counts",
         "operationId": "getRun",
-        "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
         "responses": {
           "200": {
             "description": "The run.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunStatus" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/TooMany" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
         }
       }
     },
@@ -49,147 +93,786 @@
         "summary": "A run's findings, as JSON or JUnit XML",
         "operationId": "getReport",
         "parameters": [
-          { "$ref": "#/components/parameters/RunId" },
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
           {
             "name": "format",
             "in": "query",
             "required": false,
-            "schema": { "type": "string", "enum": ["json", "junit"], "default": "json" }
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "junit"
+              ],
+              "default": "json"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Every bug the run reports (verification-dismissed ones are left out).",
             "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/Report" } },
-              "application/xml": { "schema": { "type": "string", "description": "JUnit XML: one failing test case per bug." } }
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Report"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string",
+                  "description": "JUnit XML: one failing test case per bug."
+                }
+              }
             }
           },
-          "400": { "$ref": "#/components/responses/Invalid" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/TooMany" }
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
         }
+      }
+    },
+    "/targets": {
+      "get": {
+        "summary": "List targets",
+        "operationId": "listTargets",
+        "responses": {
+          "200": {
+            "description": "The workspace's targets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "targets"
+                  ],
+                  "properties": {
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Target"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add a target",
+        "operationId": "createTarget",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The target (the existing one if its origin was already added).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "target"
+                  ],
+                  "properties": {
+                    "target": {
+                      "$ref": "#/components/schemas/Target"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
+        }
+      }
+    },
+    "/targets/{id}/specs": {
+      "get": {
+        "summary": "List a target's specs",
+        "operationId": "listSpecs",
+        "responses": {
+          "200": {
+            "description": "The target's specs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "specs"
+                  ],
+                  "properties": {
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Spec"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Missing"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TargetId"
+          }
+        ]
+      },
+      "post": {
+        "summary": "Add a spec to a target",
+        "operationId": "createSpec",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSpec"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new spec (status waiting until the worker embeds it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "spec"
+                  ],
+                  "properties": {
+                    "spec": {
+                      "$ref": "#/components/schemas/Spec"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Missing"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TargetId"
+          }
+        ]
+      }
+    },
+    "/specs/{id}": {
+      "patch": {
+        "summary": "Replace a spec's title and body",
+        "operationId": "updateSpec",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSpec"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated spec.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "spec"
+                  ],
+                  "properties": {
+                    "spec": {
+                      "$ref": "#/components/schemas/Spec"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Missing"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SpecId"
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Delete a spec",
+        "operationId": "deleteSpec",
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "$ref": "#/components/responses/Missing"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SpecId"
+          }
+        ]
       }
     }
   },
   "components": {
     "securitySchemes": {
-      "apiKey": { "type": "http", "scheme": "bearer", "description": "A workspace API key, `ata_…`." }
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A workspace API key, `ata_…`."
+      }
     },
     "parameters": {
-      "RunId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+      "RunId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "TargetId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "A target's id.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "SpecId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "A spec's id.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
     },
     "responses": {
       "Invalid": {
         "description": "The request can't be accepted; `errors` says why, per field.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Errors" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Errors"
+            }
+          }
+        }
       },
       "Unauthorized": {
         "description": "No API key, or a revoked or unknown one.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       },
       "NotFound": {
         "description": "No such run in this key's workspace.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       },
       "TooMany": {
         "description": "The key's rate limit or the workspace's monthly quota. See Retry-After.",
-        "content": { "application/json": { "schema": { "type": "object" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "Missing": {
+        "description": "No such target or spec in this key's workspace.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "schemas": {
       "StartRun": {
         "type": "object",
-        "required": ["target_url"],
+        "required": [
+          "target_url"
+        ],
         "additionalProperties": false,
         "properties": {
-          "target_url": { "type": "string", "description": "The URL to test." },
+          "target_url": {
+            "type": "string",
+            "description": "The URL to test."
+          },
           "mode": {
             "type": "string",
-            "enum": ["passive", "interactive"],
+            "enum": [
+              "passive",
+              "interactive"
+            ],
             "default": "passive",
             "description": "interactive needs a verified domain (or a sign-in setup for apps behind a login)."
           },
-          "focus": { "type": ["string", "null"], "description": "What to concentrate on, e.g. \"checkout\"." },
-          "model_id": { "type": ["string", "null"], "description": "One of the workspace's models; default: the server's model." },
-          "max_steps": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Lowers the agent's step limit." },
-          "max_minutes": { "type": "integer", "minimum": 1, "maximum": 60, "description": "Lowers the run's time limit." }
+          "focus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to concentrate on, e.g. \"checkout\"."
+          },
+          "model_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One of the workspace's models; default: the server's model."
+          },
+          "max_steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Lowers the agent's step limit."
+          },
+          "max_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Lowers the run's time limit."
+          }
         }
       },
       "Counts": {
         "type": "object",
-        "required": ["critical", "high", "medium", "low"],
+        "required": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
         "properties": {
-          "critical": { "type": "integer" },
-          "high": { "type": "integer" },
-          "medium": { "type": "integer" },
-          "low": { "type": "integer" }
+          "critical": {
+            "type": "integer"
+          },
+          "high": {
+            "type": "integer"
+          },
+          "medium": {
+            "type": "integer"
+          },
+          "low": {
+            "type": "integer"
+          }
         }
       },
       "RunStatus": {
         "type": "object",
-        "required": ["id", "status", "finished", "target_url", "mode", "created_at", "counts", "links"],
+        "required": [
+          "id",
+          "status",
+          "finished",
+          "target_url",
+          "mode",
+          "created_at",
+          "counts",
+          "links"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "status": { "type": "string", "enum": ["queued", "running", "done", "failed", "stopped"] },
-          "finished": { "type": "boolean" },
-          "target_url": { "type": "string" },
-          "mode": { "type": "string" },
-          "created_at": { "type": "string" },
-          "started_at": { "type": ["string", "null"] },
-          "finished_at": { "type": ["string", "null"] },
-          "duration_s": { "type": ["integer", "null"] },
-          "pages_visited": { "type": "integer" },
-          "cost_usd": { "type": "number" },
-          "counts": { "$ref": "#/components/schemas/Counts" },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "stopped"
+            ]
+          },
+          "finished": {
+            "type": "boolean"
+          },
+          "target_url": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_s": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pages_visited": {
+            "type": "integer"
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/Counts"
+          },
           "links": {
             "type": "object",
-            "required": ["self", "report", "junit", "dashboard"],
+            "required": [
+              "self",
+              "report",
+              "junit",
+              "dashboard"
+            ],
             "properties": {
-              "self": { "type": "string" },
-              "report": { "type": "string" },
-              "junit": { "type": "string" },
-              "dashboard": { "type": "string" }
+              "self": {
+                "type": "string"
+              },
+              "report": {
+                "type": "string"
+              },
+              "junit": {
+                "type": "string"
+              },
+              "dashboard": {
+                "type": "string"
+              }
             }
           }
         }
       },
       "Bug": {
         "type": "object",
-        "required": ["id", "title", "severity", "category", "page_url", "status", "source", "repro_steps"],
+        "required": [
+          "id",
+          "title",
+          "severity",
+          "category",
+          "page_url",
+          "status",
+          "source",
+          "repro_steps"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "title": { "type": "string" },
-          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-          "category": { "type": "string" },
-          "page_url": { "type": "string" },
-          "status": { "type": "string" },
-          "source": { "type": "string", "enum": ["deterministic", "agent"] },
-          "expected": { "type": ["string", "null"] },
-          "actual": { "type": ["string", "null"] },
-          "repro_steps": { "type": "array", "items": { "type": "string" } }
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "category": {
+            "type": "string"
+          },
+          "page_url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "deterministic",
+              "agent"
+            ]
+          },
+          "expected": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actual": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repro_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       },
       "Report": {
         "type": "object",
-        "required": ["run", "counts", "bugs"],
+        "required": [
+          "run",
+          "counts",
+          "bugs"
+        ],
         "properties": {
-          "run": { "$ref": "#/components/schemas/RunStatus" },
-          "counts": { "$ref": "#/components/schemas/Counts" },
-          "bugs": { "type": "array", "items": { "$ref": "#/components/schemas/Bug" } }
+          "run": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/Counts"
+          },
+          "bugs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bug"
+            }
+          }
         }
       },
       "Error": {
         "type": "object",
-        "required": ["error"],
-        "properties": { "error": { "type": "string" } }
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
       },
       "Errors": {
         "type": "object",
         "properties": {
-          "error": { "type": "string" },
-          "errors": { "type": "object", "additionalProperties": { "type": "string" } }
+          "error": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "NewTarget": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The app's URL; only its origin (scheme://host[:port]) is kept.",
+            "examples": [
+              "https://staging.example.com"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      },
+      "Target": {
+        "type": "object",
+        "required": [
+          "id",
+          "origin",
+          "name",
+          "specs",
+          "flows",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "specs": {
+            "type": "integer",
+            "description": "How many specs it has."
+          },
+          "flows": {
+            "type": "integer",
+            "description": "How many critical flows it has."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NewSpec": {
+        "type": "object",
+        "required": [
+          "title",
+          "body"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000,
+            "description": "Requirements as Markdown or plain text: user stories, acceptance criteria. Split at its headings."
+          }
+        }
+      },
+      "Spec": {
+        "type": "object",
+        "required": [
+          "id",
+          "targetId",
+          "title",
+          "body",
+          "status",
+          "chunks",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "waiting"
+            ],
+            "description": "ready: embedded; waiting: embedded before the next run on the target."
+          },
+          "chunks": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     }

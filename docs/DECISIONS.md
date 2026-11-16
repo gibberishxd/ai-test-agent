@@ -1154,3 +1154,127 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   counts, and the API client builds its own prompts and cache, so real API cost will differ; one
   Haiku run was cut short by the "tools not available" failure (D89), so Haiku's shop number is if
   anything an underestimate.
+
+## D92. Haiku 5.5 is the default agent; the early finish is corrected (run 7, M1)
+- **The owner's decision (run 7 Settings):** `AGENT_MODEL` and `CLAUDE_CLI_MODEL` default to
+  `claude-haiku-5-5`; Sonnet is labelled "thorough" in `.env.example`, the README and the web
+  model form (which now suggests both and fills in Haiku when Claude is picked). `PRODUCT_BRIEF.md`
+  still says Sonnet: it is the original brief, kept as written; this entry supersedes it.
+- **The early finish (FIX_EARLY_FINISH = yes):** run 6's Haiku run e3eb2b69 answered with a valid
+  `finish` whose summary said the tools were unavailable (it had tried them natively inside
+  `claude -p`, got "No such tool available", and the CLI reported no refused call, so D66 never
+  fired). Now a `finish` whose summary matches that claim gets D66's corrective message once, and
+  the next answer is taken whatever it is (never a loop). In the claude-cli adapter, not the loop:
+  the confusion comes from the CLI's own tool layer, and other providers have real tool calling.
+  Alternative: refuse any early `finish` in the loop. Rejected: it would also override real
+  decisions to stop, and a provider-specific fault belongs in its adapter.
+
+## D93. Benchmark v2: the four demo behaviours fixed (run 7, M1)
+- **The owner's decision (DEMO_BEHAVIORS = fix), in both builds, with a test each** (unit tests in
+  the demo apps and browser checks in `verify-bugs`):
+  - **Shop, profile "Recent orders":** the profile API served a hard-coded list (#10231, #10457)
+    unrelated to "My orders" (#1001–1003). Both now come from `src/orderData.ts`. The buggy build
+    still can't show them, because its profile API fails on purpose (planted bug 2); bug 13 (an
+    order page showing the next order) is untouched.
+  - **Shop, a double-clicked "Add to cart":** the second click of a double click (within 500 ms)
+    is ignored; a later click adds again. Planted bug 7 (the discount applied twice on a double
+    click, in the cart) is untouched.
+  - **Holdout, past dates:** a check-in before today is refused ("Check-in can't be in the past.").
+  - **Holdout, dates outside the room's availability:** refused when the window is known. Decided
+    without the owner, revisit: when the availability API fails (it does on purpose in the buggy
+    build, planted bug 1) the booking isn't blocked. Blocking it would hide planted bugs 3–5,
+    which are only reachable through a booking.
+- **Labelling:** `BENCHMARK_VERSION = "v2"` in `benchmark.py`, printed in bench output, stored per
+  result (`benchmark_results.benchmark_version`, `v1` for every older row), part of the
+  leaderboard's key, shown on the benchmark page. A benchmark of v1 can no longer be made: the
+  apps are what they are; old v1 rows stay as they were.
+
+## D94. Specs: a team's requirements, embedded locally and retrieved per page (run 7, M3)
+- **Storage:** `targets` (an app by origin, per workspace), `specs` (Markdown or text per
+  target), `spec_chunks` (a spec split at its headings, each piece with a `vector(768)`), all
+  under row-level security. pgvector in our own Postgres (`pgvector/pgvector:0.8.1-pg17` in dev,
+  CI and the production compose file); an HNSW index with cosine distance. Alternatives: a
+  separate vector database (one more service to run, back up and secure, for a few hundred rows
+  per customer); IVFFlat (needs rebuilding as specs grow).
+- **Embedding model: `nomic-embed-text` through Ollama** (decided without the owner). 274 MB,
+  768 dimensions, an 8k-token context, ~28 ms per call warm on this 16 GB Mac (0.9 s cold); it
+  wants task prefixes (`search_document:` / `search_query:`), which `OllamaEmbedder` adds.
+  Considered: `mxbai-embed-large` (1024 dims, 2.5× the size, no need at this scale),
+  `embeddinggemma` / `qwen3-embedding` (larger downloads, no measured gain for short English
+  requirements). The model's name is stored per spec; a different model re-embeds everything.
+- **Chunking:** at Markdown headings, each chunk keeps its heading path ("Booking > Dates"); a
+  long section splits between lines at 800 characters. Requirements are short and their headings
+  carry meaning, so no overlap and no token-based splitter.
+- **When embedding happens:** in the worker, at the start of a run on the target, for specs that
+  are new, edited (the web clears `chunked_at`) or embedded with another model. One place that
+  embeds, one model, and no Ollama connection from the web app. If Ollama is down, the run goes
+  on without specs and logs a warning.
+- **Retrieval:** per page, the query is its path, title and the start of its text (400
+  characters). The 8 nearest chunks are fetched; at most 3 within cosine distance 0.55 and 1,500
+  characters (~400 tokens) are shown. One embedding call per distinct page, cached for the run.
+- **In the prompt:** a REQUIREMENTS section in the observation, fenced as `<spec_content>`, and
+  a task line saying to cite a broken requirement with its label ([S2]), only when the target has
+  specs. The system prompt and the tools don't change, so a run without specs is the M2 run.
+  A cited requirement is stored in `evidence.spec` and given to the replay judge.
+- **Kept on by default (`USE_SPECS=true`)** only if the holdout measurement says so (D96).
+
+## D95. Critical flows: journeys learned once, replayed without a model (run 7, M4)
+- **Storage:** `flows` (name, the journey in plain language, the saved script as JSON, the last
+  status) and `flow_results` (one per journey per run), under row-level security; at most 10
+  flows per target (a trigger; the roadmap's 3–10).
+- **A journey is an episode, not a new tool.** The agent gets the journey as its focus, at most
+  15 steps, and finishes with "PASSED: <quoted text that shows it worked>" or "FAILED: ...". No
+  new tool and no system prompt change, so exploration is unchanged. Alternative: begin_flow /
+  end_flow tools. Rejected: a tool every run carries, for something only some targets have.
+- **The script** is the episode's effective actions (clicks, typing, selects, navigation; not
+  notes, blocked or failed steps) with the elements they acted on, plus the quoted texts as
+  checks. Replay uses the same code as bug verification (`verify.replay`: role and name, nearby
+  text, CSS path, position), then each check must be on the page.
+- **Order in a run:** after the deterministic scan, before exploration; journeys spend from the
+  run's step, time and cost budgets. A replayed journey costs no model call. A broken replay goes
+  to the agent: repaired → the script is replaced; not → a "Critical flow failed" finding,
+  verified by replay like any other.
+- **Editing the wording drops the script** (the old steps may not match the new journey).
+
+## D96. The first v2 double-click guard broke replays; fixed by click detail (run 7, M2)
+- **What M2 showed:** bug 5 (cart total ignores quantity) was reported in all 3 shop runs and
+  dismissed by replay all 3 times: replay saw quantity 1, not 2. The agent had clicked "Add to
+  cart" twice, seconds apart; replay repeats steps back to back, under 500 ms apart, and M1's
+  guard (ignore a click within 500 ms of the last) swallowed the second. My bug, not the agent's.
+- **Fix:** ignore only the later clicks of a multi-click (`event.detail >= 2`): a double click
+  adds once, two separate clicks add twice however fast they come. Unit test and a `verify-bugs`
+  check that two separate clicks add twice, in both builds.
+- **Labelling (decided without the owner, revisit):** still "benchmark v2": the intended
+  behaviour is the same (a double click adds once); the M2 result `e92d2c6b` stays as measured,
+  with this caveat in PROGRESS and MISS_ANALYSIS: its shop number undercounts bug 5 (3 correct
+  reports lost to the guard). Holdout numbers are unaffected. Alternative: call the fixed apps
+  v3. Rejected: one bad guard in my code, not a change of what the benchmark asks.
+
+## D97. Flows after measuring; specs off by default until measured (run 7, M4 and M3)
+- **Flows (measured, kept):** the second two-run measurement checked all three shop journeys in
+  run 2 with no model call and re-found the profile failure for free (MISS_ANALYSIS "Run 7, M4").
+  Flows are on whenever a target has them; the benchmark uses them only with `bench --flows`.
+- **Specs (not measured yet, decided without the owner, revisit):** the owner's rule keeps specs
+  on by default only if the holdout measurement shows judgement-only recall rising without more
+  clean-build false alarms. `apps/demo2/specs.md` isn't written yet, so that measurement couldn't
+  run: `USE_SPECS` now defaults to **false**, and `bench --specs` turns it on for its own runs. A
+  team can still add specs; a worker with `USE_SPECS=true` uses them. Alternative: on by
+  default, since specs only matter where a team adds them. Rejected: the owner's rule says
+  "only if it helps", and that isn't shown yet.
+
+## D98. Two flow fixes found by the benchmark (run 7, after M6)
+- **A journey on a signed-in run is told its credentials are hidden.** The benchmark's shop
+  runs sign in with a saved login, and the worker shows the saved email and password to the model
+  only as "[test account]" and "[secret]" (run 4's rule: secrets never reach a model). The
+  "Sign in" journey's agent read those placeholders on the login page, couldn't sign in, and filed
+  a false "Critical flow failed". Now the journey's task says the run is already signed in, its
+  credentials can't be typed, and a sign-in journey passes if the run is signed in. Alternative:
+  skip sign-in journeys on targets with a saved login. Rejected: guessing which journey is
+  "about signing in" from its wording is fragile; the agent can see that it is signed in.
+- **A check must agree with the page the journey ended on.** PASSED quotes from earlier pages
+  ("Go to checkout") became checks the final page can't show, so every replay "broke" and the
+  journey was re-learned each run. Now a PASSED check is kept only if it is on the final page,
+  and a FAILED check (what was expected) only if it is missing from it.
+- **Measured?** Not separately: the Sonnet benchmark in M6 ran on the code before these fixes, so
+  Haiku and Sonnet compare on the same code. The fixes have tests; their effect on a benchmark is
+  the next measurement ("Needs me").

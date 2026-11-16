@@ -28,6 +28,8 @@ export type BenchmarkRow = {
   /** Run 6: API-equivalent cost per run and per verified planted bug (estimates); null = not measured. */
   avgEstimatedCostUsd: number | null;
   estimatedCostPerVerifiedBug: number | null;
+  /** Run 7: the version of the demo apps the result was measured on ("v1" for runs 1-6). */
+  benchmarkVersion: string;
 };
 
 /** `needsJudgement`: the deterministic checks can't find it; only the AI can. */
@@ -100,7 +102,16 @@ export function leaderboard(rows: BenchmarkRow[]): BenchmarkRow[] {
 export function leaderboardFromView(rows: BenchmarkRow[], latestIds: string[]): BenchmarkRow[] {
   const keep = new Set(latestIds);
   const rank = (row: BenchmarkRow) => row.aiRecall ?? -1;
-  return rows.filter((row) => keep.has(row.id)).sort((a, b) => rank(b) - rank(a) || b.recall - a.recall);
+  // The newest benchmark version first: scores of different versions aren't comparable.
+  const version = (row: BenchmarkRow) => Number(row.benchmarkVersion.replace(/^v/, "")) || 0;
+  return rows
+    .filter((row) => keep.has(row.id))
+    .sort((a, b) => version(b) - version(a) || rank(b) - rank(a) || b.recall - a.recall);
+}
+
+/** "benchmark v2": the demo apps' version a result was measured on. */
+export function benchmarkLabel(row: BenchmarkRow): string {
+  return `benchmark ${row.benchmarkVersion}`;
 }
 
 /** "provider/model" of the reviewer tier a result was measured with, or null. */

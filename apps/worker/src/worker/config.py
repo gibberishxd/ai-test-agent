@@ -29,11 +29,11 @@ class Settings(BaseSettings):
     llm_provider: str = ""
     # SecretStr: printing or logging the settings shows '**********', never the key.
     anthropic_api_key: SecretStr = SecretStr("")
-    agent_model: str = "claude-sonnet-5-5"
+    agent_model: str = "claude-haiku-5-5"  # run 7: the default agent (D91); Sonnet is "thorough"
     cheap_model: str = "claude-haiku-5-5"
     # LLM_PROVIDER=claude-cli (run 6): full model IDs, never an alias like "sonnet", so a result
     # says exactly which model ran. The benchmark refuses to start on an alias.
-    claude_cli_model: str = "claude-sonnet-5-5"
+    claude_cli_model: str = "claude-haiku-5-5"
     claude_cli_cheap_model: str = "claude-haiku-5-5"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-vl:8b-instruct"
@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     reviewer_model: str = ""
     # False for a reviewer model that can't read images (qwen3:14b): it gets text only.
     reviewer_vision: bool = True
+
+    # Run 7, M3: a target's specs, embedded locally and retrieved per page (worker/specs.py).
+    # Off until the holdout measurement shows specs help (D97); `bench --specs` turns it on.
+    use_specs: bool = False
+    embedding_model: str = "nomic-embed-text"
 
     # Run budgets, enforced by the worker
     max_steps: int = 40

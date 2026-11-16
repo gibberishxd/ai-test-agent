@@ -391,3 +391,16 @@ def test_a_claude_cli_benchmark_refuses_a_bare_alias():
     with pytest.raises(ValueError, match="alias"):
         check_pinned_models([ClaudeCliClient(cheap_model="haiku")])
     check_pinned_models([ClaudeCliClient(), FakeClient(), None])  # pinned or not claude-cli
+
+
+# --- Run 7: benchmark v2 (the four unplanted demo behaviours fixed) ----------------------------
+
+
+def test_scores_carry_the_benchmark_version_and_print_it(capsys):
+    from worker.benchmark import BENCHMARK_VERSION, print_scores
+
+    assert BENCHMARK_VERSION == "v2"
+    scores = score({"a": [decision("a", 1)]}, {}, PLANTED, [], [], "fake", "m", "abc")
+    assert scores.benchmark_version == "v2"
+    print_scores(scores)
+    assert "benchmark v2" in capsys.readouterr().out.lower()

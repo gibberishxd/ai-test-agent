@@ -27,6 +27,14 @@ Nothing is ever tuned against it, and a unit test fails if anything from either 
 `bugs.json` appears in the prompt or tool descriptions. A holdout score close to the shop score
 means the techniques are general.
 
+**Benchmark versions.** Every result records the version of the demo apps it was measured on.
+**v1** is runs 1–6. **v2** (run 7) fixed, in both builds, four unplanted behaviours that run 6's
+agents reported: the profile's "Recent orders" listed orders "My orders" never showed; a
+double-clicked "Add to cart" added twice; the holdout accepted check-in dates in the past and
+dates outside a room's availability. The planted bugs didn't change. Scores of different versions
+aren't directly comparable (v2 removes real behaviour that v1 counted as false alarms), so the
+leaderboard keeps them apart.
+
 The judge (`JUDGE_PROVIDER` / `JUDGE_MODEL`) is kept the same while the agent model changes, so
 two models are graded by the same judge. `bench --rescore` re-matches the saved runs of the
 latest result: it keeps the commit the runs were made on and records its own commit separately.
@@ -67,6 +75,12 @@ the API-equivalent estimate ("est."), computed from the CLI's token counts at li
 | ollama · gemma4:12b + claude-sonnet-5-5 reviewer, run 6, **holdout** (est. $0.054/run) | 0% | 33% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 0366f15 |
 | ollama · gemma4:12b + **claude-opus-5-5 reviewer** (claude-cli), run 6, shop (est. $0.068/run) | 7% | 36% | 100% | 0.0 | $0.00 | 1143 s | gemma4:12b (pinned) | 19ffd92 |
 | ollama · gemma4:12b + claude-opus-5-5 reviewer, run 6, **holdout** (est. $0.213/run) | 0% | 33% | 80% | 0.0 | $0.00 | | gemma4:12b (pinned) | 19ffd92 |
+| claude-cli · claude-haiku-5-5, run 7 **benchmark v2** baseline, shop (est. $0.104/run) | 33%* | 54% | 100% | 2.0 | $0.00 | 273 s | gemma4:12b (pinned) | 3276fab |
+| claude-cli · claude-haiku-5-5, run 7 benchmark v2 baseline, **holdout** (est. $0.101/run) | 75% | 83% | 93% | 0.0 | $0.00 | | gemma4:12b (pinned) | 3276fab |
+| claude-cli · claude-haiku-5-5, run 7 benchmark v2 + shop **critical flows**, shop (est. $0.105/run) | 30% | 51% | 89% | 1.0 | $0.00 | 276 s | gemma4:12b (pinned) | 8aa5746 |
+| claude-cli · claude-haiku-5-5, run 7 benchmark v2, **holdout** (no flows there; est. $0.099/run) | 62% | 75% | 93% | 1.0 | $0.00 | | gemma4:12b (pinned) | 8aa5746 |
+| claude-cli · claude-sonnet-5-5, run 7 benchmark v2 + shop critical flows, shop (est. $1.65/run) | **48%** | **64%** | 91% | 2.0 (real behaviour) | $0.00 | 241 s | gemma4:12b (pinned) | dde46e0 |
+| claude-cli · claude-sonnet-5-5, run 7 benchmark v2, **holdout** (est. $1.35/run) | 50% | 67% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | dde46e0 |
 | claude · claude-sonnet-5-5 (API) | not run: needs an API key and budget | | | | | | | |
 
 ## What each run taught
@@ -107,6 +121,14 @@ clean builds were real behaviour. A local Gemma explorer with a **Sonnet or Opus
 at 0% on the holdout: the reviewer only judges the few steps the explorer flags, so the explorer
 sets the ceiling. Recommended default: Haiku as the agent (D91). Small samples: 3 shop and 2
 holdout runs per setup.
+
+**Run 7.** Benchmark v2 (four unplanted behaviours fixed in both builds). Haiku's v2 baseline:
+shop 33%, holdout 75%. With the shop's three critical flows, Haiku 30% / 62% and Sonnet 48% / 50%:
+on the shop Sonnet triggers more (double clicks, the $NaN price every run), on the holdout the two
+runs per model are inside the noise. Journeys learned once were checked by replay with no model
+call in every later run. Specs aren't measured yet (they wait for the owner's holdout specs).
+
+\* The v2 baseline's shop lost bug 5 three times to a guard of mine in the demo app (D96).
 
 **Note on the first three rows.** AI-only recall for them is computed from their per-bug results (bug 9, "$NaN" price, was
 the only AI bug found, by Gemma in 3 of 3 runs); they predate the holdout app. Bugs 1–4 were

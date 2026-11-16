@@ -8,6 +8,7 @@ const MATRIX: Record<Action, Role[]> = {
   "run.stop": ["owner", "admin", "member"],
   "run.share": ["owner", "admin", "member"],
   "finding.triage": ["owner", "admin", "member"],
+  "targets.manage": ["owner", "admin", "member"],
   "settings.view": ["owner", "admin", "member", "viewer"],
   "domains.manage": ["owner", "admin"],
   "models.manage": ["owner", "admin"],

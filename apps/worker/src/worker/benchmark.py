@@ -28,6 +28,13 @@ from worker.queue import BENCHMARK_SLUG, FINAL
 from worker.verify import parse_json_object
 
 BUGS_JSON = REPO_ROOT / "apps" / "demo" / "bugs.json"
+# Which version of the demo apps a result was measured on. Bump it whenever the apps change in a
+# way that can move scores, so old and new results are never compared as if they were the same.
+#   v1: runs 1-6.
+#   v2 (run 7): four unplanted behaviours run 6's agents reported fixed in both builds: the
+#       profile's recent orders, a double-clicked "Add to cart", and the holdout's past dates and
+#       dates outside a room's availability.
+BENCHMARK_VERSION = "v2"
 # The holdout app: same kinds of bugs, different specifics. Never tune prompts against it.
 HOLDOUT_BUGS_JSON = REPO_ROOT / "apps" / "demo2" / "bugs.json"
 
@@ -95,6 +102,7 @@ class BenchmarkScores:
     avg_estimated_cost_usd: float | None = None
     estimated_cost_per_verified_bug: float | None = None
     reported_models: list[str] = field(default_factory=list)  # what the providers said ran
+    benchmark_version: str = BENCHMARK_VERSION
 
 
 def load_planted(path: Path = BUGS_JSON) -> list[PlantedBug]:
@@ -421,7 +429,10 @@ def report_bugs(session: Session, run_id: str) -> list[Bug]:
 
 def print_scores(scores: BenchmarkScores) -> None:
     print()
-    print(f"Benchmark · {scores.provider} · {scores.model} · commit {scores.git_commit}")
+    print(
+        f"Benchmark {scores.benchmark_version} · {scores.provider} · {scores.model}"
+        f" · commit {scores.git_commit}"
+    )
     if scores.rescore_commit:
         print(f"  rescored at    {scores.rescore_commit}")
     print(f"  judge          {scores.judge or 'not recorded'}")
@@ -554,6 +565,7 @@ def save_scores(
         rescore_commit=scores.rescore_commit,
         avg_estimated_cost_usd=scores.avg_estimated_cost_usd,
         estimated_cost_per_verified_bug=scores.estimated_cost_per_verified_bug,
+        benchmark_version=scores.benchmark_version,
         details=details,
     )
     session.add(result)

@@ -587,3 +587,152 @@ Per judgement bug: found in N of the buggy runs (shop 3, holdout 2). R = reached
 - **Every setup:** bug 11 (log out, then reload) and bug 6 (an invalid email at checkout) were
   found by no setup in run 6: the first needs a two-step sequence nobody chose in 40 steps, the
   second an invalid value typed on a page most runs reached late or not at all.
+
+## Run 7, M2: Haiku 5.5 on benchmark v2 (the baseline)
+
+Result `e92d2c6b` (commit 3276fab), `claude-haiku-5-5`, benchmark **v2** (the four unplanted
+behaviours fixed, D93), judge ollama/gemma4:12b, 480 s and 40 steps, holdout first. No usage
+limit. $0.72 estimated for the 7 runs. Runs: holdout 004ae115, 4d761dd0, clean c0cd6ae3; shop
+9288c7a3, 5989e6a9, 04a98fc6, clean dc157d67.
+
+| Bug | found | dropped | reached | never |
+|---|---|---|---|---|
+| Shop 5. Cart total ignores quantity | 0 | **3** | 0 | 0 |
+| Shop 6. Invalid email at checkout | 0 | 0 | 0 | 3 |
+| Shop 7. Discount twice | 1 | 0 | 2 | 0 |
+| Shop 8. Save changes does nothing | 3 | 0 | 0 | 0 |
+| Shop 9. $NaN | 2 | 0 | 1 | 0 |
+| Shop 10. Long name on mobile | 0 | 0 | 0 | 3 |
+| Shop 11. Session after logout + reload | 0 | 0 | 3 | 0 |
+| Shop 12. Wrong-password error placement | 0 | 0 | 0 | 3 |
+| Shop 13. Wrong order opened | 3 | 0 | 0 | 0 |
+| Holdout 3. One night charged | 2 | 0 | 0 | 0 |
+| Holdout 4. Check-out before check-in | 2 | 0 | 0 | 0 |
+| Holdout 5. Double-click Book now | 1 | 0 | 1 | 0 |
+| Holdout 6. Room name on mobile | 1 | 0 | 1 | 0 |
+
+Against run 6's Haiku (v1, `091936b3`): shop 26% → 33%, holdout 62% → 75%; no run ended early
+(the early-finish correction, D92, had nothing to correct this time). Clean-shop false alarms
+2.0: "quantity 0 is added as 1" (the owner's open product question) and "a long special-character
+search closes the search panel with no message" (new; real behaviour of the clean build).
+
+**Bug 5 was lost to my own guard (D96).** Haiku found it in all 3 shop runs (quantity 2, line
+$24.00, total $12.00); replay dismissed all three, seeing quantity 1. The agent had clicked "Add
+to cart" twice, seconds apart; replay repeats steps back to back and M1's 500 ms double-click
+guard swallowed the second click. With the guard keyed on the click's `detail` instead, the shop
+would have read 12 of 27 (44%) if replay had confirmed them, as it did in run 6. The holdout is
+unaffected.
+
+**Misses:** checkout (bug 6), the long-name product (10) and the login page (12) never reached
+in 40 steps; logout + reload (11) reached in all 3 runs but never the two-step sequence.
+
+## Run 7, M4: critical flows on the shop (Haiku 5.5)
+
+`scripts/flows_measure.py`: a fresh workspace, the shop as a target with three journeys (sign in;
+add to cart and check out; change profile: plain product journeys, `flows.DEMO_SHOP_FLOWS`), two
+runs (480 s, 40 steps). Run 1 learns, run 2 replays. Judge-free: no benchmark scoring.
+
+**First version (commit 8263e2c).** Run 1: 3 journeys covered in 34 model calls ($0.093);
+sign in passed, "add to cart and check out" FAILED because, after the order was placed, the agent
+opened an order and saw planted bug 13 (the checkout itself worked), "change profile" failed
+(planted bug 8). Run 2: the two failing journeys were rechecked by replay with no model, but sign
+in's replay didn't match and the agent, re-doing it, failed it for planted bug 2 (the profile's
+orders don't load). Two flaws: a journey's verdict absorbed bugs that don't stop the journey, and
+a failure's checks mixed what the agent saw (an order number that changes every run) with what it
+expected.
+
+**Fixed (e49bce8):** a bug that doesn't stop the journey is reported and the journey passes;
+on FAILED only quotes after "expected" become checks; a check matches whatever its numbers are.
+
+**Second measurement (commit a6b4a22).** Run 1: 36 model calls ($0.083): sign in passed,
+checkout passed, change profile failed with `expected "Profile saved"`. Run 2: **0 model calls
+for the journeys**: both passing journeys replayed with every check passing, and the profile
+journey's failing script replayed and found bug 8 again, confirmed by the replay itself. The
+whole run cost about the same ($0.10), but run 2's 40 steps all went to exploration, where run
+1 had about 4 left after learning the journeys.
+
+**What it shows.** Journeys are learned once (≈12 model calls each) and then checked for the
+price of a browser; a known failure stays found without the model; a learning run spends most of
+its step budget on the journeys (a team adding flows should expect the first run to explore
+less). Two samples per version: small, as everything in this file.
+
+## Run 7, M6: Haiku 5.5 on benchmark v2 with the shop's critical flows
+
+Result `2f9e0744` (commit 8aa5746), `claude-haiku-5-5`, benchmark v2, `bench --flows` (the shop
+target has the three journeys; specs off: not measured yet, D97), judge ollama/gemma4:12b, 480 s
+and 40 steps, holdout first. No usage limit; $0.72 for the 7 runs. Runs: holdout e4a102b1,
+181f43eb, clean e03c0ac0; shop 64d886d0, edbe935e, c93c162d, clean 9b353008.
+
+| Set | AI-only | All | Precision | False alarms | vs M2 (no flows) |
+|---|---|---|---|---|---|
+| Shop | 30% (8 of 27) | 51% (20 of 39) | 89% | 1.0 | 33% (9 of 27)*, 100%, 2.0 |
+| Holdout (no flows) | 62% (5 of 8) | 75% (9 of 12) | 93% | 1.0 | 75% (6 of 8), 93%, 0.0 |
+
+\* M2's shop lost bug 5 three times to the double-click guard (D96); here bug 5 was found once.
+
+The holdout has no flows, so its difference from M2 (one bug-run: the mobile room name, and one
+clean-build report, "the booking dates break across lines on a phone") is run-to-run variation
+over two runs, not a change.
+
+**The journeys inside the benchmark (shop, signed in with a saved login setup):**
+
+| Run | Sign in | Add to cart and check out | Change profile | Journey model calls |
+|---|---|---|---|---|
+| 1 (learn) | passed (7) | passed (15) | failed: expected "Profile saved" (11) | 33 |
+| 2 | failed (10): the demo credentials showed as "[test account] / [secret]" | repaired (9): the replay ran but "Order confirmed" wasn't on the page | still failing, by replay (0) | 19 |
+| 3 | still failing, by replay (0) | repaired (10): a check from run 2 quoted earlier pages ("Go to checkout") | still failing, by replay (0) | 10 |
+
+Two flaws in my flows code that M4 (a workspace without a login setup) didn't show:
+- **A sign-in journey on a target that has a saved login.** The worker hides the saved
+  credentials from the model (`[test account]`, `[secret]`), and the login page shows the demo
+  account, so the journey's agent saw placeholders, couldn't sign in, and filed "Critical flow
+  failed: Sign in": a false finding (shop precision 89%).
+- **Checks the final page can't show.** A PASSED summary can quote texts from earlier pages of
+  the journey; saved as checks, they fail every replay and force a repair.
+Both are fixed after this benchmark (so Sonnet in M6 runs on the same code as this result):
+a check is kept only if it is on the episode's final page, and a journey's task says when the
+run is already signed in with hidden credentials (D98).
+
+**Flows' own finding:** "Change profile" (planted bug 8) was found in all 3 shop runs, twice by
+replay with no model call.
+
+## Run 7, M6: Sonnet 5.5 on benchmark v2 with the shop's critical flows
+
+Result `5e64c8fc` (commit dde46e0: the same code as the Haiku row `2f9e0744`), `claude-sonnet-5-5`
+(cheap calls `claude-haiku-5-5`), `bench --flows` with the journeys' scripts kept from the Haiku
+benchmark, judge ollama/gemma4:12b, 480 s and 40 steps, holdout first. No usage limit; $10.63 for
+the 7 runs (cap $15). Runs: holdout 95ffc528, 84da4309, clean 3db8703e; shop 8e1afa9c, e9cef00a,
+82896fd7, clean 3ea8dda3.
+
+| Bug | Haiku M6 (found / runs) | Sonnet M6 |
+|---|---|---|
+| Shop 5. Cart total ignores quantity | 1 / 3 | 2 / 3 |
+| Shop 6. Invalid email at checkout | 0 | 0 (never reached) |
+| Shop 7. Discount twice | 0 | 2 / 3 |
+| Shop 8. Save changes does nothing | 3 / 3 | 3 / 3 |
+| Shop 9. $NaN | 1 / 3 | 3 / 3 |
+| Shop 10. Long name on mobile | 0 | 0 (reached twice) |
+| Shop 11. Session after logout + reload | 0 | 0 (reached, never the sequence) |
+| Shop 12. Wrong-password error placement | 0 | 0 (never reached) |
+| Shop 13. Wrong order opened | 3 / 3 | 3 / 3 |
+| Holdout 3. One night charged | 2 / 2 | 0 (reached twice) |
+| Holdout 4. Check-out before check-in | 2 / 2 | 2 / 2 |
+| Holdout 5. Double-click Book now | 1 / 2 | 2 / 2 |
+| Holdout 6. Room name on mobile | 0 | 0 (reached twice) |
+| **AI-only, shop / holdout** | 30% / 62% | **48%** / 50% |
+
+**The journeys:** all three replayed with no model call in every shop run (Haiku had learned and
+repaired them). Checkout passed by replay 3/3; "Change profile" was re-found failing (bug 8) by
+replay 3/3. "Sign in" was also "still failing" by replay 3/3: the false failure Haiku's run saved
+(D98's first flaw) kept being re-found. **A failing script is never rechecked by the agent**, so a
+wrong failure sticks until someone edits the journey: the next fix (recheck a failing journey with
+the agent every few runs) is in "Needs me".
+
+**What separates the models.** On the shop Sonnet triggers more (double clicks on the discount,
+2/3; the $NaN price every run) and reports the cart total twice; on the holdout it missed the
+one-night total that Haiku found 2/2, and found the double booking 2/2. Two holdout runs per model
+move the number by 12 points per bug-run: the holdout difference is inside the noise. Sonnet costs
+~16× Haiku per run ($1.65 against $0.105 on the shop), as in run 6.
+
+**Clean-build reports (2.0 on the shop):** "quantity 0 is added as 1" and "the cart is emptied
+by a reload": both the owner's open product questions, real behaviour of the clean build.

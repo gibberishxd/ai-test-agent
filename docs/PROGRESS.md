@@ -155,6 +155,37 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Run 7 (branch `agent-v7`, plan in `docs/RUN_PLAN_7.md`)
+
+| Goal | Status | Check |
+|---|---|---|
+| M0 Plan | done | PR #9 merged, PR #10 (FSL license) still open (not merged by us; branched from main anyway); `agent-v7`; RUN_PLAN_7.md; `docs/specs/TEMPLATE.md`; the owner asked to write `apps/demo2/specs.md`. |
+| M1 Decisions | done | Haiku the default (config, claude-cli, web model form, `.env.example`, README; D92); the early finish corrected once in the claude-cli adapter (test from run 6's e3eb2b69 summary); the 4 demo behaviours fixed in both builds with unit tests and `verify-bugs` checks; benchmark v2 in bench output, `benchmark_results.benchmark_version` and the leaderboard key (D93). |
+| M2 Baseline | done | Haiku benchmark v2 `e92d2c6b` (table below). It exposed a flaw in M1's double-click guard (replays lost a second "Add to cart"); fixed by click detail (D96). |
+| M3 Specs | done, except the measurement (Needs me) | pgvector image in dev, CI and production; `targets`, `specs`, `spec_chunks` under RLS (a test checks every workspace table); chunks embedded with nomic-embed-text through Ollama (D94), HNSW cosine index; per-page retrieval capped at 3 chunks / ~400 tokens for the agent and the replay judge; Specs tab, violated spec on the bug card; `/api/v1` targets and specs with OpenAPI; guard test on the holdout specs; `bench --specs`. The holdout measurement waits for `apps/demo2/specs.md`; until then `USE_SPECS` defaults to false (D97). |
+| M4 Flows | done | Two measurements on the shop (Haiku, three journeys, table below). The first exposed two flaws (a journey failed for an unrelated bug; checks that can't match next time), fixed in e49bce8. The second: run 1 learned the journeys in 36 model calls (~$0.08), run 2 checked all three by replay with **0 model calls** and found the same failure (Save does nothing) again for free (D95, D97). |
+| M5 MCP | done | `apps/web/mcp`: start_run, get_run_status, get_report over stdio, backed by `/api/v1`; tests with a stand-in API; README setup for Claude Code and Cursor. Done before M3's measurement because that one waits for the owner's specs. |
+| M6 Final measurement | done | Haiku benchmark v2 with the shop's flows `2f9e0744` and one Sonnet benchmark on the same code `5e64c8fc` (table below). It showed two flow flaws inside a signed-in benchmark, fixed after with tests (D98). No usage limit in any run. |
+| M7 Wrap-up | done | README (what it does now, results rows), WALKTHROUGH (specs, embeddings and retrieval, flows, MCP with Q&A), DATABASE (new tables, pgvector, RLS), ROADMAP (what moved), BENCHMARKS, DEPLOY (pgvector upgrade), DECISIONS D92–D98, DEVLOG; `npm test` and `npm run lint` exit 0; demo servers stopped by PID, Ollama running; PR `agent-v7` → main opened, not merged. |
+
+### Run 7 measurements (benchmark v2; claude-cli, judge pinned to ollama/gemma4:12b, 480 s and 40 steps; shop 3 + clean, holdout 2 + clean, holdout first)
+Counts are bug×run slots (shop 9 judgement bugs × 3 = 27 of 39 in all; holdout 4 × 2 = 8 of 12). Estimated cost = API-equivalent from the CLI's token counts (D88), not a charge.
+
+| Benchmark | Result | Model | Specs / flows | Shop AI-only | Shop all | Holdout AI-only | Holdout all | Precision shop / holdout | False alarms clean shop / holdout | Avg run | Est. API cost / run | Date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M2 baseline | `e92d2c6b` (commit 3276fab) | claude-haiku-5-5 | none / none | 33% (9 of 27)* | 54% (21 of 39) | 75% (6 of 8) | 83% (10 of 12) | 100% / 93% | 2.0 / 0.0 | 273 s | $0.104 shop, $0.101 holdout ($0.72 for the 7 runs) | 2026-11-15 |
+| M6 final (Haiku) | `2f9e0744` (commit 8aa5746) | claude-haiku-5-5 | none / shop flows (`--flows`) | 30% (8 of 27) | 51% (20 of 39) | 62% (5 of 8) | 75% (9 of 12) | 89% / 93% | 1.0 / 1.0 | 276 s | $0.105 shop, $0.099 holdout ($0.72 for the 7 runs) | 2026-11-15 |
+| M6 final (Sonnet) | `5e64c8fc` (commit dde46e0, same code as the Haiku row) | claude-sonnet-5-5 (cheap calls claude-haiku-5-5) | none / shop flows (scripts kept from the Haiku row) | **48% (13 of 27)** | **64% (25 of 39)** | 50% (4 of 8) | 67% (8 of 12) | 91% / 100% | 2.0 / 0.0 | 241 s | $1.65 shop, $1.35 holdout ($10.63 for the 7 runs) | 2026-11-16 |
+
+| Flows | Commit | Run | Journeys covered | Journey model calls | Journey est. cost | Journeys: result | Whole run: model calls / est. cost | Date |
+|---|---|---|---|---|---|---|---|---|
+| first version | 8263e2c | 1 learn `792f8d98` | 3 of 3 | 34 | $0.093 | sign in passed; checkout "failed" (bug 13 seen on the way); profile failed (bug 8) | 42 / $0.110 | 2026-11-15 |
+| first version | 8263e2c | 2 replay `099f3ba2` | 3 of 3 | 12 | $0.029 | checkout and profile rechecked by replay (0 calls); sign in replay didn't match, the agent then "failed" it for an unrelated bug | 42 / $0.099 | 2026-11-15 |
+| fixed (e49bce8) | a6b4a22 | 1 learn `6f6a2eb6` | 3 of 3 | 36 | $0.083 | sign in passed; checkout passed; profile failed: expected "Profile saved" (bug 8) | 43 / $0.098 | 2026-11-15 |
+| fixed (e49bce8) | a6b4a22 | 2 replay `7688b1da` | 3 of 3 | **0** | **$0** | all three by replay: two passed, profile still failing (bug 8 found again, free) | 41 / $0.104 (all exploration) | 2026-11-15 |
+
+\* Undercounts bug 5: reported in all 3 shop runs, dismissed by replay because M1's double-click guard swallowed the replay's second "Add to cart" (D96, fixed after this run).
+
 ## Run 6 (branch `agent-v6`, plan in `docs/RUN_PLAN_6.md`)
 
 | Goal | Status | Check |
@@ -209,6 +240,32 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
+0. **Run 7 (branch `agent-v7`):**
+   - **PR #10 (FSL license) is still open:** review and merge it when you're ready; run 7 didn't
+     touch it.
+   - **Write the holdout specs** (`apps/demo2/specs.md`, from `docs/specs/TEMPLATE.md`, without
+     looking at `bugs.json`). Then: `cd apps/worker && LLM_PROVIDER=claude-cli
+     CLAUDE_CLI_MODEL=claude-haiku-5-5 DEV_MODE=true MAX_RUN_COST_USD=1 BENCH_MAX_COST_USD=2
+     JUDGE_PROVIDER=ollama JUDGE_MODEL=gemma4:12b uv run worker bench --holdout-first --specs`
+     and compare the holdout with M2 (`e92d2c6b`). Keep `USE_SPECS=true` as the default only if
+     judgement-only recall rises and clean-build false alarms don't (D97). The guard test
+     (`test_spec_guard.py`) checks the file first.
+   - **The real Claude API path** is still untested (no key): one smoke run with
+     `LLM_PROVIDER=claude AGENT_MODEL=claude-haiku-5-5`, then a Haiku benchmark to compare real
+     cost with the claude-cli estimates.
+   - **Revisit, decided without you:** benchmark v2 still names the apps after the double-click
+     guard fix (D96); a failed availability API doesn't block bookings (D93); specs off by
+     default until measured (D97).
+   - **A failing journey is never rechecked by the agent:** a wrong failure (the false "Sign in"
+     failure Haiku's M6 run saved, D98) is re-found by replay in every later run. Next fix (agent
+     loop, your call): give a failing journey back to the agent every few runs, or when its replay
+     result changes. Meanwhile, editing or deleting the journey clears it.
+   - **D98's two flow fixes aren't measured in a benchmark yet** (they came after M6 so Haiku and
+     Sonnet compare on one code); a Haiku `bench --flows` would show their effect (~$0.75).
+   - **The pgvector image's collation:** `pgvector/pgvector:0.8.1-pg17` is built on an older
+     Debian than `postgres:17`, so an existing data volume warns about a collation version
+     mismatch. Dev is fixed (`REINDEX DATABASE` + `ALTER DATABASE ... REFRESH COLLATION VERSION`
+     on each database); a production volume made with `postgres:17` needs the same once.
 0. **Run 6 (branch `agent-v6`, merged in PR #7 on 2026-11-15):**
    - **Opus as the agent (e):** not run, as you asked. Expect about Sonnet's call count (~300 Opus
      calls, roughly $3 a run at API prices by the run 6 estimates). To run it:
@@ -323,6 +380,10 @@ are product and measurement questions, not merges.
    Node 20), and in Docker Desktop → Settings → Advanced pick "System" so `docker` is on PATH.
 
 ## Spend tonight
+Run 7: $0.00 charged. claude-cli on the owner's Pro plan: Haiku benchmarks M2 (est. $0.72) and M6
+(est. $0.72), four Haiku flow-measurement runs (est. ~$0.41), one Sonnet benchmark M6 (est.
+$10.63): about **$12.5 API-equivalent**, no usage limit and no credit-paid call. No Anthropic API
+call (no key). Ollama local: the judge, and nomic-embed-text (pulled, 274 MB).
 Run 6: $0.00 charged. claude-cli on the owner's Pro plan: one Haiku call (L1 fixture) and four
 benchmarks: (a) Haiku agent est. $0.55, (b) Sonnet agent est. $10.79, (c) Sonnet reviewer est.
 ~$0.20, (d) Opus reviewer est. $0.91: about **$12.45 API-equivalent** in all, no usage limit hit

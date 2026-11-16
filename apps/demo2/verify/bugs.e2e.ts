@@ -72,3 +72,26 @@ test("fixed: a date error goes away once the date is corrected", async ({ page }
   await page.getByLabel("Check-out").fill("2027-02-06");
   await expect(error).toBeHidden();
 });
+
+// Benchmark v2 (run 7): two unplanted behaviours run 6's agents reported, fixed in both builds.
+test("fixed (v2): a check-in in the past is refused", async ({ page }) => {
+  await fillBooking(page, "2026-01-10", "2026-01-12");
+  await page.getByRole("button", { name: "Book now" }).click();
+  await expect(page.getByText("Check-in can't be in the past.")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Booked!" })).toHaveCount(0);
+});
+
+// The window comes from the availability API, which fails on purpose in the buggy build (bug 1),
+// so only the clean build knows it.
+test("fixed (v2): dates outside the room's availability are refused", async ({ page }) => {
+  test.skip(test.info().project.name === "buggy", "bug 1: the availability API is down");
+  await page.goto("/rooms/1");
+  await expect(page.getByText(/Open from 2027-01-05 to 2027-03-31/)).toBeVisible();
+  await page.getByLabel("Guest name").fill("Test User");
+  await page.getByLabel("Email").fill("test@example.com");
+  await page.getByLabel("Check-in").fill("2027-03-29");
+  await page.getByLabel("Check-out").fill("2027-04-03");
+  await page.getByRole("button", { name: "Book now" }).click();
+  await expect(page.getByText("This room is open from 2027-01-05 to 2027-03-31.")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Booked!" })).toHaveCount(0);
+});

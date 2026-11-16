@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-24.04 # pinned so the runner image changes only when we choose (run 4)
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:0.8.1-pg17
         env:
           POSTGRES_USER: agent
           POSTGRES_PASSWORD: agent
@@ -39,7 +39,7 @@ jobs:
     container: mcr.microsoft.com/playwright/python:v1.64.0-noble
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:0.8.1-pg17
         env:
           POSTGRES_USER: agent
           POSTGRES_PASSWORD: agent
@@ -71,7 +71,7 @@ jobs:
     container: mcr.microsoft.com/playwright:v1.64.0-noble
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:0.8.1-pg17
         env:
           POSTGRES_USER: agent
           POSTGRES_PASSWORD: agent

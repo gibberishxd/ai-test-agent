@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
+import { acceptAdd } from "../addToCart";
 import { bug } from "../bugs";
 import { findProduct, formatPrice, type Product } from "../products";
 import { useStore } from "../store";
@@ -54,7 +55,8 @@ function ProductDetails({ product }: { product: Product }) {
           <button
             type="button"
             className="button"
-            onClick={() => {
+            onClick={(event) => {
+              if (!acceptAdd(event.detail)) return; // the second click of a double click
               addToCart({ productId: product.id, name: product.name, price: product.price, quantity });
               setAdded(true);
             }}

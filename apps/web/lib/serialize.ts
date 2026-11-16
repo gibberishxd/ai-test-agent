@@ -43,6 +43,17 @@ export type BugView = {
   suppressed: boolean;
 };
 
+export type FlowResultView = {
+  name: string;
+  /** passed | replayed | repaired | failed | skipped */
+  status: string;
+  /** Checked by replaying its saved script, with no model call. */
+  replayed: boolean;
+  modelCalls: number;
+  estimatedCostUsd: number;
+  detail: string | null;
+};
+
 export type RunView = {
   id: string;
   targetUrl: string;
@@ -68,6 +79,8 @@ export type RunView = {
   finishedAt: string | null;
   steps: StepView[];
   bugs: BugView[];
+  /** Run 7, M4: each critical flow's result in this run (empty when the target has none). */
+  flows: FlowResultView[];
   /** Compared with the target's previous run, and the workspace's triage (members only). */
   history?: RunHistory | null;
 };
@@ -97,6 +110,14 @@ export function serializeRun(run: RunDetail): RunView {
     createdAt: run.createdAt.toISOString(),
     startedAt: iso(run.startedAt),
     finishedAt: iso(run.finishedAt),
+    flows: (run.flowResults ?? []).map((r) => ({
+      name: r.flow.name,
+      status: r.status,
+      replayed: r.replayed,
+      modelCalls: r.modelCalls,
+      estimatedCostUsd: r.estimatedCostUsd,
+      detail: r.detail,
+    })),
     steps: run.steps.map((step) => ({
       index: step.index,
       action: step.action,

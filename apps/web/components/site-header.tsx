@@ -8,6 +8,7 @@ import { currentUser } from "@/lib/auth";
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/runs", label: "Runs" },
+  { href: "/targets", label: "Targets" },
   { href: "/benchmark", label: "Benchmark" },
 ];
 

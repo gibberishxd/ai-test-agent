@@ -148,3 +148,35 @@ test("not planted: the order pages need a signed-in user", async ({ page }) => {
   await page.goto("/orders");
   await expect(page).toHaveURL(/\/login\?next=%2Forders/);
 });
+
+// Benchmark v2 (run 7): two unplanted behaviours run 6's agents reported, fixed in both builds.
+test("fixed (v2): a double click on Add to cart adds once", async ({ page }) => {
+  await page.goto("/products/1");
+  await page.getByLabel("Quantity").fill("2");
+  await page.getByRole("button", { name: "Add to cart" }).dblclick();
+  await expect(page.getByRole("link", { name: /Cart \(2\)/ })).toBeVisible();
+});
+
+// The profile API fails on purpose in the buggy build (bug 2), so its orders only load in the clean one.
+test("fixed (v2): the profile's recent orders are the orders on My orders", async ({ page }) => {
+  test.skip(test.info().project.name === "buggy", "bug 2: the profile API fails");
+  await logIn(page);
+  await page.goto("/profile");
+  const recent = page.getByRole("heading", { name: "Recent orders" }).locator("xpath=following-sibling::ul[1]/li");
+  await recent.first().waitFor();
+  const recentIds = (await recent.allTextContents()).map((t) => t.match(/#(\d+)/)?.[1]).sort();
+  await page.goto("/orders");
+  const mine = await page.getByRole("link", { name: /Order #\d+/ }).allTextContents();
+  expect(recentIds).toEqual(mine.map((t) => t.match(/#(\d+)/)?.[1]).sort());
+});
+
+// Separate clicks still add each time, however fast: a replay repeats a user's clicks faster than
+// the user made them, and must reach the same cart (the first v2 guard, a 500 ms window, didn't).
+test("fixed (v2): two separate clicks on Add to cart add twice", async ({ page }) => {
+  await page.goto("/products/1");
+  await page.getByLabel("Quantity").fill("1");
+  const add = page.getByRole("button", { name: "Add to cart" });
+  await add.click();
+  await add.click();
+  await expect(page.getByRole("link", { name: /Cart \(2\)/ })).toBeVisible();
+});

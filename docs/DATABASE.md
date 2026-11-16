@@ -111,6 +111,7 @@ erDiagram
     text rescore_commit
     double_precision avg_estimated_cost_usd
     double_precision estimated_cost_per_verified_bug
+    text benchmark_version
   }
   bugs {
     uuid id PK
@@ -503,6 +504,30 @@ are deleted in the same pass.
 `max_steps` and `max_seconds` (nullable): a CI caller may lower the worker's limits for one run,
 never raise them (`run_limits()` takes the smaller value).
 
+### targets, specs, spec_chunks — a team's own requirements (run 7, M3)
+- **`targets`**: an app a workspace tests, by `origin` (`scheme://host[:port]`, a CHECK keeps it
+  that shape; unique per workspace). A run's target is the one whose origin matches its URL.
+- **`specs`**: requirements per target (`title`, `body` as Markdown or text, at most 100,000
+  characters). `chunked_at` and `embedding_model` say whether the worker has embedded this
+  version; the web app clears `chunked_at` on an edit, and `updated_at` has its trigger.
+- **`spec_chunks`**: a spec split at its headings (`heading` keeps the path, `ord` the order),
+  each with `embedding vector(768)` from `nomic-embed-text` (D94). Written by the worker only,
+  before a run on the target. **pgvector**: the `vector` extension (image
+  `pgvector/pgvector:0.8.1-pg17`), an **HNSW index with `vector_cosine_ops`** for "the chunks
+  closest to this page", filtered by `target_id` (its own index).
+- All three are tenant tables: `workspace_id`, row-level security, `tenant_isolation`. A
+  database test fails if any table with a `workspace_id` lacks either (`test_db_rules.py`).
+
+### flows, flow_results — critical flows (run 7, M4)
+- **`flows`**: a journey per target in plain language (`name`, `goal`), its order (`position`),
+  the saved `script` (JSON: start URL, steps with their elements, checks, end path) and
+  `script_saved_at`, and the latest `last_status` / `last_run_id`. At most 10 per target: a
+  BEFORE INSERT trigger (`flows_per_target_limit`), since the count spans rows.
+- **`flow_results`**: one row per journey per run: `status` (passed, replayed, repaired, failed,
+  skipped: a CHECK), whether it was `replayed` without a model, its `model_calls` and
+  `estimated_cost_usd`, and a `detail` line. Indexed by `run_id` for the run report.
+- Both tenant tables, under row-level security like the rest.
+
 ## Keys and constraints, in one place
 - **Primary keys:** `id uuid` everywhere (except `verification_tokens`, keyed by its unique
   token).
@@ -726,6 +751,8 @@ edited or erased by the apps.
 - **`model_leaderboard`** (materialized): one row per (provider, model, judge, reviewer) with its
   newest valid result (rows with `details.invalid` are left out) and how many results it has.
   Run 6 added `avg_estimated_cost_usd` and `estimated_cost_per_verified_bug` (null on older rows).
+  Run 7 added `benchmark_version` (`v1` for runs 1–6, `v2` since the demo fixes of run 7; a CHECK
+  keeps it `v<number>`) and made it part of the leaderboard's key, so versions never mix.
   **Refresh strategy:** a statement trigger refreshes it after every insert, update, delete or
   truncate of `benchmark_results`. Results arrive a few times a day and the table is tiny, so a
   full refresh costs milliseconds and the view is never stale; the benchmark page reads it on

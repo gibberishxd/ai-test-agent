@@ -10,6 +10,8 @@ import { inTenant, tenantDb, workspaceOf, type TenantContext } from "@/lib/tenan
 import type { ProbeResult } from "@/lib/model-probe";
 import { encryptSecret, lastFour } from "@/lib/secret-box";
 
+export { CLAUDE_MODELS, modelForProvider } from "@/lib/claude-models";
+
 /** Providers a workspace can choose. (claude-cli is the owner's local test tool, never here.) */
 export const WORKSPACE_PROVIDERS = ["openai-compat", "claude"] as const;
 export type WorkspaceProvider = (typeof WORKSPACE_PROVIDERS)[number];

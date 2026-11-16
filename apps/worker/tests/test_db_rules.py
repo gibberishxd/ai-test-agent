@@ -441,3 +441,24 @@ def test_the_leaderboard_refreshes_when_a_result_is_saved_and_skips_invalid_ones
 def test_out_of_range_and_unknown_values_are_refused(db_engine, two, sql):
     with db_engine.connect() as conn, pytest.raises(IntegrityError):
         conn.execute(text(sql))
+
+
+def test_every_workspace_table_has_row_level_security_and_a_tenant_policy(db_engine):
+    # Run 7: new tenant tables (targets, specs, spec_chunks, flows...) must not be forgotten.
+    from sqlalchemy import text
+
+    with db_engine.connect() as conn:
+        tables = conn.execute(
+            text(
+                "SELECT c.relname, c.relrowsecurity,"
+                " EXISTS (SELECT 1 FROM pg_policies p WHERE p.tablename = c.relname"
+                "         AND p.policyname = 'tenant_isolation') AS has_policy"
+                " FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+                " JOIN information_schema.columns col"
+                "   ON col.table_name = c.relname AND col.column_name = 'workspace_id'"
+                " WHERE n.nspname = 'public' AND c.relkind = 'r'"
+            )
+        ).all()
+    assert {t.relname for t in tables} >= {"targets", "specs", "spec_chunks"}
+    missing = [t.relname for t in tables if not (t.relrowsecurity and t.has_policy)]
+    assert missing == []

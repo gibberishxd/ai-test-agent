@@ -140,6 +140,8 @@ export async function getRun(workspaceId: string, id: string) {
     include: {
       steps: { orderBy: { index: "asc" } },
       bugs: { orderBy: { createdAt: "asc" } },
+      // Run 7, M4: what happened to each critical flow of the target.
+      flowResults: { orderBy: { createdAt: "asc" }, include: { flow: { select: { name: true } } } },
     },
   });
 }

@@ -92,3 +92,19 @@ must not be a superuser, or row-level security can be switched off by whoever co
 
 What this model doesn't cover yet, and needs people or money (docs/ROADMAP.md): an external
 penetration test, a security review of the deployment, SOC 2 controls, and incident response.
+
+## Upgrading to run 7: pgvector
+
+Run 7 adds the `vector` extension (specs, D94). The Postgres image is now
+`pgvector/pgvector:0.8.1-pg17` (in `docker-compose.prod.yml`); a managed Postgres must offer the
+extension (RDS, Cloud SQL and Supabase do) and let the migration role create it.
+
+An existing data volume created by `postgres:17` works, but Postgres warns about a collation
+version mismatch: the pgvector image is built on an older Debian (glibc 2.36 against 2.41), and
+text indexes built under the other version can order non-ASCII text differently. Once, after the
+switch and before traffic, on each database:
+
+```sql
+REINDEX DATABASE agent;
+ALTER DATABASE agent REFRESH COLLATION VERSION;
+```

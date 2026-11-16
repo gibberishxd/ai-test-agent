@@ -518,3 +518,56 @@ def test_lists_the_crawl_found_appear_in_the_first_observation(context, site_url
     )
     AgentRun(context.new_page(), llm, guard, config).run()
     assert 'on /orders.html: open one item (e.g. "1042")' in llm.calls[0]["observation"]
+
+
+# --- Run 7, M3: the team's requirements in the observation ------------------------------------
+
+
+class StubSpecs:
+    """Two requirements for every page, like a SpecRetriever would return."""
+
+    def __init__(self):
+        self.pages = []
+
+    def for_page(self, url, title, page_text):
+        from worker.specs import RetrievedChunk, select_chunks
+
+        self.pages.append(url)
+        found = [
+            RetrievedChunk("c1", "s1", "Profile", "Name", "The name can't be empty.", 0.2),
+            RetrievedChunk("c2", "s1", "Profile", "Save", "Saving shows 'Profile saved'.", 0.3),
+        ]
+        return select_chunks(found)
+
+
+def test_requirements_are_shown_fenced_and_a_cited_one_is_linked_to_the_report(agent):
+    run, llm, _ = agent(
+        [
+            call(
+                "report_bug",
+                title="Empty name is accepted",
+                severity="medium",
+                category="validation",
+                expected="[S1] The form refuses an empty name",
+                actual="It was saved",
+                step_ids=[],
+                evidence="saved with no name",
+            ),
+            call("finish", summary="done"),
+        ]
+    )
+    run.config.specs = StubSpecs()
+    result = run.run()
+    observation = llm.calls[0]["observation"]
+    assert "REQUIREMENTS" in observation and "<spec_content>" in observation
+    assert "[S1] Profile > Name" in observation
+    assert "SPECS:" in observation  # the task says how to cite one
+    [bug] = result.bugs
+    assert bug.evidence["spec"]["spec_id"] == "s1" and bug.evidence["spec"]["heading"] == "Name"
+
+
+def test_without_specs_the_observation_has_no_requirements_section(agent):
+    run, llm, _ = agent([call("finish", summary="done")])
+    run.run()
+    assert "REQUIREMENTS" not in llm.calls[0]["observation"]
+    assert "SPECS:" not in llm.calls[0]["observation"]

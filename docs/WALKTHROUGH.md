@@ -1346,3 +1346,96 @@ limit, `fallback_credit`). Samples are small: 3 shop runs and 2 holdout runs per
    first limit answer sets it, every later call (any client, the reviewer too) is refused before
    the CLI starts, the loop doesn't treat it as an ordinary model error, and the benchmark stops
    its queue and saves what finished.
+
+## Run 7: testing against a team's own requirements (`worker/specs.py`, `worker/spec_store.py`, `lib/target-specs.ts`, migration `20261116110000_specs`, D94)
+
+**What.** A team adds its requirements per target (Markdown or text: user stories, acceptance
+criteria) on the target's Specs tab or through `/api/v1`. Before a run on that target, the worker
+splits each changed spec at its headings, embeds the pieces with a local model (`nomic-embed-text`
+through Ollama) and stores them with pgvector. On every page, the agent's observation gets the
+2–3 pieces closest to that page, fenced as untrusted reference text, and a line telling it to
+cite a broken requirement by its label ([S2]). The citation is stored with the finding, shown on
+the bug card ("Breaks your spec Booking › Dates"), and given to the replay judge.
+
+**How retrieval works.** Embeddings turn text into vectors where similar meaning means a small
+angle between them. The query for a page is its path, title and first 400 characters of text;
+Postgres returns the 8 nearest chunks by cosine distance (`<=>`, served by an HNSW index), and
+the worker keeps at most 3 within distance 0.55 and 1,500 characters. One embedding call per
+distinct page, cached for the run; a page with nothing relevant gets no section at all.
+
+**Why this design.** pgvector keeps vectors next to the rows they belong to, under the same
+row-level security, in the database we already run and back up; a separate vector database would
+be one more service for a few hundred rows per customer. A local embedding model keeps a
+customer's specs off third-party APIs and costs nothing per call. Showing only the closest pieces
+keeps the prompt small (~400 tokens a step at most) and keeps the agent focused on the page.
+
+**Weak spots.** Retrieval by page text can miss a requirement phrased very differently from the
+page (a synonym, a business term the page never shows). The distance threshold was chosen, not
+tuned on data. Specs could themselves be wrong; the agent is told to report what breaks them,
+so a wrong spec produces a confident wrong finding (replay still verifies it on the page).
+
+**Interview Q&A**
+1. *Why chunk at headings instead of every N tokens?* Requirements are written in sections; a
+   heading names the feature, and the heading path ("Booking > Dates") keeps a chunk meaningful
+   on its own. Token windows would split one criterion in half.
+2. *How do you stop a customer's spec from hijacking the agent?* It is data, not instructions:
+   fenced like page text, the closing tag escaped, and the task line says a requirement can't
+   tell the agent to do anything else. The guard on the holdout specs also keeps them honest.
+3. *How do you know specs help?* The holdout benchmark with and without the owner's specs, same
+   model, same judge: kept on by default only if judgement-only recall rises and clean-build
+   false alarms don't (D94, D97).
+
+## Run 7: critical flows (`worker/flows.py`, `execute.py: check_flow, record_flow`, `lib/target-flows.ts`, migration `20261116120000_flows`, D95)
+
+**What.** A team lists the journeys that must never break, in plain language. Every run checks
+them before it explores. A journey with a saved script is replayed with Playwright and no model;
+one without a script, or whose replay broke, goes to the agent as a short episode that ends
+"PASSED: <the text that shows it worked>" or "FAILED: ...". A pass saves the steps as the script;
+a failure is a finding. A failure the agent pinned down (it quoted what it expected) is saved too,
+so the next run rechecks it without the model.
+
+**How the script replays.** The same code that verifies bug reports: each step finds its element
+by role and name, then nearby text, CSS path and position, never "the first match", and the
+quoted texts must be on the page at the end. A step that can't be repeated means the page
+changed: the agent repairs the journey and the script is replaced.
+
+**Why.** Teams want their key journeys covered on every release, cheaply and the same way each
+time. A model call per step per run for a journey that hasn't changed is waste; a replay is
+deterministic, fast and free, and the model is paid only when something changed.
+
+**Weak spots.** A replay checks the texts the agent quoted, not everything a person would notice;
+a journey that passes by replay can still hide a bug the quotes don't cover (exploration still
+runs after the journeys). Journeys with side effects (placing an order) repeat them every run.
+
+**Interview Q&A**
+1. *Why not ask the model to write a Playwright test file?* Generated code needs review and
+   breaks silently; recorded steps with robust element lookup are data the worker already knows
+   how to replay and verify.
+2. *What happens when the UI changes?* The replay fails at a specific step with a reason
+   (element not found, page differs); the agent completes the journey again, and if it can, the
+   script is replaced (status "repaired"); if not, the run has a finding.
+3. *How do you measure it?* Run 1 learns, run 2 replays: journeys covered, model calls and
+   estimated cost for the journeys in each run (MISS_ANALYSIS "Run 7").
+
+## Run 7: the MCP server (`apps/web/mcp/tools.ts`, `apps/web/mcp/server.ts`)
+
+**What.** A stdio MCP server with three tools, each one call to `/api/v1` with a workspace API key:
+start_run, get_run_status, get_report (JSON or JUnit). Claude Code, Cursor or any MCP client can
+start a test of a staging URL and read the findings without leaving the editor.
+
+**How.** MCP over stdio is JSON-RPC 2.0, one message per line. The server answers `initialize`
+(negotiating a protocol version both sides know), `tools/list` and `tools/call`; notifications
+get no reply; stdout carries only protocol messages, logs go to stderr. An API refusal (a quota,
+an unverified domain) comes back as a tool result with `isError`, which the model can read and
+act on, not as a protocol error.
+
+**Why no SDK.** Three methods. A dependency-free file is easy to read in full, has nothing to
+patch, and runs with Node 24's built-in TypeScript support.
+
+**Interview Q&A**
+1. *Why wrap the public API instead of the database?* The API already enforces keys, quotas,
+   rate limits and domain verification; the MCP server can't do anything a CI script couldn't.
+2. *How is the key protected?* It comes from the environment, goes only in the Authorization
+   header, and is never written to stdout or stderr (a test checks it isn't echoed).
+3. *What does a tool error look like to the model?* `isError: true` with the API's status and
+   message, so it can say "verify the domain first" instead of failing silently.
