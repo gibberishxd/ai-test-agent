@@ -1278,3 +1278,28 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Measured?** Not separately: the Sonnet benchmark in M6 ran on the code before these fixes, so
   Haiku and Sonnet compare on the same code. The fixes have tests; their effect on a benchmark is
   the next measurement ("Needs me").
+
+## D99. Key safety before the first API call (run 8, N0)
+- **What was checked (counts only, nothing printed):** `.env` and `.env.prod` are git-ignored
+  (`.gitignore` lines 16 and 46). Three tracked files contain the prefix `sk-ant-`: the redaction
+  code and two tests. One has a key-shaped string (29 characters, a fake fixture in
+  `test_safety.py`); the real key (106 characters) is in no tracked file and in no commit of any
+  branch (`git log --all -p` compared in a script that printed only true/false).
+- **The leak that existed:** `run_cli` started `claude -p` with the worker's whole environment.
+  pydantic-settings reads `.env` without exporting it, so in practice the key wasn't there, but
+  anything that exports `.env` (a dotenv loader, a shell `set -a`, a future process manager)
+  would have made every claude-cli run bill the API key instead of the Pro plan, silently.
+  Now `run_cli` passes `cli_environment()`: this process's environment without
+  `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` (tests: a pure one, and a real `/usr/bin/env`
+  subprocess started by `run_cli` with both set in the parent).
+- **A guard test** fails if any tracked file holds `sk-ant-` followed by 40 or more key
+  characters (real keys are ~100; the fixtures are short). It reports file names, never matches.
+- **Proof on the real CLI** (`scripts/cli_billing_check.py`): with the key deliberately put into
+  the parent process's environment, one Haiku call through `ClaudeCliClient` (stream-json, same
+  stripped environment) reported `apiKeySource: "none"` (the owner's login), model
+  `claude-haiku-5-5`, charged $0, API-equivalent $0.0012.
+- **Alternative considered:** pass an allow-list environment (HOME, PATH, ...) to the CLI.
+  Rejected: the CLI needs variables we don't control (its config dir, proxies, locale); a
+  deny-list of the two credentials is exact for the risk and keeps the CLI working.
+- **Not done:** a control call *with* the key, to see the CLI report `ANTHROPIC_API_KEY`: it
+  would spend API credit to prove what the CLI documents.

@@ -23,6 +23,7 @@ by a loop).
 
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -71,11 +72,22 @@ class CliFailed(RuntimeError):
         self.output = output
 
 
+# With either of these in its environment, `claude -p` bills that API key's credits instead of
+# the owner's Pro plan (run 8, N0). The worker can hold the key (LLM_PROVIDER=claude needs it).
+API_CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def cli_environment() -> dict[str, str]:
+    """This process's environment without the Anthropic API credentials."""
+    return {k: v for k, v in os.environ.items() if k not in API_CREDENTIALS}
+
+
 def run_cli(command: list[str], stdin: str, cwd: Path) -> str:
     result = subprocess.run(
         command,
         input=stdin,
         cwd=cwd,
+        env=cli_environment(),
         capture_output=True,
         text=True,
         timeout=TIMEOUT_S,

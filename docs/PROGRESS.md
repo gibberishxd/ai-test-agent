@@ -155,6 +155,11 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Run 8 (branch `agent-v8`, plan in `docs/RUN_PLAN_8.md`)
+| Goal | Status | Evidence |
+|---|---|---|
+| N0 Plan and key safety | done | Plan written; `.env`/`.env.prod` git-ignored; real key in 0 tracked files and 0 commits (one 29-char fake fixture); `run_cli` strips `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` (failing test first, then a real subprocess test); guard test against a real-looking key in tracked files; one claude-cli Haiku call with the key in the parent: `apiKeySource: "none"` (Pro login), charged $0, est. $0.0012 (D99). |
+
 ## Run 7 (branch `agent-v7`, plan in `docs/RUN_PLAN_7.md`)
 
 | Goal | Status | Check |
