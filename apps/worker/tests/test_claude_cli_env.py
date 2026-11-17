@@ -43,8 +43,10 @@ def test_no_tracked_file_holds_a_real_looking_anthropic_key():
 
     from worker.config import REPO_ROOT
 
+    # CI's container checks the repo out as another user; git then refuses with "dubious
+    # ownership" unless the folder is marked safe (only for this one read-only command).
     found = subprocess.run(
-        ["git", "grep", "-lE", "sk-ant-[A-Za-z0-9_-]{40,}", "--", "."],
+        ["git", "-c", "safe.directory=*", "grep", "-lE", "sk-ant-[A-Za-z0-9_-]{40,}"] + ["--", "."],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
