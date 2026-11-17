@@ -404,3 +404,62 @@ def test_scores_carry_the_benchmark_version_and_print_it(capsys):
     assert scores.benchmark_version == "v2"
     print_scores(scores)
     assert "benchmark v2" in capsys.readouterr().out.lower()
+
+
+# Run 8, N3: confidence intervals on recall.
+def test_scores_carry_intervals_over_bug_run_slots():
+    buggy = {"a": [decision("a", 1), decision("a", 2), decision("a", 5)], "b": [decision("b", 1)]}
+    scores = score(buggy, {}, MIXED, [], [], "fake", "m", "abc")
+    ai = scores.intervals["ai_recall"]
+    assert (ai["k"], ai["n"]) == (1, 4)  # 2 AI bugs × 2 runs, one found
+    assert ai["recall"] == pytest.approx(scores.ai_recall)
+    assert ai["wilson"][0] < 0.25 < ai["wilson"][1]
+    every = scores.intervals["recall"]
+    assert (every["k"], every["n"]) == (4, 8)
+
+
+def test_intervals_count_only_verified_reports():
+    buggy = {"a": [staged("a", 5, stage="judge_said_no")]}
+    scores = score(buggy, {}, MIXED, [], [], "fake", "m", "abc")
+    assert scores.intervals["ai_recall"]["k"] == 0
+
+
+def test_printed_scores_show_the_intervals(capsys):
+    from worker.benchmark import print_scores
+
+    buggy = {"a": [decision("a", 5)], "b": []}
+    print_scores(score(buggy, {}, MIXED, [], [], "fake", "m", "abc"))
+    out = capsys.readouterr().out
+    assert "95% interval" in out and "Wilson" in out and "bootstrap" in out
+
+
+def test_intervals_can_be_computed_from_a_saved_result_and_pooled():
+    from worker.benchmark import intervals_from_details
+
+    def saved(runs, decisions):
+        return {"runs": {"buggy": runs}, "decisions": decisions}
+
+    first = saved(["a", "b"], [{"run_id": "a", "matched": 5, "stage": "verified"}])
+    second = saved(
+        ["c"],
+        [
+            {"run_id": "c", "matched": 6, "stage": "verified"},
+            {"run_id": "c", "matched": 5, "stage": "could_not_replay"},  # not counted
+        ],
+    )
+    one = intervals_from_details([first], MIXED, "shop")["ai_recall"]
+    assert (one["k"], one["n"]) == (1, 4)
+    pooled = intervals_from_details([first, second], MIXED, "shop")["ai_recall"]
+    assert (pooled["k"], pooled["n"]) == (2, 6)
+
+
+def test_holdout_intervals_come_from_the_holdout_part_of_a_result():
+    from worker.benchmark import intervals_from_details
+
+    details = {
+        "runs": {"buggy": [], "holdout_buggy": ["h"]},
+        "decisions": [],
+        "holdout": {"decisions": [{"run_id": "h", "matched": 5, "stage": "verified"}]},
+    }
+    ai = intervals_from_details([details], MIXED, "holdout")["ai_recall"]
+    assert (ai["k"], ai["n"]) == (1, 2)

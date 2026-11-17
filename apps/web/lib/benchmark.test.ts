@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aiRecallInterval,
   commitLabel,
   decisions,
   holdout,
@@ -212,5 +213,34 @@ describe("benchmark versions (run 7)", () => {
     const old = row({ id: "old", aiRecall: 0.9, benchmarkVersion: "v1" });
     const fresh = row({ id: "new", aiRecall: 0.2, benchmarkVersion: "v2" });
     expect(leaderboardFromView([old, fresh], ["old", "new"]).map((r) => r.id)).toEqual(["new", "old"]);
+  });
+});
+
+describe("confidence intervals (run 8, N3)", () => {
+  it("shows the stored Wilson interval", () => {
+    const r = row({ details: { intervals: { ai_recall: { k: 9, n: 27, wilson: [0.186, 0.52], bootstrap: [0.22, 0.44] } } } });
+    expect(aiRecallInterval(r)).toBe("19–52%");
+  });
+  it("computes it from the saved decisions for older rows", () => {
+    const r = row({
+      details: {
+        runs: { buggy: ["a", "b"] },
+        per_bug: { "5": { title: "t", found_runs: 1, detection: "agent" }, "1": { title: "d", found_runs: 2, detection: "deterministic" } },
+        decisions: [
+          { run_id: "a", matched: 5, stage: "verified" },
+          { run_id: "b", matched: 5, stage: "judge_said_no" },
+          { run_id: "b", matched: 1, stage: "verified" },
+        ],
+      },
+    });
+    // 1 of 2 slots (bug 5 × runs a, b): Wilson 9–91%
+    expect(aiRecallInterval(r)).toBe("9–91%");
+  });
+  it("reads the holdout part", () => {
+    const r = row({ details: { holdout: { intervals: { ai_recall: { k: 5, n: 8, wilson: [0.306, 0.863] } } } } });
+    expect(aiRecallInterval(r, "holdout")).toBe("31–86%");
+  });
+  it("says nothing when it can't tell", () => {
+    expect(aiRecallInterval(row({ details: {} }))).toBeNull();
   });
 });

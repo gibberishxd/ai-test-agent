@@ -226,3 +226,48 @@ export function verification(row: BenchmarkRow, set: "shop" | "holdout" = "shop"
     correctButDiscarded: v.correct_but_discarded,
   };
 }
+
+// Run 8, N3: a 95% interval on AI-only recall over bug×run slots (Wilson), so a reader can see
+// how much one result could move with more runs. Stored per result since run 8; computed here
+// from the saved decisions for older rows (the bootstrap interval needs the worker).
+type StoredInterval = { k: number; n: number; wilson: [number, number] };
+type IntervalDetails = {
+  intervals?: { ai_recall?: StoredInterval };
+  runs?: { buggy?: string[]; holdout_buggy?: string[] };
+  per_bug?: Record<string, { detection?: string }>;
+  decisions?: { run_id: string; matched: number | null; stage?: string }[];
+  holdout?: IntervalDetails;
+};
+
+export function wilson(k: number, n: number, z = 1.959963984540054): [number, number] {
+  if (n <= 0) return [0, 1];
+  const p = k / n;
+  const denominator = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / denominator;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / denominator;
+  return [Math.max(0, centre - half), Math.min(1, centre + half)];
+}
+
+export function aiRecallInterval(row: BenchmarkRow, set: "shop" | "holdout" = "shop"): string | null {
+  const details = (row.details ?? {}) as IntervalDetails;
+  const part = set === "holdout" ? details.holdout : details;
+  const stored = part?.intervals?.ai_recall;
+  let bounds: [number, number] | null = stored ? stored.wilson : null;
+  if (!bounds && part) {
+    const runIds = (set === "holdout" ? details.runs?.holdout_buggy : details.runs?.buggy) ?? [];
+    const aiBugs = Object.entries(part.per_bug ?? {})
+      .filter(([, bug]) => bug.detection === "agent")
+      .map(([id]) => Number(id));
+    if (runIds.length && aiBugs.length) {
+      const found = new Set(
+        (part.decisions ?? [])
+          .filter((d) => (d.stage ?? "verified") === "verified" && d.matched !== null && aiBugs.includes(d.matched))
+          .map((d) => `${d.run_id}:${d.matched}`),
+      );
+      const k = [...found].filter((key) => runIds.includes(key.split(":")[0])).length;
+      bounds = wilson(k, aiBugs.length * runIds.length);
+    }
+  }
+  if (!bounds) return null;
+  return `${Math.round(bounds[0] * 100)}–${Math.round(bounds[1] * 100)}%`;
+}

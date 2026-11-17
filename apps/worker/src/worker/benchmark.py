@@ -25,6 +25,7 @@ from worker.config import REPO_ROOT
 from worker.db.models import BenchmarkResult, Bug, Run, Workspace
 from worker.llm import LLMClient
 from worker.queue import BENCHMARK_SLUG, FINAL
+from worker.stats import fmt, recall_interval
 from worker.verify import parse_json_object
 
 BUGS_JSON = REPO_ROOT / "apps" / "demo" / "bugs.json"
@@ -103,6 +104,8 @@ class BenchmarkScores:
     estimated_cost_per_verified_bug: float | None = None
     reported_models: list[str] = field(default_factory=list)  # what the providers said ran
     benchmark_version: str = BENCHMARK_VERSION
+    # Run 8, N3: 95% intervals on recall ("ai_recall", "recall"), see worker/stats.py.
+    intervals: dict = field(default_factory=dict)
 
 
 def load_planted(path: Path = BUGS_JSON) -> list[PlantedBug]:
@@ -261,6 +264,11 @@ def score(
     }
     clean_before = clean_reports if clean_before is None else clean_before
     avg_estimate, per_bug_estimate = estimated_cost(estimated_costs, kept, planted)
+    found_runs = [{d.matched for d in ds if d.matched is not None} for ds in kept.values()]
+    intervals = {
+        "ai_recall": recall_interval(found_runs, {b.id for b in ai_bugs}),
+        "recall": recall_interval(found_runs, {b.id for b in planted}),
+    }
     return BenchmarkScores(
         provider=provider,
         model=model,
@@ -283,7 +291,30 @@ def score(
         verification=verification,
         avg_estimated_cost_usd=avg_estimate,
         estimated_cost_per_verified_bug=per_bug_estimate,
+        intervals=intervals,
     )
+
+
+def intervals_from_details(details: list[dict], planted: list[PlantedBug], which: str) -> dict:
+    """Recall intervals from saved results (their `details`), pooled over all of them: "shop"
+    uses runs["buggy"] and decisions, "holdout" runs["holdout_buggy"] and holdout.decisions.
+    Only verified reports count, as in score(). For results saved before run 8 and for
+    benchmarks split into parts (run 8, N3)."""
+    found: dict[str, set[int]] = {}
+    for d in details:
+        runs = (d.get("runs") or {}).get("buggy" if which == "shop" else "holdout_buggy") or []
+        part = d if which == "shop" else (d.get("holdout") or {})
+        for run_id in runs:
+            found.setdefault(run_id, set())
+        for decision in part.get("decisions") or []:
+            if decision.get("stage", "verified") == "verified" and decision.get("matched"):
+                if decision["run_id"] in found:
+                    found[decision["run_id"]].add(decision["matched"])
+    runs = list(found.values())
+    return {
+        "ai_recall": recall_interval(runs, {b.id for b in planted if b.detection == "agent"}),
+        "recall": recall_interval(runs, {b.id for b in planted}),
+    }
 
 
 def estimated_cost(
@@ -462,6 +493,9 @@ def _print_set(name: str, scores: BenchmarkScores) -> None:
     print(f"  {name}: {scores.runs_buggy} buggy runs")
     print(f"  AI-only recall {scores.ai_recall:.0%}  (bugs that need judgement, found per run)")
     print(f"  recall         {scores.recall:.0%}  (all planted bugs, incl. the free checks)")
+    if scores.intervals:
+        print("  95% interval   AI-only " + fmt(scores.intervals["ai_recall"]))
+        print("                 all     " + fmt(scores.intervals["recall"]))
     print(f"  precision      {scores.precision:.0%}  (reports that matched a planted bug)")
     print(f"  false alarms   {scores.false_alarms:.1f}  (reports per run on the clean build)")
     funnel = scores.verification
@@ -535,6 +569,7 @@ def save_scores(
         "reviewer": scores.reviewer or None,
         "verification": verification_details(scores),
         "reported_models": scores.reported_models,
+        "intervals": scores.intervals,
         **(extra or {}),
     }
     if holdout:
@@ -544,6 +579,7 @@ def save_scores(
             "verification": verification_details(holdout),
             "avg_estimated_cost_usd": holdout.avg_estimated_cost_usd,
             "estimated_cost_per_verified_bug": holdout.estimated_cost_per_verified_bug,
+            "intervals": holdout.intervals,
         }
     result = BenchmarkResult(
         provider=scores.provider,
