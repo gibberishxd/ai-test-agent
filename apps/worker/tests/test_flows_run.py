@@ -162,6 +162,38 @@ def test_a_journey_the_agent_cant_complete_becomes_a_finding_and_is_rechecked_fo
         assert again.status == "confirmed" and again.evidence["replayed_script"] is True
 
 
+def test_a_failing_journey_goes_back_to_the_agent_every_third_run(
+    sessions, workspace, site_url, settings, tmp_path, browser, flow
+):
+    """Run 8, N2: a wrong failure (D98's false "Sign in") must not stick: after two runs that only
+    replay it, the third gives the journey to the agent again, which can now pass it."""
+    failing = [
+        call("type", element_id=NAME, text="Ada"),
+        call("click", element_id=SAVE, expect="'Profile saved'"),
+        call("finish", summary='FAILED: nothing shown, expected "Profile saved"'),
+    ]
+    start_run(sessions, workspace, site_url, settings, tmp_path, browser, failing)
+    explore = [call("finish", summary="x")]
+    for _ in range(2):  # runs 2 and 3: replay only, no model for the journey
+        run_id, _ = start_run(sessions, workspace, site_url, settings, tmp_path, browser, explore)
+        result = result_of(sessions, run_id)
+        assert (result.status, result.replayed, result.model_calls) == ("failed", True, 0)
+
+    fourth, llm = start_run(sessions, workspace, site_url, settings, tmp_path, browser, completes())
+    assert "CRITICAL FLOW" in llm.calls[0]["observation"]  # the agent has the journey again
+    result = result_of(sessions, fourth)
+    assert (result.status, result.replayed, result.model_calls) == ("passed", False, 3)
+    assert "rechecked by the agent every 3 runs" in result.detail
+    with sessions() as session:
+        script = session.get(Flow, flow.id).script
+        assert script["failing"] is False and script["checks"] == ["Saved: Ada"]
+        assert (
+            not session.query(Bug)
+            .filter(Bug.run_id == fourth, Bug.title.like("Critical flow failed%"))
+            .count()
+        )
+
+
 def test_a_failure_without_a_quoted_expectation_saves_nothing(
     sessions, workspace, site_url, settings, tmp_path, browser, flow
 ):
