@@ -121,24 +121,26 @@ Every other report is listed and read by hand: some may be real bugs nobody plan
 
 ## Results
 
-Haiku 5.5 through claude-cli, commit 447c7fc, judge ollama/gemma4:12b, 40 steps / 480 s,
-2026-11-17. A claude-cli **usage limit** stopped the measurement during IT-5 (after run 1 of 3).
-Following the run rules there was no retry: IT-5 runs 2–3, RA-1 and RA-2 were **not measured**.
-Raw rows: `apps/realworld/results.jsonl`. 10 runs, est. $1.25 API-equivalent on the Pro plan
-($0 charged), 250–400 s each.
+Haiku 5.5 through claude-cli, commit 447c7fc, judge ollama/gemma4:12b, 40 steps / 480 s, start
+on the feature's page with no hint. 10 runs on 2026-11-17 morning; a claude-cli usage limit
+stopped them during IT-5; the remaining 8 (IT-5 ×2, RA-1 ×3, RA-2 ×3) ran the same afternoon on
+the owner's go-ahead, same commit and settings. Raw rows: `apps/realworld/results.jsonl` (6
+lines; the IT-5 line from the morning holds the two runs stopped with 0 steps, not counted).
+18 runs, est. ~$2.2 API-equivalent on the Pro plan, $0 charged.
 
-| Bug | Runs | Found | Reached, not reported (hand-checked) | Never reached | Automatic "reached" rule said |
+| Bug | Runs | Found | Reached, not reported (hand-checked) | Never reached | Automatic rule said |
 |---|---|---|---|---|---|
 | IT-1 Roman numerals accept invalid numerals | 3 | 0 | 1 | 2 | 3 |
 | IT-2 IPv4 input can't be edited | 3 | 0 | 2 | 1 | 3 |
 | IT-4 favorite button on a tool page | 3 | 0 | 0 | 3 | 0 |
-| IT-5 lower-case OTP secret rejected | 1 (2 stopped) | 0 | 1 | 0 | 1 |
-| RA-1, RA-2 (react-admin) | not run (usage limit) | – | – | – | – |
-| **Total** | **10** | **0 (Wilson 95%: 0–28%)** | **4** | **6** | 7 |
+| IT-5 lower-case OTP secret rejected | 3 | 0 | 3 | 0 | 3 |
+| RA-1 "Remove all filters" empties the orders list | 3 | 0 | 0 | 3 | 3 |
+| RA-2 prev/next position wrong after paging | 3 | 0 | 0 | 3 | 0 |
+| **Total** | **18** | **0 (Wilson 95%: 0–18%)** | **6** | **12** | 12 |
 
-**Found: none of the four real reported bugs in 10 runs.** Per bug, 0 of 3 has a Wilson interval
-of 0–56%, so no single bug's number means much; the pooled 0 of 10 says the real-world recall of
-this setup is probably below ~30%, against 40% (shop) and 62% (holdout) on our own apps.
+**Found: none of the six real reported bugs in 18 runs** (IT-Tools 0 of 12, interval 0–24%;
+react-admin 0 of 6, 0–39%), against 40% (shop) and 62% (holdout) on our own demo apps.
+**The main open problem: in 6 runs the agent reached the real bug and didn't report it.**
 
 **What happened, run by run (read from the saved steps, no model):**
 - **IT-1, run fce7cc68 saw the bug and didn't report it.** It typed `IIII` into the Roman field,
@@ -163,6 +165,20 @@ this setup is probably below ~30%, against 40% (shop) and 62% (holdout) on our o
   should be a base32 string" (the bug: lower-case base32 is valid). The agent took the app's
   message as correct and reported "OTP codes still shown for an invalid base32 secret".
 
+- **IT-5, runs 2f138bb1 and c9917786:** the same as run 1: both typed a lower-case secret, saw
+  "Secret should be a base32 string" and reported the app showing codes for an "invalid" secret.
+- **RA-1: never did the trigger.** No run opened "Add filter" and chose "Remove all filters"; the
+  automatic rule matched the word "filter" in URLs and reasoning. All three typed injection-style
+  text into the orders search, which left the list filtered, and then reported status tabs and
+  pagination "doing nothing" on that filtered list.
+- **RA-2: never opened an order from page 2.** Two runs tried to page but believed the buttons did
+  nothing (the same leftover search filter); none looked at the prev/next position.
+- **react-admin replay is weak:** most react-admin reports were "could not replay". The demo
+  regenerates its data on every page load, so a replay sees different orders (the agent's "order
+  shows a different order after reload" is that, not a bug). Verified reports there: a blocked
+  external image (`ERR_BLOCKED_BY_ORB`, our network guard), console JSON errors after the injected
+  search, and mobile overflow on the order page.
+
 **Other reports (not planted, read by hand).** Besides axe accessibility findings (the same 7–8
 rules in every IT-Tools run), the agent reported: Arabic-to-Roman keeps a stale result for `0`,
 `-5` and silently rounds `1.5` (plausible real input-validation gaps at that commit, not
@@ -178,14 +194,12 @@ The matcher question (same root cause, different symptom) is the owner's call.
 
 ## Honest limits
 
-- **Small and cut short:** 10 runs over 4 bugs in one app; react-admin wasn't measured at all.
-  0 of 10 means "probably under ~30%", not "zero".
-- **One app, and a friendly kind:** IT-Tools pages are small single tools. The start page is the
-  feature's page (D102), which helps the agent a lot; from the home page it would be harder.
-- **The automatic "reached" rule over-counts** (it said 7, the hand check 4): it counts any
-  typing on the page whose reasoning mentions the tool. The hand-checked column is the one to use.
+- **Small:** 18 runs over 6 bugs in 2 apps; 0 of 18 means "probably under ~18%", not "zero".
+- **The start page helps:** each run starts on the feature's page (D102); from the home page it
+  would be harder.
+- **The automatic "reached" rule over-counts** (12 vs 6 by hand); use the hand-checked column.
 - **Strict scoring:** a report of the right root cause with a different symptom (IT-1's NaN)
   counts as not found.
-- **Not checked against the trackers:** whether the other reports are real, already known bugs.
-- **Same model only:** Haiku 5.5 through claude-cli; no API run here and no bigger model (the
-  plan allowed none).
+- **react-admin's random data** breaks our replay, so verified reports there are few.
+- **Not checked against the trackers:** whether the other reports are real, known bugs.
+- **One model:** Haiku 5.5 through claude-cli only.

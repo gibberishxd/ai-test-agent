@@ -1558,11 +1558,11 @@ benchmark's own matcher (replay, then the pinned judge) against the one known bu
 reached-not-reported, or never reached. Every step is saved, so "reached" can be checked by hand.
 
 **Why.** Planted bugs are written by the same person who tunes the agent; real bugs aren't. The
-first result (0 of 10, interval 0–28%) is much lower than the demo apps' 40–62%, and the per-run
+first result (0 of 18, interval 0–18%) is much lower than the demo apps' 40–62%, and the per-run
 steps say why: the agent often got to the bug and didn't report it.
 
-**Weak spots.** Ten runs in one app, cut short by a usage limit; the automatic reached rule
-over-counts (7 vs 4 by hand); the start page helps; the strict judge rejects a same-root-cause
+**Weak spots.** 18 runs over 6 bugs in two apps; the automatic reached rule
+over-counts (12 vs 6 by hand); the start page helps; the strict judge rejects a same-root-cause
 report with a different symptom; claude-cli must never read this folder or the clones
 (`outside_repo` refuses both, tested).
 

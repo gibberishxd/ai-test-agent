@@ -1369,3 +1369,5 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **No agent change tonight:** the two blind spots (a fill timeout on a read-only input treated as a
   tool error; the agent's own "should be rejected" not reported) have clear fixes, but measuring
   them needs model runs, and the usage limit had stopped those. Written up for the owner.
+- **Resumed (later on 2026-11-17):** the owner said to resume the model runs; IT-5 ×2, RA-1 ×3
+  and RA-2 ×3 ran on the same commit and settings with no limit message. Final: 0 of 18 found.

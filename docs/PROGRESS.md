@@ -162,7 +162,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | N1 Real Claude API | done | **First real API calls.** Smoke run 9f55a380 (`scripts/api_smoke.py`, Haiku, 12 steps): 15 model calls, every one a valid tool call; cache reads from the 2nd model call on (4,585 tokens per step); recorded $0.00554 = the token counts at list price, step by step. No fix needed. Then one Haiku **benchmark v2 through the API**, result `6dc913ac` (commit b5aaf9b): shop AI-only 33% (9 of 27), holdout 62% (5 of 8), precision 100% / 100%, false alarms 0.0 / 1.0, **$0.016 charged per run** (claude-cli estimate in run 7: $0.10), 144 s per run. API spend so far $0.111 of $4. |
 | N2 Open fixes | done | **Failing-journey recheck** (626f25c, test first): a failing journey whose replay still fails is taken from replay at most twice in a row; the agent gets it again on every 3rd run or as soon as the replay result changes. **Measured** in one Haiku `bench --flows` through claude-cli (result `6c7257ae`, commit 626f25c, 4 shop runs so the recheck comes up, D101): shop AI-only 39% (14 of 36), holdout 75% (6 of 8), precision 100%, false alarms 3.0 / 0.0 (real clean-build behaviour: quantity 0 accepted, a reload empties the cart, a search hides the search box), est. $0.10 per run. Journeys: "Sign in" never falsely failed (D98 fix 1); checkout learned once, then replayed with every check passing in runs 2–4 (D98 fix 2); "Change profile" (planted bug 8) replayed as failing in runs 2–3 with no model call and **given back to the agent in run 4** (the recheck), which confirmed the failure. No usage limit. |
 | N3 Enough runs | done | **Intervals** (8097b24): Wilson 95% over bug×run slots and a bootstrap over runs, in `bench` output, stored per result, on the leaderboard (computed from saved decisions for older rows), `scripts/intervals.py` for older and pooled results. **8 + 2 Haiku runs per app** through claude-cli on benchmark v2 as two identical benchmarks under the $2 cap: `d304f3ce` (shop 39%, holdout 56% AI-only) and `7a05a19d` (42%, 69%), commit 447c7fc, est. $0.10 per run, ~272 s, no usage limit. **Pooled: shop AI-only 40% (29 of 72; Wilson 30–52%, bootstrap 35–44%), holdout 62% (20 of 32; Wilson 45–77%, bootstrap 53–72%)**; all bugs 59% / 75%; false alarms 2.0 / 0.0 per clean run (real clean-build behaviour). Within noise: every earlier Haiku-vs-Haiku and Haiku-vs-Sonnet difference (see BENCHMARKS "Noise"). Beyond noise: Haiku vs a local Gemma 12B on both apps. |
-| N4 Real-world benchmark | partly done | **IT-Tools** (4 bugs; IT-3 didn't reproduce, reserve IT-5 used) and **react-admin's demo** (RA-1, RA-2 reproduce; RA-3 didn't) fetched at each fix's parent, started locally, each bug reproduced by a Playwright check first (447c7fc). **10 Haiku runs** (claude-cli, 2026-11-17): **0 of 10 found** (Wilson 0–28%); hand-checked, 4 runs reached the trigger without reporting it, 6 never did. A **claude-cli usage limit** stopped it during IT-5: IT-5 runs 2–3, RA-1 and RA-2 not run, no retry. Results and what the agent did per run: `docs/REAL_WORLD.md`. |
+| N4 Real-world benchmark | done | **IT-Tools** (4 bugs; IT-3 didn't reproduce, reserve IT-5 used) and **react-admin's demo** (RA-1, RA-2; RA-3 didn't reproduce) fetched at each fix's parent, started locally, each bug reproduced by a Playwright check first (447c7fc). **18 Haiku runs** (claude-cli, 2026-11-17; a usage limit stopped the first batch after 10, the other 8 ran on the owner's go-ahead): **0 of 18 found** (Wilson 0–18%); hand-checked, **6 runs reached the bug without reporting it** (all IT-Tools), 12 never did. The main open problem. `docs/REAL_WORLD.md`. |
 | N5 Wrap-up | done | README "Real-world results", REAL_WORLD, BENCHMARKS, MISS_ANALYSIS, WALKTHROUGH (real-world section + Q&A), DECISIONS D103, DEVLOG; `npm test` (710 passed) and `npm run lint` exit 0; servers and apps stopped by PID; PR #13 open, not merged. |
 
 ## Run 7 (branch `agent-v7`, plan in `docs/RUN_PLAN_7.md`)
@@ -251,10 +251,8 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 
 ## Needs me
 0. **Run 8 (branch `agent-v8`, PR #13, not merged):**
-   - **Finish the real-world measurement** (stopped by a claude-cli usage limit): IT-5 runs 2–3,
-     RA-1 and RA-2, 3 runs each. Start each app (`cd apps/worker && uv run python
-     ../realworld/realworld.py start RA-1`), then the `measure.py` command in its docstring, then
-     `realworld.py stop RA-1`.
+   - **Study the 6 real-world runs that reached a real bug without reporting it**
+     (`docs/REAL_WORLD.md`) before changing the agent.
    - **Two agent blind spots the real-world runs showed** (AI core, your call, D103): a fill that
      times out on a visible input should come back as "this input did not accept typing" (IT-2);
      an unexpected `ok` that the agent's own reasoning says should be rejected should lead to a
@@ -405,8 +403,8 @@ are product and measurement questions, not merges.
 ## Spend tonight
 Run 8: **real Claude API: $0.111 of the $4 budget** (8 API runs: the smoke run and one benchmark,
 about $0.016 per benchmark run; `scripts/api_spend.py` sums the recorded `cost_usd`). claude-cli on
-the owner's Pro plan, $0 charged: 1 billing check, N2 (est. ~$0.86), N3 (est. ~$2.0), N4 (10 runs,
-est. $1.25); 47 of the 60 Haiku runs allowed. One usage-limit message (during N4): all model runs
+the owner's Pro plan, $0 charged: 1 billing check, N2 (est. ~$0.86), N3 (est. ~$2.0), N4 (18 runs,
+est. ~$2.2); 47 of the 60 Haiku runs allowed. One usage-limit message (during N4): all model runs
 stopped at once, no retry. No Sonnet, Opus or Fable run. Ollama local (the judge).
 Run 7: $0.00 charged. claude-cli on the owner's Pro plan: Haiku benchmarks M2 (est. $0.72) and M6
 (est. $0.72), four Haiku flow-measurement runs (est. ~$0.41), one Sonnet benchmark M6 (est.

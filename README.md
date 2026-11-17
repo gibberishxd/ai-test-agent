@@ -14,25 +14,23 @@ on a benchmark with planted bugs before you trust it.
 
 ## Real-world results
 
-Planted bugs only go so far, so run 8 pointed the agent at **real bugs that users reported in a
-real open-source app** ([IT-Tools](https://github.com/CorentinTh/it-tools), run locally at the
-commit before each fix; method and answer key in [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md)).
-Haiku 5.5, 40 steps, starting on the feature's page with no hint of the bug:
+Planted bugs only go so far, so run 8 pointed the agent at **real bugs that users reported in real
+open-source apps** ([IT-Tools](https://github.com/CorentinTh/it-tools) and
+[react-admin](https://github.com/marmelab/react-admin)'s demo, run locally at the commit before
+each fix; method and answer key in [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md)). Haiku 5.5, 40
+steps, starting on the feature's page with no hint of the bug:
 
-| Real bug (issue) | Runs | Found | Reached the trigger, didn't report |
+| | Runs | Real bug found | Reached the bug, didn't report it |
 |---|---|---|---|
-| Roman numeral converter accepts `IIII` / `IVX` (#274) | 3 | 0 | 1 |
-| IPv4 converter's input can't be edited (#402) | 3 | 0 | 2 |
-| Favorite button on a tool page does nothing (#1365) | 3 | 0 | 0 |
-| OTP generator rejects a lower-case secret (#283) | 1 | 0 | 1 |
+| IT-Tools (4 bugs) | 12 | 0 | 6 |
+| react-admin demo (2 bugs) | 6 | 0 | 0 |
+| **Total** | **18** | **0 (95% interval 0–18%)** | **6** |
 
-**0 of 10 (95% interval 0–28%)**, against 40% and 62% on our own demo apps. The honest reading:
-the agent got to the bug in 4 runs and then didn't report it. It typed `IIII`, saw `4` and noted
-it "should be rejected", it took a read-only input for its own tool failing, and it trusted the
-app's wrong error message. Every run did report the Roman converter's missing validation
-through another symptom (`ABC` → `NaN`), which the strict judge doesn't count. A Pro-plan usage
-limit stopped the measurement before the react-admin bugs; the next step is fixing those two
-blind spots and finishing the run.
+Against 40% and 62% on our own demo apps, this is the honest result: **exploration doesn't yet
+find real bugs.** In a third of the runs the agent got to the bug and didn't report it: it typed
+`IIII`, saw `4` and noted it "should be rejected"; it took a read-only input for its own tool
+failing; it trusted the app's wrong error message. On react-admin it never did the trigger. That
+"reached but not reported" gap is the main open problem.
 
 ## Highlights
 

@@ -829,3 +829,10 @@ Patterns: **reached but not reported** (4 of 10 runs) is the main loss, not expl
 fixes are cheap and general: turn a fill timeout on a visible input into "this input did not
 accept typing", and act on the agent's own "should be rejected" reasoning after an `ok`. The
 third (IT-5) needs domain knowledge (base32 is case-insensitive): a bigger model or a spec.
+
+**The other 8 runs (same afternoon, on the owner's go-ahead):** IT-5 ×2 reached the bug and read
+it the same wrong way as run 1. RA-1 ×3 never opened "Add filter → Remove all filters"; RA-2 ×3
+never opened an order from page 2. On react-admin every run typed injection-style text into the
+orders search first, which left the list filtered, then reported tabs and paging "doing nothing".
+Final: 0 of 18 found, 6 reached (IT-Tools), 12 never. React-admin's data is regenerated on every
+page load, so most of its reports couldn't be replayed.

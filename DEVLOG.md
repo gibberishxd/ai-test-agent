@@ -115,6 +115,5 @@ Benchmark scores go here too, once Phase 2 exists.
 - Failing journeys go back to the agent every 3rd run; every recall now has a 95% interval. With
   8 runs per app, Haiku is shop 40% (30–52%), holdout 62% (45–77%), and most earlier "differences"
   were noise.
-- Real-world benchmark on IT-Tools: 0 of 10 real reported bugs found (0–28%). In 4 runs the agent
-  got to the bug and didn't report it. A Pro usage limit stopped the measurement before
-  react-admin.
+- Real-world benchmark (IT-Tools, react-admin): 0 of 18 real reported bugs found (0–18%). In 6
+  runs the agent got to the bug and didn't report it: the main open problem.

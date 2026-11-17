@@ -92,7 +92,7 @@ the API-equivalent estimate ("est."), computed from the CLI's token counts at li
 | **N3 pooled (A + B): 8 shop + 8 holdout runs** | **shop 40% (30–52), holdout 62% (45–77)** | 59% / 75% | | 2.0 / 0.0 | | | | 447c7fc |
 | claude · claude-sonnet-5-5 (API) | not run (run 8: no Sonnet, Opus or Fable runs) | | | | | | | |
 
-## Real-world v1 (run 8, N4): real reported bugs in IT-Tools
+## Real-world v1 (run 8, N4): real reported bugs in IT-Tools and react-admin
 
 A separate benchmark (`docs/REAL_WORLD.md`, rows in `apps/realworld/results.jsonl`): real bugs
 from the app's tracker, at the commit before each fix, one known bug per run, same matcher and
@@ -100,7 +100,7 @@ judge. Not comparable with the table above (one bug per run, a different app).
 
 | Agent | Settings | Runs | Found (Wilson 95%) | Reached, not reported (hand-checked) | Est. cost/run | Judge | Commit |
 |---|---|---|---|---|---|---|---|
-| claude-cli · claude-haiku-5-5, real-world v1, 2026-11-17 | 480 s, 40 steps, feature's page, no focus | 10 (IT-1 3, IT-2 3, IT-4 3, IT-5 1; stopped by a usage limit) | **0 of 10 (0–28%)** | 4 | $0.125 | gemma4:12b (pinned) | 447c7fc |
+| claude-cli · claude-haiku-5-5, real-world v1, 2026-11-17 | 480 s, 40 steps, feature's page, no focus | 18 (IT-Tools 12, react-admin 6) | **0 of 18 (0–18%)** | 6 | $0.12 | gemma4:12b (pinned) | 447c7fc |
 
 ## Noise: which differences are real (run 8, N3)
 
