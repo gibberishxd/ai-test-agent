@@ -1335,3 +1335,22 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   3rd run, or when the replay's result text changes. Alternatives: a time interval (runs aren't
   regular), or a random share of runs (not reproducible in a test). Counting replays keeps the
   model cost of a stuck failure to one episode per three runs.
+
+## D102. Real-world benchmark: what was decided without the owner (run 8, N4)
+- **Apps:** IT-Tools and react-admin's e-commerce demo (`docs/REAL_WORLD.md` says why, and what
+  else was considered). Both run fully on this Mac from a clone at a commit.
+- **Start page:** each run starts on the page of the feature with the bug, with no focus text
+  and no description. Alternative: the app's home page. Rejected for IT-Tools (80 tools: 40 steps
+  would mostly measure whether the right tool happens to be opened). Revisit: a home-page variant
+  would measure exploration as well as recognition.
+- **Third-party requests:** the apps' own requests for web fonts and a login background (Google
+  Fonts, Unsplash) are allowed, as for any customer site; the agent's navigation can't leave
+  the local app (the navigation guard). Alternative: block every non-local request for these
+  runs. Not done: one more mode in the network guard for an asset request that changes nothing
+  the agent tests.
+- **Dropped bugs:** IT-3 and RA-3 don't reproduce as reported (reasons in REAL_WORLD.md). IT-3
+  was replaced by the reserve IT-5; RA-3 was not replaced (time), so react-admin has 2 bugs.
+- **Local apps:** `LOCAL_APP_URLS` adds the apps' URLs to "our own local apps" only when
+  `DEV_MODE=true` (tested), the same rule as the demo shops.
+- **Toolchain:** react-admin's demo at these commits needs Node 20 (forced to arm64); the system
+  Node 20 is used rather than changing the user's Node setup.

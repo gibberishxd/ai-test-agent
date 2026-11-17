@@ -85,7 +85,33 @@ the API-equivalent estimate ("est."), computed from the CLI's token counts at li
 | claude (API) · claude-haiku-5-5, run 8 benchmark v2, **holdout** | 62% | 75% | 100% | 1.0 | $0.013 | | gemma4:12b (pinned) | b5aaf9b |
 | claude-cli · claude-haiku-5-5, run 8 benchmark v2 + shop critical flows **+ recheck** (4 shop runs; est. $0.108/run; 2026-11-17) | 39% | 58% | 100% | 3.0 (real behaviour) | $0.00 | 276 s | gemma4:12b (pinned) | 626f25c |
 | claude-cli · claude-haiku-5-5, run 8 benchmark v2, **holdout** (no flows there; est. $0.099/run) | 75% | 83% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 626f25c |
+| claude-cli · claude-haiku-5-5, run 8 benchmark v2, **N3 part A** (4 shop + 4 holdout runs; est. $0.105/run; 2026-11-17) | 39% (25–55) | 58% | 92% | 3.0 (real behaviour) | $0.00 | 272 s | gemma4:12b (pinned) | 447c7fc |
+| claude-cli · claude-haiku-5-5, run 8 N3 part A, **holdout** | 56% (33–77) | 71% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 447c7fc |
+| claude-cli · claude-haiku-5-5, run 8 benchmark v2, **N3 part B** (same settings; est. $0.106/run) | 42% (27–58) | 60% | 95% | 1.0 (real behaviour) | $0.00 | 271 s | gemma4:12b (pinned) | 447c7fc |
+| claude-cli · claude-haiku-5-5, run 8 N3 part B, **holdout** | 69% (44–86) | 79% | 96% | 0.0 | $0.00 | | gemma4:12b (pinned) | 447c7fc |
+| **N3 pooled (A + B): 8 shop + 8 holdout runs** | **shop 40% (30–52), holdout 62% (45–77)** | 59% / 75% | | 2.0 / 0.0 | | | | 447c7fc |
 | claude · claude-sonnet-5-5 (API) | not run (run 8: no Sonnet, Opus or Fable runs) | | | | | | | |
+
+## Noise: which differences are real (run 8, N3)
+
+Since run 8 every result has a 95% interval on AI-only recall (in brackets above: Wilson over
+bug×run slots; `bench` also prints a bootstrap over runs). Two setups differ beyond noise only if
+their intervals don't overlap (a conservative reading). With 8 runs per app, Haiku 5.5's
+benchmark v2 numbers are **shop 40% (30–52%)** and **holdout 62% (45–77%)**.
+
+| Comparison | Intervals (AI-only, Wilson 95%) | Verdict |
+|---|---|---|
+| Haiku run 7 baseline vs. with flows vs. run 8 (shop 33% / 30% / 39% / 42%) | 19–52, 16–48, 25–55, 27–58 | within noise |
+| Haiku holdout 62% vs. 75% (runs 6–8, two runs each) | 31–86 vs. 41–93 | within noise (one bug-run) |
+| Sonnet 48% vs. Haiku 40% on the shop (run 7 vs. run 8 pooled) | 31–66 vs. 30–52 | within noise |
+| Sonnet 50% vs. Haiku 62% on the holdout | 22–78 vs. 45–77 | within noise |
+| Haiku through the API vs. claude-cli (shop 33% vs. 40%) | 19–52 vs. 30–52 | within noise: same model, same behaviour |
+| Run 6 Haiku 26% vs. Sonnet 33% (v1) | 13–45 vs. 19–52 | within noise |
+| Haiku 8 runs vs. Gemma 12B alone (shop 40% vs. 7%; holdout 62% vs. 0%) | 30–52 vs. 2–23; 45–77 vs. 0–32 | **beyond noise** |
+
+So: the claim "Sonnet finds more than Haiku" was never shown; "a cloud model finds far more
+than the local 12B model" is. Run 6's choice of Haiku as the default rests on cost (6–16× less)
+at recall the data can't tell apart from Sonnet's.
 
 ## What each run taught
 

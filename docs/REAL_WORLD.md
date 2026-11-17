@@ -64,13 +64,90 @@ tooltips, fixed by 9d23f078), if a bug above doesn't reproduce.
 
 ## Method
 
-(Filled in as the benchmark is built: the fetch-and-start script, the reproduction checks, how a
-report is matched to the real bug, and what "reached" means.)
+**The answer key** is `apps/realworld/bugs.json`: per bug the issue link, a short description in
+the reporter's terms, the fix commit, the start page and the port, and a "reach" rule (below).
+It lives in the repo, which claude-cli can't read; the apps' clones live in
+`~/ai-test-agent-realworld` (their git history holds the fixes), and `outside_repo` refuses that
+folder too before every claude-cli call (a test checks). A prompt guard test fails if a bug's
+title or an app's name appears in the agent's prompt or tools.
+
+**Fetch and start** (`apps/realworld/realworld.py`): a blobless clone per app (git fetches only
+the files a checkout needs), then one git worktree per bug at the fix's first parent, checked by
+hash; install with the app's own package manager and lockfile (pnpm 8 for IT-Tools, pnpm 7 for
+the March 2023 lockfile of IT-5, yarn 3/4 for react-admin); start the dev server on the bug's
+port in its own process group; stop it by that PID. No Anthropic credential reaches the apps.
+react-admin's demo at these commits needs Node 20 (its Vite config uses `assert { type: 'json' }`,
+which Node 22+ rejects) forced to arm64 (the native modules were installed for arm64); RA-3's
+older checkout also needs `ra-core` and the data generator built first.
+
+**Does the bug reproduce?** (`apps/realworld/checks.py`) A short Playwright script per bug does
+what the reporter did and checks what they saw, before any agent run. Kept:
+
+| Bug | Check result at the fix's parent |
+|---|---|
+| IT-1 | `IVX` → `4`, not flagged as invalid |
+| IT-2 | the IPv4 input has `readonly`; typing changes nothing |
+| IT-4 | clicking the heart on a tool page stores `[null]`; the home page lists no favorite |
+| IT-5 | `abcd` rejected ("Secret should be a base32 string"), `ABCD` accepted |
+| RA-1 | 13–18 rows before "Remove all filters", 0 after, while the footer still says "1-25 of 600" |
+| RA-2 | the 4th order of page 2 (position 29) shows "4 / 537" |
+
+Dropped, with the reason:
+- **IT-3** (#652, RC4 in the decrypt panel): the reported symptom, the panel disappearing, does
+  not happen in headless Chromium at the fix's parent. Choosing RC4 throws an uncaught
+  "Malformed UTF-8 data" error, the choice doesn't apply and the dropdown stays open, but the
+  panel stays. Not the bug as reported, so not measured; IT-5 (the reserve) took its place.
+- **RA-3** (#9468, TabbedForm tabs): at the fix's parent the demo's own `yarn.lock` resolves
+  react-router 6.2.1, and the bug came with react-router 6.19+, which users got from fresh
+  installs (the fix pins react-router below 6.19). In the repo's demo the tabs work. No
+  replacement (time).
+
+**A run** (`apps/realworld/measure.py`): Haiku 5.5 through claude-cli, the benchmark's settings
+(480 s, 40 steps, interactive), in a "realworld" workspace with no saved login, starting on the
+bug's start page with no focus text. The app's URL is passed as `LOCAL_APP_URLS`, which only in
+dev mode counts as one of our own local apps (the network guard lets the browser reach it;
+navigation can't leave it). The apps' own requests for web fonts and a login background image
+(react-admin's demo: Google Fonts, Unsplash) are allowed, as for any site under test (D102).
+
+**Scoring.** Each run's reports go through the benchmark's matcher with one known bug (the
+judge is the pinned `ollama/gemma4:12b`, which sees the description; the agent never does):
+- **found**: a report that survived verification (replay) and that the judge matched;
+- **reached, not reported**: no such report, but the run did the trigger. "Did the trigger" is a
+  rule per bug (an action of the right kind, on the right page, whose arguments or reasoning
+  mention the trigger: typing on the Roman numeral page, a click mentioning "favorite", a click
+  on the next page of orders, ...), checked by hand on every run;
+- **never reached**: neither.
+Every other report is listed and read by hand: some may be real bugs nobody planted.
 
 ## Results
 
-(Filled in after the measurement.)
+Haiku 5.5 through claude-cli, commit 447c7fc, judge ollama/gemma4:12b, 40 steps / 480 s, 2026-11-17.
+A claude-cli **usage limit** stopped the measurement during IT-5 (run 2 of 3). Following the run
+rules, no retry: IT-5 runs 2–3, RA-1 and RA-2 were **not measured**. Raw rows:
+`apps/realworld/results.jsonl`.
+
+| Bug | Runs | Found | Reached, not reported | Never reached |
+|---|---|---|---|---|
+| IT-1 Roman numerals | 3 | 0 | 3 | 0 |
+| IT-2 IPv4 input read-only | 3 | 0 | 3 | 0 |
+| IT-4 favorite on a tool page | 3 | 0 | 0 | 3 |
+| IT-5 lower-case OTP secret | 1 (2 stopped) | 0 | 1 | 0 |
+| RA-1, RA-2 | not run (usage limit) | – | – | – |
+| **Total** | **10** | **0 (Wilson 95%: 0–28%)** | 7 | 3 |
+
+The agent found none of the real reported bugs in 10 runs. It did reach the trigger area in 7
+runs and filed real-looking neighbouring bugs instead: "Roman to arabic shows NaN for ABC with no
+error", "Arabic to roman keeps stale output for -5 / 0", "Editing the Decimal field does not
+update the IP address" (close to IT-2 but not the read-only IPv4 input), "OTP codes still shown for
+an invalid base32 secret" (near IT-5, the opposite direction). It never clicked the favorite
+heart (IT-4). Most other reports are axe accessibility findings. The per-run "reached" labels
+come from the automatic rule; checking them by hand is under "Needs me".
 
 ## Honest limits
 
-(Filled in after the measurement.)
+- 10 runs over 4 bugs in one app; react-admin wasn't measured at all. 0/10 means "probably under
+  ~30%", not "zero".
+- The automatic "reached" rule is coarse (typing on the right page counts); not yet hand-checked.
+- Start pages are the feature's page (D102), which helps the agent; the home page would be harder.
+- Several reports (NaN for invalid input, stale results) may be real unreported bugs; not yet
+  checked against the app's tracker.
