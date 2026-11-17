@@ -159,6 +159,7 @@ Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 | Goal | Status | Evidence |
 |---|---|---|
 | N0 Plan and key safety | done | Plan written; `.env`/`.env.prod` git-ignored; real key in 0 tracked files and 0 commits (one 29-char fake fixture); `run_cli` strips `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` (failing test first, then a real subprocess test); guard test against a real-looking key in tracked files; one claude-cli Haiku call with the key in the parent: `apiKeySource: "none"` (Pro login), charged $0, est. $0.0012 (D99). |
+| N1 Real Claude API | done | **First real API calls.** Smoke run 9f55a380 (`scripts/api_smoke.py`, Haiku, 12 steps): 15 model calls, every one a valid tool call; cache reads from the 2nd model call on (4,585 tokens per step); recorded $0.00554 = the token counts at list price, step by step. No fix needed. Then one Haiku **benchmark v2 through the API**, result `6dc913ac` (commit b5aaf9b): shop AI-only 33% (9 of 27), holdout 62% (5 of 8), precision 100% / 100%, false alarms 0.0 / 1.0, **$0.016 charged per run** (claude-cli estimate in run 7: $0.10), 144 s per run. API spend so far $0.111 of $4. |
 
 ## Run 7 (branch `agent-v7`, plan in `docs/RUN_PLAN_7.md`)
 

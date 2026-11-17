@@ -1303,3 +1303,23 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   deny-list of the two credentials is exact for the risk and keeps the CLI working.
 - **Not done:** a control call *with* the key, to see the CLI report `ANTHROPIC_API_KEY`: it
   would spend API credit to prove what the CLI documents.
+
+## D100. The API path, first real calls (run 8, N1)
+- **What was checked:** one short Haiku run (12 steps) with `LLM_PROVIDER=claude`, then one
+  benchmark v2 (result `6dc913ac`, commit b5aaf9b). Tool use with `strict` schemas, prompt caching
+  (tools + system prompt cached; reads on every step after the first model call, ~70% of input
+  tokens per run) and the recorded cost (equal to the token counts at `pricing.py`'s list prices,
+  which match Anthropic's table for Haiku 5.5: $0.10 / $0.50, cache read $0.01, 5-minute write
+  $0.125) all worked as written in run 1. No code change was needed.
+- **Left as it is (decided without the owner):** `ClaudeClient.decide` sends the server-side
+  refusal fallback (`fallbacks: "default"`). Haiku 5.5 has no fallback model, so for Haiku it does
+  nothing (a declined request stays declined; the docs say "default" isn't rejected, and no call
+  was). It still helps a Sonnet or Opus agent. Alternative: send it only for models with a
+  fallback. Not worth a model list in the client for a no-op.
+- **Thinking:** Haiku 5.5 thinks adaptively by default (effort `medium`, sent explicitly);
+  thinking is billed as output tokens and is included in the recorded cost.
+- **Cost, real vs. estimated:** $0.013–0.019 charged per API run, against run 7's claude-cli
+  estimate of ~$0.10 per run for the same model and benchmark. The CLI's estimate is the cost of
+  Claude Code's own calls (its large system prompt, written to a 1-hour cache at 2× input price,
+  ~9k cached tokens per call); our API client sends only our prompt and caches it for 5 minutes.
+  So the claude-cli estimates overstated what a customer would pay by about 6×.
