@@ -1323,3 +1323,15 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   Claude Code's own calls (its large system prompt, written to a 1-hour cache at 2× input price,
   ~9k cached tokens per call); our API client sends only our prompt and caches it for 5 minutes.
   So the claude-cli estimates overstated what a customer would pay by about 6×.
+
+## D101. Measuring the flow fixes and the recheck with 4 shop runs (run 8, N2)
+- **Decision:** `bench --holdout-first --flows --runs 4` (shop 4 + clean, holdout 2 + clean)
+  instead of run 7's 3 shop runs. A failing journey goes back to the agent on its 3rd run after
+  the one that saved it, i.e. the 4th shop run of a fresh benchmark: with 3 runs the recheck
+  would never have run inside the measurement. Cost: one more claude-cli run (8 instead of 7).
+- **Comparability:** recall is a mean per run, so 4 runs compare with run 7's 3 as well as any
+  two small samples do (see the intervals in N3). The holdout part is unchanged.
+- **The recheck rule (decided without the owner, the owner's goal named the behaviour):** every
+  3rd run, or when the replay's result text changes. Alternatives: a time interval (runs aren't
+  regular), or a random share of runs (not reproducible in a test). Counting replays keeps the
+  model cost of a stuck failure to one episode per three runs.

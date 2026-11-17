@@ -83,6 +83,8 @@ the API-equivalent estimate ("est."), computed from the CLI's token counts at li
 | claude-cli · claude-sonnet-5-5, run 7 benchmark v2, **holdout** (est. $1.35/run) | 50% | 67% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | dde46e0 |
 | **claude (API)** · claude-haiku-5-5, run 8 benchmark v2, shop (real charge; 2026-11-17) | 33% | 54% | 100% | 0.0 | **$0.016** | 144 s | gemma4:12b (pinned) | b5aaf9b |
 | claude (API) · claude-haiku-5-5, run 8 benchmark v2, **holdout** | 62% | 75% | 100% | 1.0 | $0.013 | | gemma4:12b (pinned) | b5aaf9b |
+| claude-cli · claude-haiku-5-5, run 8 benchmark v2 + shop critical flows **+ recheck** (4 shop runs; est. $0.108/run; 2026-11-17) | 39% | 58% | 100% | 3.0 (real behaviour) | $0.00 | 276 s | gemma4:12b (pinned) | 626f25c |
+| claude-cli · claude-haiku-5-5, run 8 benchmark v2, **holdout** (no flows there; est. $0.099/run) | 75% | 83% | 100% | 0.0 | $0.00 | | gemma4:12b (pinned) | 626f25c |
 | claude · claude-sonnet-5-5 (API) | not run (run 8: no Sonnet, Opus or Fable runs) | | | | | | | |
 
 ## What each run taught
