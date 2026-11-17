@@ -1541,3 +1541,41 @@ assumption behind Wilson.
    ignore.
 3. *Why a fixed bootstrap seed?* The same runs must always print the same interval, or a rerun
    of the scoring would look like a change.
+
+## Run 8: the real-world benchmark (`apps/realworld/`: `bugs.json`, `realworld.py`, `checks.py`, `measure.py`, `docs/REAL_WORLD.md`, D102, D103)
+
+**What.** A benchmark of real bugs that users reported in open-source apps (IT-Tools,
+react-admin's demo), each run at the commit just before its fix, on this Mac only. Per bug: the
+issue, the reporter's words, the fix commit, a start page and a rule for "did the run do the
+trigger".
+
+**How.** `realworld.py setup` makes a blobless clone per app and one git worktree per bug at the
+fix's first parent, installs with the app's own lockfile and starts the dev server on the bug's
+port in its own process group (stopped by that PID). `checks.py` reproduces each bug with a short
+Playwright script first; two that didn't reproduce were dropped. `measure.py` queues interactive
+runs in a separate workspace, lets the agent run with no hint, then scores each run with the
+benchmark's own matcher (replay, then the pinned judge) against the one known bug: found,
+reached-not-reported, or never reached. Every step is saved, so "reached" can be checked by hand.
+
+**Why.** Planted bugs are written by the same person who tunes the agent; real bugs aren't. The
+first result (0 of 10, interval 0–28%) is much lower than the demo apps' 40–62%, and the per-run
+steps say why: the agent often got to the bug and didn't report it.
+
+**Weak spots.** Ten runs in one app, cut short by a usage limit; the automatic reached rule
+over-counts (7 vs 4 by hand); the start page helps; the strict judge rejects a same-root-cause
+report with a different symptom; claude-cli must never read this folder or the clones
+(`outside_repo` refuses both, tested).
+
+**Interview Q&A**
+1. *Why run the app at the fix's parent commit instead of the latest release?* The bug is known
+   to exist there and the fix commit tells you exactly what changed, so "found" can be judged
+   against something concrete; at the latest release it may be fixed or changed.
+2. *Your agent scores 40–62% on your demos and 0% here. Which number is true?* Both, for different
+   questions. The demo number measures the agent on bugs like the ones it was tuned on; the
+   real-world number (with a wide interval) says how it generalises. The gap and the step logs
+   are the useful part: they point at "reached but didn't report", which the demos hid.
+3. *How do you keep the agent from cheating with the answer key?* The key and the clones (whose
+   history holds the fixes) are outside the agent's reach: claude-cli runs in a temp folder and
+   `outside_repo` refuses the repo and the clones' folder before every call; a guard test fails if
+   a bug title or app name appears in the agent's prompt or tools; the browser can't leave the
+   app's local URL.

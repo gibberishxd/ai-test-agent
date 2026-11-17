@@ -1354,3 +1354,18 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   `DEV_MODE=true` (tested), the same rule as the demo shops.
 - **Toolchain:** react-admin's demo at these commits needs Node 20 (forced to arm64); the system
   Node 20 is used rather than changing the user's Node setup.
+
+## D103. Real-world results: the usage limit, scoring and what to fix (run 8, N4)
+- **Usage limit:** a claude-cli usage-limit message arrived during IT-5's second run. As the run
+  rules say, every model run stopped at once and nothing was retried; IT-5 runs 2–3, RA-1 and RA-2
+  are left for the owner. The rest of run 8 (docs, hand checks, tests, PR) needed no model.
+- **Reached is hand-checked:** the automatic rule said 7 runs reached the trigger; reading every
+  step gave 4. The docs report the hand-checked number and keep the rule's in a side column.
+  Alternative: tighten the rule now. Not done: one rule per bug tuned after seeing the runs would
+  be fitted to these 10 runs.
+- **Strict scoring kept:** IT-1's "ABC → NaN, no error" shares the reported bug's root cause and
+  fix but not its symptom; the judge said no and the score stays 0. Changing what counts is the
+  owner's call (in "Needs me").
+- **No agent change tonight:** the two blind spots (a fill timeout on a read-only input treated as a
+  tool error; the agent's own "should be rejected" not reported) have clear fixes, but measuring
+  them needs model runs, and the usage limit had stopped those. Written up for the owner.

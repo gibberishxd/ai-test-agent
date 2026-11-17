@@ -121,33 +121,71 @@ Every other report is listed and read by hand: some may be real bugs nobody plan
 
 ## Results
 
-Haiku 5.5 through claude-cli, commit 447c7fc, judge ollama/gemma4:12b, 40 steps / 480 s, 2026-11-17.
-A claude-cli **usage limit** stopped the measurement during IT-5 (run 2 of 3). Following the run
-rules, no retry: IT-5 runs 2–3, RA-1 and RA-2 were **not measured**. Raw rows:
-`apps/realworld/results.jsonl`.
+Haiku 5.5 through claude-cli, commit 447c7fc, judge ollama/gemma4:12b, 40 steps / 480 s,
+2026-11-17. A claude-cli **usage limit** stopped the measurement during IT-5 (after run 1 of 3).
+Following the run rules there was no retry: IT-5 runs 2–3, RA-1 and RA-2 were **not measured**.
+Raw rows: `apps/realworld/results.jsonl`. 10 runs, est. $1.25 API-equivalent on the Pro plan
+($0 charged), 250–400 s each.
 
-| Bug | Runs | Found | Reached, not reported | Never reached |
-|---|---|---|---|---|
-| IT-1 Roman numerals | 3 | 0 | 3 | 0 |
-| IT-2 IPv4 input read-only | 3 | 0 | 3 | 0 |
-| IT-4 favorite on a tool page | 3 | 0 | 0 | 3 |
-| IT-5 lower-case OTP secret | 1 (2 stopped) | 0 | 1 | 0 |
-| RA-1, RA-2 | not run (usage limit) | – | – | – |
-| **Total** | **10** | **0 (Wilson 95%: 0–28%)** | 7 | 3 |
+| Bug | Runs | Found | Reached, not reported (hand-checked) | Never reached | Automatic "reached" rule said |
+|---|---|---|---|---|---|
+| IT-1 Roman numerals accept invalid numerals | 3 | 0 | 1 | 2 | 3 |
+| IT-2 IPv4 input can't be edited | 3 | 0 | 2 | 1 | 3 |
+| IT-4 favorite button on a tool page | 3 | 0 | 0 | 3 | 0 |
+| IT-5 lower-case OTP secret rejected | 1 (2 stopped) | 0 | 1 | 0 | 1 |
+| RA-1, RA-2 (react-admin) | not run (usage limit) | – | – | – | – |
+| **Total** | **10** | **0 (Wilson 95%: 0–28%)** | **4** | **6** | 7 |
 
-The agent found none of the real reported bugs in 10 runs. It did reach the trigger area in 7
-runs and filed real-looking neighbouring bugs instead: "Roman to arabic shows NaN for ABC with no
-error", "Arabic to roman keeps stale output for -5 / 0", "Editing the Decimal field does not
-update the IP address" (close to IT-2 but not the read-only IPv4 input), "OTP codes still shown for
-an invalid base32 secret" (near IT-5, the opposite direction). It never clicked the favorite
-heart (IT-4). Most other reports are axe accessibility findings. The per-run "reached" labels
-come from the automatic rule; checking them by hand is under "Needs me".
+**Found: none of the four real reported bugs in 10 runs.** Per bug, 0 of 3 has a Wilson interval
+of 0–56%, so no single bug's number means much; the pooled 0 of 10 says the real-world recall of
+this setup is probably below ~30%, against 40% (shop) and 62% (holdout) on our own apps.
+
+**What happened, run by run (read from the saved steps, no model):**
+- **IT-1, run fce7cc68 saw the bug and didn't report it.** It typed `IIII` into the Roman field,
+  got `4`, and its own reasoning for that step was "a non-canonical numeral (IIII) that should be
+  rejected or flagged, not silently accepted". It then reported other things. Runs 1c7a377b and
+  98193f67 never typed a wrong combination of Roman letters (an `IIII` attempt failed on a stale
+  element id). **All three runs reported "Roman to arabic shows NaN for ABC with no error
+  message"**: the same root cause as the issue (the fix, 8930e139, adds validation of the Roman
+  input, which also flags `ABC`), but a different symptom from the reporter's. The judge said
+  no match; we keep the strict score, and note that a person reading these reports would have
+  found the missing validation.
+- **IT-2: the bug showed up as a tool error.** Typing into the IPv4 field timed out (Playwright's
+  fill waits for an editable element, and the field is `readonly`). Run 6e35b438 hit this six
+  times, then wrote "typing into the IPv4 field keeps timing out, so I'll focus it first and
+  retry"; dda4708f hit it once. Both treated it as their own tool failing, not as the app's bug.
+  Run 6432d4fb never reached the real field (stale element ids). They reported nearby bugs:
+  "Editing the Decimal field does not update the IP address", "invalid hex/binary accepted with
+  no error".
+- **IT-4: never clicked the heart.** All three runs stayed on the token options and mobile layout;
+  none clicked the favorite button, so the bug (nothing gets stored) never had a chance.
+- **IT-5: saw the symptom and read it the other way.** Typing `jbswy3dpehpk3pxp` showed "Secret
+  should be a base32 string" (the bug: lower-case base32 is valid). The agent took the app's
+  message as correct and reported "OTP codes still shown for an invalid base32 secret".
+
+**Other reports (not planted, read by hand).** Besides axe accessibility findings (the same 7–8
+rules in every IT-Tools run), the agent reported: Arabic-to-Roman keeps a stale result for `0`,
+`-5` and silently rounds `1.5` (plausible real input-validation gaps at that commit, not
+checked against the tracker); a "Copy" button that resets the input (needs a look); mobile-width
+overflow on the token generator; a clipboard `NotAllowedError` (headless Chromium has no
+clipboard permission: our environment, a false alarm).
+
+**What this suggests (not measured yet):** two cheap fixes would have turned two "reached" runs
+into finds: (1) a fill that times out on a visible input is evidence of a read-only field and
+should come back to the agent as "this input did not accept typing", not as a tool error; (2) the
+agent's own "should be rejected" reasoning after an unexpected `ok` result should make it report.
+The matcher question (same root cause, different symptom) is the owner's call.
 
 ## Honest limits
 
-- 10 runs over 4 bugs in one app; react-admin wasn't measured at all. 0/10 means "probably under
-  ~30%", not "zero".
-- The automatic "reached" rule is coarse (typing on the right page counts); not yet hand-checked.
-- Start pages are the feature's page (D102), which helps the agent; the home page would be harder.
-- Several reports (NaN for invalid input, stale results) may be real unreported bugs; not yet
-  checked against the app's tracker.
+- **Small and cut short:** 10 runs over 4 bugs in one app; react-admin wasn't measured at all.
+  0 of 10 means "probably under ~30%", not "zero".
+- **One app, and a friendly kind:** IT-Tools pages are small single tools. The start page is the
+  feature's page (D102), which helps the agent a lot; from the home page it would be harder.
+- **The automatic "reached" rule over-counts** (it said 7, the hand check 4): it counts any
+  typing on the page whose reasoning mentions the tool. The hand-checked column is the one to use.
+- **Strict scoring:** a report of the right root cause with a different symptom (IT-1's NaN)
+  counts as not found.
+- **Not checked against the trackers:** whether the other reports are real, already known bugs.
+- **Same model only:** Haiku 5.5 through claude-cli; no API run here and no bigger model (the
+  plan allowed none).

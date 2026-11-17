@@ -812,3 +812,20 @@ limit; est. $0.10 per run.
 Pooled: shop 40% (29 of 72; Wilson 30–52%), holdout 62% (20 of 32; Wilson 45–77%). Bug 11 can't be triggered on a signed-in run (logout is denied, run 4) and bug 12 rarely is;
 without those two the shop is 29 of 56 (52%). The clean shop's reports (3 in part A, 1 in part B) are the same real
 behaviours as N2: a reload empties the cart, quantity 0 is added, a search hides the search box.
+
+## Run 8, N4: real-world v1, Haiku 5.5 on IT-Tools (claude-cli)
+
+Commit 447c7fc, 480 s, 40 steps, judge ollama/gemma4:12b, start on the feature's page. 10 runs;
+a usage limit stopped the rest. Every miss, read from the saved steps:
+
+| Bug | Runs | Why it was missed |
+|---|---|---|
+| IT-1 `IVX`/`IIII` accepted | 3 | Run 1 typed `IIII`, got `4`, wrote that it "should be rejected or flagged", and didn't report it. Runs 2–3 only tried non-Roman letters (`ABC` → `NaN`), which all three reported: same root cause and fix, judged a different bug. |
+| IT-2 IPv4 input read-only | 3 | The read-only field made Playwright's fill time out. Two runs hit it (one six times) and blamed their tool; one never reached the real field (stale element ids). |
+| IT-4 favorite button | 3 | Never clicked the heart; explored token options and mobile layout. |
+| IT-5 lower-case secret | 1 | Typed a lower-case secret, saw "Secret should be a base32 string", and trusted the app: reported that codes still show for an "invalid" secret. |
+
+Patterns: **reached but not reported** (4 of 10 runs) is the main loss, not exploration. Two
+fixes are cheap and general: turn a fill timeout on a visible input into "this input did not
+accept typing", and act on the agent's own "should be rejected" reasoning after an `ok`. The
+third (IT-5) needs domain knowledge (base32 is case-insensitive): a bigger model or a spec.

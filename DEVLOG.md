@@ -108,3 +108,13 @@ Benchmark scores go here too, once Phase 2 exists.
 - Measured on v2: Haiku shop 30–33%, holdout 62–75%; Sonnet shop 48%, holdout 50% at ~16× the
   cost. Learned: measure a feature inside the real benchmark setup too (a signed-in run hid the
   credentials a sign-in journey needed), and a saved failure needs a way to be rechecked.
+
+## 2026-11-17 (run 8, branch agent-v8)
+- Key safety first: claude-cli no longer inherits the API key (test first). The first real Claude
+  API calls cost $0.111 in total (about $0.016 per benchmark run, matching the token counts).
+- Failing journeys go back to the agent every 3rd run; every recall now has a 95% interval. With
+  8 runs per app, Haiku is shop 40% (30–52%), holdout 62% (45–77%), and most earlier "differences"
+  were noise.
+- Real-world benchmark on IT-Tools: 0 of 10 real reported bugs found (0–28%). In 4 runs the agent
+  got to the bug and didn't report it. A Pro usage limit stopped the measurement before
+  react-admin.
