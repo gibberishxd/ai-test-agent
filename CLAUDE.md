@@ -81,11 +81,14 @@ Ask only about what the Settings don't cover, as numbered plain text, never bloc
 ## Run 8 (branch `agent-v8`)
 Goals and acceptance checks: [`docs/RUN_PLAN_8.md`](docs/RUN_PLAN_8.md): the API path, the
 failing-journey recheck, confidence intervals and a real-world benchmark (`docs/REAL_WORLD.md`).
-PR #13, not merged; open items under "Needs me" in `docs/PROGRESS.md`.
+Merged in PR #13 (2026-11-17).
 
 ## Current phase
-Demo v1 and runs 2–7 are all merged into `main` (PRs #1–#4, #7 and #11, last on 2026-11-16). The
-license is FSL-1.1-ALv2 since PR #10 (2026-11-16); versions up to commit 5faa299 were MIT (PR #5).
-No run is in progress, so the normal "How to work with me" rules apply. Haiku 5.5 is the default
-agent (D91, D92). Open items (the holdout specs to write, the API path, the failing-journey
-recheck) are under "Needs me" in `docs/PROGRESS.md`.
+**Paused (2026-11-17).** The owner is focused on studies and a job search; nothing is in progress.
+Demo v1 and runs 2–8 are all merged into `main` (last: PR #13, run 8). The license is
+FSL-1.1-ALv2 since PR #10; versions up to commit 5faa299 were MIT. The normal "How to work with
+me" rules apply. Haiku 5.5 is the default agent (D91, D92).
+
+**Next, when the owner resumes:** study the real-world runs where the agent reached a real bug
+and didn't report it (`docs/REAL_WORLD.md`, "What happened, run by run": 6 of 18 runs) before
+changing the agent. Other open items are under "Needs me" in `docs/PROGRESS.md`.

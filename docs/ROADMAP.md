@@ -203,3 +203,19 @@ benchmark; customers may put 4 or 5 first.
   of the demo apps; results now record which version they were measured on.
 - Not started: 4 (GitHub integration), 5 (issue tracker export), 7 (evaluations in CI and
   tracing), 8 (hosting). "Before building" still applies: talk to QA leads first.
+
+## Competitors (the owner's notes, 2026-11-17)
+
+| Product | What it does | Price |
+|---|---|---|
+| **Testsigma** | Tests written in plain English, with its Atto AI agents that plan, write, heal and run tests | Custom pricing |
+| **KaneAI** by LambdaTest | Turns tickets, PRDs or screenshots into test scenarios that a person approves | From $17 per user per month |
+
+Both help teams write and maintain **tests for what they already know to check**. Neither does
+autonomous exploratory bug finding. Our edge is exploration (no test cases to write) plus measured
+accuracy (a public benchmark with planted bugs, a holdout app and intervals). The honest caveat:
+the real-world benchmark (run 8, `docs/REAL_WORLD.md`) found 0 of 6 real reported bugs in 18
+runs, so exploration doesn't yet work on real bugs.
+
+**Next step when the project resumes:** study the 6 runs where the agent reached a real bug
+without reporting it, and fix that before anything else on this roadmap.
