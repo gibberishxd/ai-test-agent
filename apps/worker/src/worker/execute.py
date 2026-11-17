@@ -26,8 +26,10 @@ from worker.flows import (
     MAX_FLOW_STEPS,
     FlowOutcome,
     checks_for_final_page,
+    counted_replay,
     flow_task,
     parse_finish,
+    recheck_reason,
     replay_flow,
     script_from_steps,
 )
@@ -248,7 +250,7 @@ def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> Flo
     episode. A known failure (a failing script) that still fails is found again for free."""
     if budget.max_steps <= 0 or budget.max_seconds <= 0 or budget.max_cost_usd <= 0:
         return FlowOutcome("skipped", "no budget left for this journey")
-    broke = None
+    broke = recheck = None
     if flow.script:
         result, detail = replay_flow(context, flow.script)
         failing = bool(flow.script.get("failing"))
@@ -256,13 +258,18 @@ def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> Flo
             fixed = " (it failed before: fixed)" if failing else ""
             return FlowOutcome("replayed", detail + fixed, replayed=True)
         if result == "checks_failed" and failing:
-            return FlowOutcome(
-                "failed",
-                f"still failing: {detail}",
-                replayed=True,
-                last_url=flow.script["start_url"],
-            )
-        broke = detail
+            # Run 8, N2: the same failure is taken from replay at most twice in a row.
+            recheck = recheck_reason(flow.script, detail)
+            if recheck is None:
+                return FlowOutcome(
+                    "failed",
+                    f"still failing: {detail}",
+                    replayed=True,
+                    last_url=flow.script["start_url"],
+                    script=counted_replay(flow.script, detail),
+                )
+        else:
+            broke = detail
     first, cost_before = run.step_count, run.estimated_cost_usd
     agent = make_agent(budget, first)
     episode = agent.run()
@@ -276,7 +283,13 @@ def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> Flo
         "last_url": episode.steps[-1].url if episode.steps else run.target_url,
         "first_step": first,
     }
-    after_break = f" (the saved replay had broken: {broke})" if broke else ""
+    after_break = (
+        f" (the saved replay had broken: {broke})"
+        if broke
+        else f" ({recheck}; the replay still failed: {detail})"
+        if recheck
+        else ""
+    )
     if passed:
         script = script_from_steps(run.target_url, episode.steps, checks)
         return FlowOutcome(
@@ -288,6 +301,8 @@ def check_flow(flow: Flow, context, budget: Budget, run: Run, make_agent) -> Flo
     script = (
         script_from_steps(run.target_url, episode.steps, checks, failing=True) if checks else None
     )
+    if script is None and recheck:  # keep the old failing script, counting from this recheck
+        script = {**flow.script, "replays_since_agent": 0, "last_replay": None}
     return FlowOutcome("failed", why + after_break, script=script, **common)
 
 
@@ -314,7 +329,9 @@ def record_flow(session: Session, run: Run, flow: Flow, outcome: FlowOutcome, ag
     )
     flow.last_status, flow.last_run_id = outcome.status, run.id
     if outcome.script:
-        flow.script, flow.script_saved_at = outcome.script, func.now()
+        flow.script = outcome.script
+        if not outcome.replayed:  # a replay only counts itself in the script (run 8, N2)
+            flow.script_saved_at = func.now()
     if outcome.status == "failed" and (outcome.steps or outcome.replayed):
         bug = flow_finding(flow, outcome, run.target_url)
         agent_bugs.append(bug)

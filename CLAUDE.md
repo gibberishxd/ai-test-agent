@@ -78,6 +78,11 @@ Goals and acceptance checks: [`docs/RUN_PLAN_7.md`](docs/RUN_PLAN_7.md). The own
 are decisions already made; the agent loop may change for the early-finish fix, specs and flows.
 Ask only about what the Settings don't cover, as numbered plain text, never blocking.
 
+## Run 8 (branch `agent-v8`)
+Goals and acceptance checks: [`docs/RUN_PLAN_8.md`](docs/RUN_PLAN_8.md): the API path, the
+failing-journey recheck, confidence intervals and a real-world benchmark (`docs/REAL_WORLD.md`).
+PR #13, not merged; open items under "Needs me" in `docs/PROGRESS.md`.
+
 ## Current phase
 Demo v1 and runs 2–7 are all merged into `main` (PRs #1–#4, #7 and #11, last on 2026-11-16). The
 license is FSL-1.1-ALv2 since PR #10 (2026-11-16); versions up to commit 5faa299 were MIT (PR #5).

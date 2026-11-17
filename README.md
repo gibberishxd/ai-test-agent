@@ -12,6 +12,26 @@ on a benchmark with planted bugs before you trust it.
 
 ![A report with verified findings](docs/screenshots/report.png)
 
+## Real-world results
+
+Planted bugs only go so far, so run 8 pointed the agent at **real bugs that users reported in real
+open-source apps** ([IT-Tools](https://github.com/CorentinTh/it-tools) and
+[react-admin](https://github.com/marmelab/react-admin)'s demo, run locally at the commit before
+each fix; method and answer key in [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md)). Haiku 5.5, 40
+steps, starting on the feature's page with no hint of the bug:
+
+| | Runs | Real bug found | Reached the bug, didn't report it |
+|---|---|---|---|
+| IT-Tools (4 bugs) | 12 | 0 | 6 |
+| react-admin demo (2 bugs) | 6 | 0 | 0 |
+| **Total** | **18** | **0 (95% interval 0–18%)** | **6** |
+
+Against 40% and 62% on our own demo apps, this is the honest result: **exploration doesn't yet
+find real bugs.** In a third of the runs the agent got to the bug and didn't report it: it typed
+`IIII`, saw `4` and noted it "should be rejected"; it took a read-only input for its own tool
+failing; it trusted the app's wrong error message. On react-admin it never did the trigger. That
+"reached but not reported" gap is the main open problem.
+
 ## Highlights
 
 **Finds bugs like a tester**
@@ -66,6 +86,8 @@ whatever the model). The holdout app is never used to tune the agent. Full histo
 
 | Setup | Shop: judgement-only / all bugs | Holdout: judgement-only / all bugs | False alarms per clean run |
 |---|---|---|---|
+| **Claude Haiku 5.5 agent, 8 runs per app** (run 8, benchmark v2, the default; est. ~$0.10 a run via CLI) | **40% (30–52%)** / 59% | **62% (45–77%)** / 75% | 2.0 shop (real behaviour), 0 holdout |
+| Claude Haiku 5.5 agent through the **Claude API** (run 8; **$0.016 a run, charged**) | 33% (19–52%) / 54% | 62% (31–86%) / 75% | 0 shop, 1.0 holdout |
 | Claude Sonnet 5.5 agent, benchmark v2 + critical flows (run 7; est. $1.4–1.7 a run) | **48% / 64%** | 50% / 67% | 2.0 shop (real behaviour), 0 holdout |
 | **Claude Haiku 5.5 agent**, benchmark v2 + critical flows (run 7, the default; est. ~$0.10 a run) | 30% / 51% | 62% / 75% | 1.0 shop, 1.0 holdout |
 | Claude Haiku 5.5 agent, benchmark v2 baseline (run 7) | 33% / 54% | **75% / 83%** | 2.0 shop, 0 holdout |
@@ -78,12 +100,17 @@ whatever the model). The holdout app is never used to tune the agent. Full histo
 | Gemma 4 12B alone (local) | 7% / 36% | 0% / 33% | 0 |
 
 Small local models reach most bug states but rarely recognise them; a reviewer on the flagged
-steps helps on the shop, and the holdout shows how far that generalises. Every run cost $0: local
-models, or a Claude subscription through the CLI.
+steps helps on the shop, and the holdout shows how far that generalises. Every run but the API row
+cost $0: local models, or a Claude subscription through the CLI.
 
-Run 7's rows are **benchmark v2**: four unplanted behaviours of the demo apps were fixed, so they
-compare with each other, not directly with the v1 rows below them. Two holdout runs per setup move a
-number by 12 points per bug found.
+Brackets are 95% intervals (Wilson, over bug×run slots; run 8). With 8 runs per app Haiku's numbers
+are shop 40% (30–52%) and holdout 62% (45–77%). **Every difference between Claude setups in this
+table is within noise**, Sonnet vs. Haiku included (Sonnet's 48% shop is 31–66%); the gap between
+Claude and the local Gemma model is not (shop 7% is 2–23%, holdout 0% is 0–32%). Details:
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md#noise-which-differences-are-real-run-8-n3).
+
+Run 7's and run 8's rows are **benchmark v2**: four unplanted behaviours of the demo apps were
+fixed, so they compare with each other, not directly with the v1 rows below them.
 
 Run 6 measured Claude models through the CLI with an API-equivalent cost estimate (the list-price
 cost of the tokens each run used; nothing was charged). Haiku as the agent finds most of what
@@ -235,6 +262,18 @@ npm run bench        # the benchmark (real model calls)
 - Prompt caching on the tool definitions and the (byte-stable) system prompt.
 - The cheap model for dedup and benchmark matching; the agent model only for decisions.
 - Tokens and cost recorded per step and per run, shown in the UI; budgets cap every run.
+
+**What a run really costs (run 8, the first real API calls).** The same Haiku 5.5 agent on the
+same benchmark:
+
+| Path | Cost per run | Time per run | Cache | AI-only recall (shop / holdout) |
+|---|---|---|---|---|
+| Claude API (`LLM_PROVIDER=claude`), charged | **$0.013–0.019** (avg $0.016) | ~145 s | ~70% of input tokens read from cache | 33% / 62% |
+| Claude Code CLI (`claude-cli`), API-equivalent estimate, $0 on a subscription | ~$0.10 | ~272 s | Claude Code's own prompt, cached for 1 hour at 2× | 40% / 62% (8 runs) |
+
+The CLI estimate prices Claude Code's calls (its large system prompt and 1-hour cache writes), not
+ours: through the API a run costs about a sixth of it, and the recall is the same within noise.
+A team running 300 Haiku runs a month would pay about $5 in model cost.
 
 ## Project layout
 

@@ -23,6 +23,7 @@ by a loop).
 
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -71,11 +72,22 @@ class CliFailed(RuntimeError):
         self.output = output
 
 
+# With either of these in its environment, `claude -p` bills that API key's credits instead of
+# the owner's Pro plan (run 8, N0). The worker can hold the key (LLM_PROVIDER=claude needs it).
+API_CREDENTIALS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def cli_environment() -> dict[str, str]:
+    """This process's environment without the Anthropic API credentials."""
+    return {k: v for k, v in os.environ.items() if k not in API_CREDENTIALS}
+
+
 def run_cli(command: list[str], stdin: str, cwd: Path) -> str:
     result = subprocess.run(
         command,
         input=stdin,
         cwd=cwd,
+        env=cli_environment(),
         capture_output=True,
         text=True,
         timeout=TIMEOUT_S,
@@ -329,11 +341,15 @@ def outside_repo(folder: Path) -> None:
     Checked before every call: the CLI's file tools reach its working folder and --add-dir,
     and the repo holds the demo apps' bug lists, which would spoil the benchmark.
     """
-    from worker.config import REPO_ROOT
+    from worker.config import REPO_ROOT, realworld_dir
 
     folder, repo = folder.resolve(), REPO_ROOT.resolve()
     if folder == repo or repo in folder.parents or folder in repo.parents:
         raise RuntimeError(f"claude-cli refused: {folder} is inside the repo or contains it")
+    # Run 8, N4: the real-world apps' clones hold their fix commits (the answer key).
+    apps = realworld_dir().resolve()
+    if folder == apps or apps in folder.parents or folder in apps.parents:
+        raise RuntimeError(f"claude-cli refused: {folder} is in the real-world apps' folder")
 
 
 def _tool_instructions(tools: list[ToolSpec]) -> str:

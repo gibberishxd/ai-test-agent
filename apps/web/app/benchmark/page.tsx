@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  aiRecallInterval,
   commitLabel,
   decisions,
   holdout,
@@ -104,11 +105,17 @@ export default async function BenchmarkPage() {
                     {reviewerLabel(row) && <span className="block text-xs text-muted-foreground">+ reviewer {reviewerLabel(row)}</span>}
                     <span className="block text-xs text-muted-foreground">{benchmarkLabel(row)}</span>
                   </TableCell>
-                  <TableCell className="text-right font-semibold tabular-nums">{percentOrDash(row.aiRecall)}</TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {percentOrDash(row.aiRecall)}
+                    <IntervalNote value={aiRecallInterval(row)} />
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.recall)}</TableCell>
                   <TableCell className="text-right tabular-nums">{percent(row.precision)}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.falseAlarms.toFixed(1)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{percentOrDash(holdout(row)?.aiRecall)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {percentOrDash(holdout(row)?.aiRecall)}
+                    <IntervalNote value={aiRecallInterval(row, "holdout")} />
+                  </TableCell>
                   <TableCell className="text-right tabular-nums whitespace-nowrap">
                     {funnelLabel(verification(row))}
                   </TableCell>
@@ -369,6 +376,12 @@ function Tile({ label, value, hint, headline = false }: { label: string; value: 
       <dd className="text-xs text-muted-foreground">{hint}</dd>
     </div>
   );
+}
+
+// Run 8, N3: the 95% interval under a recall: how much the number could move with more runs.
+function IntervalNote({ value }: { value: string | null }) {
+  if (!value) return null;
+  return <span className="block text-xs font-normal text-muted-foreground">95%: {value}</span>;
 }
 
 function funnelLabel(funnel: Verification | null): string {

@@ -88,9 +88,17 @@ class Settings(BaseSettings):
     demo2_url: str = "http://localhost:5175"
     clean_demo2_url: str = "http://localhost:5176"
 
+    # Run 8, N4: open-source apps started on this Mac for the real-world benchmark
+    # (comma-separated URLs). Only with DEV_MODE=true do they count as our own local apps.
+    local_app_urls: str = ""
+
     def demo_urls(self) -> list[str]:
-        """Our own demo apps: the only targets where interactive tests need no verified domain."""
-        return [self.demo_url, self.clean_demo_url, self.demo2_url, self.clean_demo2_url]
+        """Our own demo apps: the only targets where interactive tests need no verified domain.
+        In dev mode, also the local apps of LOCAL_APP_URLS (the real-world benchmark)."""
+        urls = [self.demo_url, self.clean_demo_url, self.demo2_url, self.clean_demo2_url]
+        if self.dev_mode:
+            urls += [u.strip() for u in self.local_app_urls.split(",") if u.strip()]
+        return urls
 
     # Off unless DEV_MODE=true is set explicitly: a deployment that forgets the variable must
     # not let the browser reach localhost (fail safe).
@@ -126,6 +134,14 @@ class Settings(BaseSettings):
         """Absolute path for screenshots (a relative DATA_DIR is resolved from the repo root)."""
         path = Path(self.data_dir)
         return path if path.is_absolute() else REPO_ROOT / path
+
+
+def realworld_dir() -> Path:
+    """Where the real-world benchmark's apps are cloned (run 8, N4): outside the repo, and never
+    reachable by claude-cli (their git history holds the fix commits)."""
+    import os
+
+    return Path(os.environ.get("REALWORLD_DIR", Path.home() / "ai-test-agent-realworld"))
 
 
 @lru_cache

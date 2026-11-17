@@ -2,7 +2,14 @@
 
 from types import SimpleNamespace
 
-from worker.flows import flow_task, parse_finish, replay_flow, script_from_steps
+from worker.flows import (
+    counted_replay,
+    flow_task,
+    parse_finish,
+    recheck_reason,
+    replay_flow,
+    script_from_steps,
+)
 
 
 def step(action, at, element=None, result="ok", blocked=False, **args):
@@ -160,3 +167,34 @@ def test_checks_are_kept_only_if_the_final_page_agrees():
     assert checks_for_final_page(False, ["Profile saved", "Order confirmed"], final) == [
         "Profile saved"
     ]
+
+
+# Run 8, N2: a failing journey is given back to the agent, so a wrong failure doesn't stick.
+SAME = 'replayed every step, but the page doesn\'t show "Profile saved"'
+FAILING = {"start_url": "/", "steps": [], "checks": ["Profile saved"], "failing": True}
+
+
+def test_a_new_failing_script_is_replayed_without_the_agent():
+    assert recheck_reason(FAILING, SAME) is None
+
+
+def test_the_same_replay_result_twice_stays_with_replay():
+    once = counted_replay(FAILING, SAME)
+    assert once["replays_since_agent"] == 1 and once["last_replay"] == SAME
+    assert recheck_reason(once, SAME) is None
+
+
+def test_every_third_run_goes_back_to_the_agent():
+    twice = counted_replay(counted_replay(FAILING, SAME), SAME)
+    assert recheck_reason(twice, SAME) == "rechecked by the agent every 3 runs"
+
+
+def test_a_changed_replay_result_goes_back_to_the_agent():
+    once = counted_replay(FAILING, SAME)
+    other = 'replayed every step, but the page doesn\'t show "Saved"'
+    assert recheck_reason(once, other) == "its replay result changed"
+
+
+def test_counting_doesnt_change_the_script_it_was_given():
+    counted_replay(FAILING, SAME)
+    assert "replays_since_agent" not in FAILING

@@ -37,6 +37,10 @@ SCRIPT_ACTIONS = (
 EXPECTED = re.compile(r"\bexpect(?:ed|s|ing)?\b", re.IGNORECASE)
 QUOTED = re.compile(r"[\"“'‘]([^\"”'’]{2,80})[\"”'’]")
 MAX_CHECKS = 3
+# Run 8, N2: a failing journey is checked by replay alone at most twice in a row; every 3rd run
+# (or as soon as its replay result changes) the agent gets it again, so a wrong failure (D98's
+# false "Sign in") can't stick forever.
+RECHECK_EVERY = 3
 
 # The demo shop's critical flows for the measurements (run 7, M4 and M6): plain product journeys
 # written for the shop's pages, not taken from its bug list.
@@ -150,6 +154,28 @@ def script_from_steps(
         "checks": checks,
         "end_path": urlsplit(end).path or "/",
         "failing": failing,
+    }
+
+
+def recheck_reason(script: dict, detail: str) -> str | None:
+    """Why a failing journey whose replay still fails (`detail`) should go back to the agent
+    instead of being taken from replay alone, or None. The script counts the replay-only runs
+    since the agent last had the journey (`replays_since_agent`) and keeps the last replay's
+    result (`last_replay`)."""
+    last = script.get("last_replay")
+    if last is not None and last != detail:
+        return "its replay result changed"
+    if script.get("replays_since_agent", 0) + 1 >= RECHECK_EVERY:
+        return f"rechecked by the agent every {RECHECK_EVERY} runs"
+    return None
+
+
+def counted_replay(script: dict, detail: str) -> dict:
+    """The script after one more replay-only run of a failing journey (a new dict)."""
+    return {
+        **script,
+        "replays_since_agent": script.get("replays_since_agent", 0) + 1,
+        "last_replay": detail,
     }
 
 

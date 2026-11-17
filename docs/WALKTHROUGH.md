@@ -1439,3 +1439,143 @@ patch, and runs with Node 24's built-in TypeScript support.
    header, and is never written to stdout or stderr (a test checks it isn't echoed).
 3. *What does a tool error look like to the model?* `isError: true` with the API's status and
    message, so it can say "verify the domain first" instead of failing silently.
+
+## Run 8: key safety before the first API call (`llm/claude_cli.py: cli_environment, outside_repo`, `tests/test_claude_cli_env.py`, D99)
+
+**What.** Two credentials can make the `claude` CLI bill an API key instead of the owner's Pro
+plan: `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`. The worker may hold the key (API runs need
+it), so every `claude -p` subprocess now gets the worker's environment without those two. A
+guard test fails if any tracked file holds a real-looking key, and `scripts/cli_billing_check.py`
+proved it on the real CLI: with the key in the parent's environment, the CLI's own `init` event
+said `apiKeySource: "none"` (the subscription login).
+
+**How.** `subprocess.run(..., env=cli_environment())`, where `cli_environment()` copies
+`os.environ` minus the two names. The test that matters starts a real `/usr/bin/env` through
+`run_cli` with both variables set in the parent and checks they're absent in the child.
+
+**Why a deny-list, not an allow-list.** The CLI needs variables we don't control (its config
+folder, proxy settings, locale). Removing exactly the two credentials fixes exactly the risk.
+
+**Weak spots.** A future credential variable (a new auth method) would need adding. The check
+reads the CLI's self-report; there's no billing API call to confirm it from the other side.
+
+**Interview Q&A**
+1. *How did you verify the fix without spending money?* A real subprocess test for the
+   environment, plus one subscription-billed CLI call whose `init` event names the credential
+   source. A control call with the key would have cost API credit to prove documented behaviour.
+2. *Why wasn't this a bug before?* pydantic-settings reads `.env` without exporting it, so the
+   key wasn't in `os.environ`. Anything that exports `.env` (a dotenv loader, `set -a`) would
+   have silently switched billing.
+3. *How do you check git history for a leaked key without printing it?* Compare in a script and
+   print only counts and booleans; keep the comparison inside the process.
+
+## Run 8: the Claude API path, first real calls (`llm/claude.py`, `scripts/api_smoke.py`, `scripts/api_spend.py`, D100)
+
+**What.** `ClaudeClient` had never made a call. Run 8's smoke run (12 steps on the shop) checked
+the three things that can only be checked live: tool use returns a valid call every step,
+prompt caching reads the cached prefix from the second call on, and the recorded cost equals
+the token counts at list price. Then one Haiku benchmark through the API.
+
+**How.** The tool definitions (the last one marked `cache_control`) and the system prompt form
+a byte-stable prefix; only the observation and screenshot change per step, so ~70% of a run's
+input tokens are cache reads at a tenth of the price. `api_spend.py` sums `runs.cost_usd` where
+the provider is `claude`: the app's own records are the budget's source of truth, and
+`api_smoke.py` refuses to start a run whose cap could push the total past the budget.
+
+**Why the API is ~6× cheaper than the CLI estimate.** The CLI estimate prices Claude Code's own
+calls: its large system prompt, written to a 1-hour cache at 2× the input price. Our client
+sends only our prompt and caches it for 5 minutes at 1.25×. Same model, same benchmark, about
+$0.016 a run instead of ~$0.10.
+
+**Weak spots.** One benchmark (7 runs). Haiku 5.5 has no server-side refusal fallback, so a
+refused step is just a step without an action. Prices come from a cached table in `pricing.py`.
+
+**Interview Q&A**
+1. *How do you know caching works?* `cache_read_input_tokens` > 0 on every call after the first;
+   if it's 0, something in the prefix changes per call (a timestamp, unsorted JSON).
+2. *Why record cost per step instead of reading the bill?* The run needs it live, to stop at its
+   budget, and per step it shows where the money goes.
+3. *Why was the CLI estimate so far off?* It priced a different program's calls (Claude Code's
+   prompt and cache settings), not ours.
+
+## Run 8: failing journeys are rechecked (`flows.py: recheck_reason, counted_replay`, `execute.py: check_flow`, D101)
+
+**What.** A journey that failed was replayed every run and found failing again for free. That
+also kept a *wrong* failure forever. Now the agent gets a failing journey again every 3rd run,
+or as soon as the replay's result changes; the measurement saw it happen on run 4.
+
+**How.** The saved script counts replay-only runs (`replays_since_agent`) and keeps the last
+replay's result text (`last_replay`). No schema change: it's part of the script JSON.
+
+**Interview Q&A**
+1. *Why not recheck every run?* Then replaying a known failure would cost a model episode each
+   time, which is what replay exists to avoid.
+2. *Why "result changed" as a trigger?* A different missing check means the page changed; the
+   saved expectation may no longer be the right one.
+3. *What if the recheck fails without quoting an expectation?* The old script stays, with its
+   count reset, so the next recheck is three runs later.
+
+## Run 8: confidence intervals (`worker/stats.py`, `benchmark.py: score, intervals_from_details`, `scripts/intervals.py`, `lib/benchmark.ts: aiRecallInterval`)
+
+**What.** Every recall now comes with two 95% intervals: Wilson over bug×run slots and a
+bootstrap over runs. They are printed by `bench`, stored with each result, shown on the
+leaderboard, and `scripts/intervals.py` computes them for older results and pooled ones.
+
+**How.** Wilson's interval is the score-test interval for a proportion: it stays inside [0, 1]
+and behaves at k = 0 and small n, where the textbook normal interval doesn't. The bootstrap
+resamples whole runs (2,000 times, fixed seed) and takes the 2.5th and 97.5th percentiles of the
+mean per-run recall, so a run that explored badly counts as one unit.
+
+**Why both.** Slots aren't independent (one good run finds several bugs), so Wilson is the
+optimistic one; the bootstrap keeps runs together but needs 8+ runs to mean much.
+
+**Weak spots.** "Intervals overlap → within noise" is a conservative reading, not a test.
+Slots of very different difficulty (bug 9 found almost always, bug 12 never) violate the equal-p
+assumption behind Wilson.
+
+**Interview Q&A**
+1. *Why not just report the mean?* With 8 slots, one bug moves the number 12 points; without an
+   interval a reader can't tell that from a real change.
+2. *When would you use a significance test?* Comparing two setups on the same bugs and many
+   runs: a paired test per bug (McNemar-style) would use the pairing that overlapping intervals
+   ignore.
+3. *Why a fixed bootstrap seed?* The same runs must always print the same interval, or a rerun
+   of the scoring would look like a change.
+
+## Run 8: the real-world benchmark (`apps/realworld/`: `bugs.json`, `realworld.py`, `checks.py`, `measure.py`, `docs/REAL_WORLD.md`, D102, D103)
+
+**What.** A benchmark of real bugs that users reported in open-source apps (IT-Tools,
+react-admin's demo), each run at the commit just before its fix, on this Mac only. Per bug: the
+issue, the reporter's words, the fix commit, a start page and a rule for "did the run do the
+trigger".
+
+**How.** `realworld.py setup` makes a blobless clone per app and one git worktree per bug at the
+fix's first parent, installs with the app's own lockfile and starts the dev server on the bug's
+port in its own process group (stopped by that PID). `checks.py` reproduces each bug with a short
+Playwright script first; two that didn't reproduce were dropped. `measure.py` queues interactive
+runs in a separate workspace, lets the agent run with no hint, then scores each run with the
+benchmark's own matcher (replay, then the pinned judge) against the one known bug: found,
+reached-not-reported, or never reached. Every step is saved, so "reached" can be checked by hand.
+
+**Why.** Planted bugs are written by the same person who tunes the agent; real bugs aren't. The
+first result (0 of 18, interval 0–18%) is much lower than the demo apps' 40–62%, and the per-run
+steps say why: the agent often got to the bug and didn't report it.
+
+**Weak spots.** 18 runs over 6 bugs in two apps; the automatic reached rule
+over-counts (12 vs 6 by hand); the start page helps; the strict judge rejects a same-root-cause
+report with a different symptom; claude-cli must never read this folder or the clones
+(`outside_repo` refuses both, tested).
+
+**Interview Q&A**
+1. *Why run the app at the fix's parent commit instead of the latest release?* The bug is known
+   to exist there and the fix commit tells you exactly what changed, so "found" can be judged
+   against something concrete; at the latest release it may be fixed or changed.
+2. *Your agent scores 40–62% on your demos and 0% here. Which number is true?* Both, for different
+   questions. The demo number measures the agent on bugs like the ones it was tuned on; the
+   real-world number (with a wide interval) says how it generalises. The gap and the step logs
+   are the useful part: they point at "reached but didn't report", which the demos hid.
+3. *How do you keep the agent from cheating with the answer key?* The key and the clones (whose
+   history holds the fixes) are outside the agent's reach: claude-cli runs in a temp folder and
+   `outside_repo` refuses the repo and the clones' folder before every call; a guard test fails if
+   a bug title or app name appears in the agent's prompt or tools; the browser can't leave the
+   app's local URL.

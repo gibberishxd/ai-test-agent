@@ -736,3 +736,103 @@ move the number by 12 points per bug-run: the holdout difference is inside the n
 
 **Clean-build reports (2.0 on the shop):** "quantity 0 is added as 1" and "the cart is emptied
 by a reload": both the owner's open product questions, real behaviour of the clean build.
+
+## Run 8, N1: Haiku 5.5 through the real Claude API (benchmark v2)
+
+Result `6dc913ac` (commit b5aaf9b), `claude-haiku-5-5`, provider **claude (API)**, judge
+ollama/gemma4:12b, 480 s and 40 steps, holdout first, no flows. $0.111 charged for the 7 runs
+(**$0.016 per run**). Runs took 118–164 s (the CLI: ~275 s), all 40 steps used.
+
+| Bug (judgement only) | API (6dc913ac) | claude-cli baseline (run 7, e92d2c6b) |
+|---|---|---|
+| Shop 5. Cart total ignores quantity | 1/3 | 0/3 (lost to D96's guard) |
+| Shop 7. Discount twice | 2/3 | 1/3 |
+| Shop 8. Save changes does nothing | 1/3 | 3/3 |
+| Shop 9. $NaN | 3/3 | 2/3 |
+| Shop 13. Wrong order opened | 2/3 | 3/3 |
+| Shop 6, 10, 11, 12 | 0 | 0 |
+| Holdout 3. One night charged | 2/2 | 2/2 |
+| Holdout 4. Check-out before check-in | 0/2 | 2/2 |
+| Holdout 5. Double-click Book now | 2/2 | 1/2 |
+| Holdout 6. Room name on mobile | 1/2 | 1/2 |
+
+Same totals as the CLI baseline on the shop (9 of 27), one fewer on the holdout (5 of 8): the
+same model behaves the same through either path, within noise (the 95% intervals overlap almost
+entirely, N3). One report on the clean holdout was confirmed by replay: "Double-clicking Book now
+creates two identical bookings". The clean build ignores the second click of a double click
+(D93), so this was most likely two separate clicks seconds apart (two real bookings), which
+replay also repeats. A precision cost of the double-click technique, not a planted bug.
+
+## Run 8, N2: the flow fixes (D98) and the failing-journey recheck (Haiku, claude-cli)
+
+Result `6c7257ae` (commit 626f25c), `bench --holdout-first --flows --runs 4` (D101). Shop AI-only
+39% (14 of 36), holdout 75% (6 of 8). Per bug, shop: 7 found 3/4, 8 4/4, 9 3/4, 13 4/4; 5, 6, 10,
+11, 12 never. Holdout: 3, 4, 5 2/2, 6 0/2.
+
+| Run | Sign in | Add to cart and check out | Change profile (planted bug 8) |
+|---|---|---|---|
+| 1 (391a69ad) | passed, 3 calls | passed, 12 calls (learned) | failed, 12 calls (failure saved) |
+| 2 (89f1b3b3) | passed, 1 call | **replayed, 0 calls** | still failing by replay, 0 calls |
+| 3 (c6685a83) | passed, 4 calls | **replayed, 0 calls** | still failing by replay, 0 calls |
+| 4 (8c8ae856) | **replayed, 0 calls** | **replayed, 0 calls** | **rechecked by the agent**, 9 calls: still fails |
+
+- **D98 fix 1 works:** "Sign in" never failed on a signed-in run. In runs 1–3 the agent passed it
+  by checking the signed-in state; a check with no action saves no script, so it was re-checked
+  (1–4 calls) until a run's episode left a replayable step.
+- **D98 fix 2 works:** checkout's checks were all on its final page, so its replay passed in
+  every later run (run 7's version re-learned it every run).
+- **The recheck works as designed:** the known failure cost no model call in runs 2 and 3 and
+  went back to the agent in run 4, which confirmed it (a real bug, so it stays found).
+- Clean shop, 3 confirmed reports, all real behaviour of the clean build: quantity 0 is added
+  (the owner's open question since run 4), a reload empties the cart (open since run 3), a long
+  search hides the search box (first seen in run 7).
+
+## Run 8, N3: Haiku 5.5, 8 runs per app (benchmark v2, claude-cli)
+
+Results `d304f3ce` and `7a05a19d` (both commit 447c7fc, identical settings: 480 s, 40 steps, no
+flows, holdout first, judge ollama/gemma4:12b; 4 buggy + 1 clean run per app each). No usage
+limit; est. $0.10 per run.
+
+| Bug (judgement only) | Found in 8 runs | Note |
+|---|---|---|
+| Shop 5. Cart total ignores quantity | 7 | with D96's fix, replay keeps it |
+| Shop 6. Invalid email at checkout | 1 | checkout is rarely reached with a valid cart in 40 steps |
+| Shop 7. Discount twice | 2 | needs a double click on Apply with a code |
+| Shop 8. Save changes does nothing | 4 | |
+| Shop 9. $NaN | 7 | |
+| Shop 10. Long name on mobile | 0 | the product with the long name is rarely opened at phone width |
+| Shop 11. Session after logout + reload | 0 | the benchmark runs signed in with a saved login; logout is denied |
+| Shop 12. Wrong-password error placement | 0 | a signed-in run rarely goes back to the login page to try a wrong password |
+| Shop 13. Wrong order opened | 8 | |
+| Holdout 3. One night charged | 7 | |
+| Holdout 4. Check-out before check-in | 5 | |
+| Holdout 5. Double-click Book now | 8 | |
+| Holdout 6. Room name on mobile | 0 | found 1–2 times in earlier runs; a layout check at phone width |
+
+Pooled: shop 40% (29 of 72; Wilson 30–52%), holdout 62% (20 of 32; Wilson 45–77%). Bug 11 can't be triggered on a signed-in run (logout is denied, run 4) and bug 12 rarely is;
+without those two the shop is 29 of 56 (52%). The clean shop's reports (3 in part A, 1 in part B) are the same real
+behaviours as N2: a reload empties the cart, quantity 0 is added, a search hides the search box.
+
+## Run 8, N4: real-world v1, Haiku 5.5 on IT-Tools (claude-cli)
+
+Commit 447c7fc, 480 s, 40 steps, judge ollama/gemma4:12b, start on the feature's page. 10 runs;
+a usage limit stopped the rest. Every miss, read from the saved steps:
+
+| Bug | Runs | Why it was missed |
+|---|---|---|
+| IT-1 `IVX`/`IIII` accepted | 3 | Run 1 typed `IIII`, got `4`, wrote that it "should be rejected or flagged", and didn't report it. Runs 2–3 only tried non-Roman letters (`ABC` → `NaN`), which all three reported: same root cause and fix, judged a different bug. |
+| IT-2 IPv4 input read-only | 3 | The read-only field made Playwright's fill time out. Two runs hit it (one six times) and blamed their tool; one never reached the real field (stale element ids). |
+| IT-4 favorite button | 3 | Never clicked the heart; explored token options and mobile layout. |
+| IT-5 lower-case secret | 1 | Typed a lower-case secret, saw "Secret should be a base32 string", and trusted the app: reported that codes still show for an "invalid" secret. |
+
+Patterns: **reached but not reported** (4 of 10 runs) is the main loss, not exploration. Two
+fixes are cheap and general: turn a fill timeout on a visible input into "this input did not
+accept typing", and act on the agent's own "should be rejected" reasoning after an `ok`. The
+third (IT-5) needs domain knowledge (base32 is case-insensitive): a bigger model or a spec.
+
+**The other 8 runs (same afternoon, on the owner's go-ahead):** IT-5 ×2 reached the bug and read
+it the same wrong way as run 1. RA-1 ×3 never opened "Add filter → Remove all filters"; RA-2 ×3
+never opened an order from page 2. On react-admin every run typed injection-style text into the
+orders search first, which left the list filtered, then reported tabs and paging "doing nothing".
+Final: 0 of 18 found, 6 reached (IT-Tools), 12 never. React-admin's data is regenerated on every
+page load, so most of its reports couldn't be replayed.

@@ -1278,3 +1278,96 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Measured?** Not separately: the Sonnet benchmark in M6 ran on the code before these fixes, so
   Haiku and Sonnet compare on the same code. The fixes have tests; their effect on a benchmark is
   the next measurement ("Needs me").
+
+## D99. Key safety before the first API call (run 8, N0)
+- **What was checked (counts only, nothing printed):** `.env` and `.env.prod` are git-ignored
+  (`.gitignore` lines 16 and 46). Three tracked files contain the prefix `sk-ant-`: the redaction
+  code and two tests. One has a key-shaped string (29 characters, a fake fixture in
+  `test_safety.py`); the real key (106 characters) is in no tracked file and in no commit of any
+  branch (`git log --all -p` compared in a script that printed only true/false).
+- **The leak that existed:** `run_cli` started `claude -p` with the worker's whole environment.
+  pydantic-settings reads `.env` without exporting it, so in practice the key wasn't there, but
+  anything that exports `.env` (a dotenv loader, a shell `set -a`, a future process manager)
+  would have made every claude-cli run bill the API key instead of the Pro plan, silently.
+  Now `run_cli` passes `cli_environment()`: this process's environment without
+  `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` (tests: a pure one, and a real `/usr/bin/env`
+  subprocess started by `run_cli` with both set in the parent).
+- **A guard test** fails if any tracked file holds `sk-ant-` followed by 40 or more key
+  characters (real keys are ~100; the fixtures are short). It reports file names, never matches.
+- **Proof on the real CLI** (`scripts/cli_billing_check.py`): with the key deliberately put into
+  the parent process's environment, one Haiku call through `ClaudeCliClient` (stream-json, same
+  stripped environment) reported `apiKeySource: "none"` (the owner's login), model
+  `claude-haiku-5-5`, charged $0, API-equivalent $0.0012.
+- **Alternative considered:** pass an allow-list environment (HOME, PATH, ...) to the CLI.
+  Rejected: the CLI needs variables we don't control (its config dir, proxies, locale); a
+  deny-list of the two credentials is exact for the risk and keeps the CLI working.
+- **Not done:** a control call *with* the key, to see the CLI report `ANTHROPIC_API_KEY`: it
+  would spend API credit to prove what the CLI documents.
+
+## D100. The API path, first real calls (run 8, N1)
+- **What was checked:** one short Haiku run (12 steps) with `LLM_PROVIDER=claude`, then one
+  benchmark v2 (result `6dc913ac`, commit b5aaf9b). Tool use with `strict` schemas, prompt caching
+  (tools + system prompt cached; reads on every step after the first model call, ~70% of input
+  tokens per run) and the recorded cost (equal to the token counts at `pricing.py`'s list prices,
+  which match Anthropic's table for Haiku 5.5: $0.10 / $0.50, cache read $0.01, 5-minute write
+  $0.125) all worked as written in run 1. No code change was needed.
+- **Left as it is (decided without the owner):** `ClaudeClient.decide` sends the server-side
+  refusal fallback (`fallbacks: "default"`). Haiku 5.5 has no fallback model, so for Haiku it does
+  nothing (a declined request stays declined; the docs say "default" isn't rejected, and no call
+  was). It still helps a Sonnet or Opus agent. Alternative: send it only for models with a
+  fallback. Not worth a model list in the client for a no-op.
+- **Thinking:** Haiku 5.5 thinks adaptively by default (effort `medium`, sent explicitly);
+  thinking is billed as output tokens and is included in the recorded cost.
+- **Cost, real vs. estimated:** $0.013–0.019 charged per API run, against run 7's claude-cli
+  estimate of ~$0.10 per run for the same model and benchmark. The CLI's estimate is the cost of
+  Claude Code's own calls (its large system prompt, written to a 1-hour cache at 2× input price,
+  ~9k cached tokens per call); our API client sends only our prompt and caches it for 5 minutes.
+  So the claude-cli estimates overstated what a customer would pay by about 6×.
+
+## D101. Measuring the flow fixes and the recheck with 4 shop runs (run 8, N2)
+- **Decision:** `bench --holdout-first --flows --runs 4` (shop 4 + clean, holdout 2 + clean)
+  instead of run 7's 3 shop runs. A failing journey goes back to the agent on its 3rd run after
+  the one that saved it, i.e. the 4th shop run of a fresh benchmark: with 3 runs the recheck
+  would never have run inside the measurement. Cost: one more claude-cli run (8 instead of 7).
+- **Comparability:** recall is a mean per run, so 4 runs compare with run 7's 3 as well as any
+  two small samples do (see the intervals in N3). The holdout part is unchanged.
+- **The recheck rule (decided without the owner, the owner's goal named the behaviour):** every
+  3rd run, or when the replay's result text changes. Alternatives: a time interval (runs aren't
+  regular), or a random share of runs (not reproducible in a test). Counting replays keeps the
+  model cost of a stuck failure to one episode per three runs.
+
+## D102. Real-world benchmark: what was decided without the owner (run 8, N4)
+- **Apps:** IT-Tools and react-admin's e-commerce demo (`docs/REAL_WORLD.md` says why, and what
+  else was considered). Both run fully on this Mac from a clone at a commit.
+- **Start page:** each run starts on the page of the feature with the bug, with no focus text
+  and no description. Alternative: the app's home page. Rejected for IT-Tools (80 tools: 40 steps
+  would mostly measure whether the right tool happens to be opened). Revisit: a home-page variant
+  would measure exploration as well as recognition.
+- **Third-party requests:** the apps' own requests for web fonts and a login background (Google
+  Fonts, Unsplash) are allowed, as for any customer site; the agent's navigation can't leave
+  the local app (the navigation guard). Alternative: block every non-local request for these
+  runs. Not done: one more mode in the network guard for an asset request that changes nothing
+  the agent tests.
+- **Dropped bugs:** IT-3 and RA-3 don't reproduce as reported (reasons in REAL_WORLD.md). IT-3
+  was replaced by the reserve IT-5; RA-3 was not replaced (time), so react-admin has 2 bugs.
+- **Local apps:** `LOCAL_APP_URLS` adds the apps' URLs to "our own local apps" only when
+  `DEV_MODE=true` (tested), the same rule as the demo shops.
+- **Toolchain:** react-admin's demo at these commits needs Node 20 (forced to arm64); the system
+  Node 20 is used rather than changing the user's Node setup.
+
+## D103. Real-world results: the usage limit, scoring and what to fix (run 8, N4)
+- **Usage limit:** a claude-cli usage-limit message arrived during IT-5's second run. As the run
+  rules say, every model run stopped at once and nothing was retried; IT-5 runs 2–3, RA-1 and RA-2
+  are left for the owner. The rest of run 8 (docs, hand checks, tests, PR) needed no model.
+- **Reached is hand-checked:** the automatic rule said 7 runs reached the trigger; reading every
+  step gave 4. The docs report the hand-checked number and keep the rule's in a side column.
+  Alternative: tighten the rule now. Not done: one rule per bug tuned after seeing the runs would
+  be fitted to these 10 runs.
+- **Strict scoring kept:** IT-1's "ABC → NaN, no error" shares the reported bug's root cause and
+  fix but not its symptom; the judge said no and the score stays 0. Changing what counts is the
+  owner's call (in "Needs me").
+- **No agent change tonight:** the two blind spots (a fill timeout on a read-only input treated as a
+  tool error; the agent's own "should be rejected" not reported) have clear fixes, but measuring
+  them needs model runs, and the usage limit had stopped those. Written up for the owner.
+- **Resumed (later on 2026-11-17):** the owner said to resume the model runs; IT-5 ×2, RA-1 ×3
+  and RA-2 ×3 ran on the same commit and settings with no limit message. Final: 0 of 18 found.

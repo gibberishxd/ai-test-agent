@@ -56,3 +56,22 @@ def test_specs_are_off_by_default_until_measured_and_bench_specs_turns_them_on()
     assert on.use_specs is True and settings.use_specs is False  # a copy, not a change
     assert settings_for(settings, SimpleNamespace(command="bench", specs=False)).use_specs is False
     assert settings_for(settings, SimpleNamespace(command="run")).use_specs is False
+
+
+def test_local_apps_count_as_our_own_only_in_dev_mode():
+    """Run 8, N4: open-source apps started on this Mac for the real-world benchmark."""
+    urls = "http://localhost:5301, http://localhost:5302"
+    dev = settings(dev_mode=True, local_app_urls=urls)
+    assert "http://localhost:5301" in dev.demo_urls()
+    assert "http://localhost:5302" in dev.demo_urls()
+    production = settings(dev_mode=False, local_app_urls=urls)
+    assert "http://localhost:5301" not in production.demo_urls()
+
+
+def test_no_local_apps_by_default():
+    assert settings(dev_mode=True).demo_urls() == [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:5176",
+    ]

@@ -1,0 +1,274 @@
+{
+  "_comment": "Run 8, N4: the real-world benchmark's answer key. Real bugs from public issue trackers, each fixed in an identifiable commit; the app runs at the fix's parent. Never shown to the agent (claude-cli runs outside this repo). See docs/REAL_WORLD.md.",
+  "apps": {
+    "it-tools": {
+      "repo": "https://github.com/CorentinTh/it-tools.git",
+      "license": "GPL-3.0",
+      "install": [
+        "corepack",
+        "pnpm@8.15.3",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "start": [
+        "corepack",
+        "pnpm@8.15.3",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+        "--port",
+        "{port}"
+      ],
+      "start_dir": "."
+    },
+    "react-admin": {
+      "repo": "https://github.com/marmelab/react-admin.git",
+      "license": "MIT",
+      "install": [
+        "arch",
+        "-arm64",
+        "corepack",
+        "yarn",
+        "install"
+      ],
+      "start": [
+        "arch",
+        "-arm64",
+        "corepack",
+        "yarn",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+        "--port",
+        "{port}"
+      ],
+      "start_dir": "examples/demo",
+      "env": {
+        "REACT_APP_DATA_PROVIDER": "rest",
+        "YARN_ENABLE_IMMUTABLE_INSTALLS": "false"
+      },
+      "node_bin": "/usr/local/bin",
+      "_node": "vite.config.ts imports package.json with `assert { type: 'json' }`, which Node 22+ rejects: the system Node 20 (universal binary), forced to arm64 to match the native modules installed."
+    }
+  },
+  "bugs": [
+    {
+      "id": "IT-1",
+      "app": "it-tools",
+      "port": 5301,
+      "issue": "https://github.com/CorentinTh/it-tools/issues/274",
+      "fix_commit": "8930e139b28f",
+      "start_path": "/roman-numeral-converter",
+      "page": "/roman-numeral-converter",
+      "title": "Roman numeral converter accepts invalid numerals",
+      "description": "Roman to Arabic: entering an invalid Roman numeral such as 'IVX' (or 'IXX') shows a number ('4') instead of rejecting it as invalid.",
+      "reach": {
+        "path": "/roman-numeral-converter",
+        "any_text": [
+          "roman",
+          "arabic"
+        ],
+        "actions": [
+          "type"
+        ]
+      }
+    },
+    {
+      "id": "IT-2",
+      "app": "it-tools",
+      "port": 5302,
+      "issue": "https://github.com/CorentinTh/it-tools/issues/402",
+      "fix_commit": "7aed9c56fd06",
+      "start_path": "/ipv4-address-converter",
+      "page": "/ipv4-address-converter",
+      "title": "IPv4 address converter input can't be edited",
+      "description": "On the IPv4 address converter, the IPv4 address input is read-only: the user can't change the example address.",
+      "reach": {
+        "path": "/ipv4-address-converter",
+        "any_text": [
+          "ip"
+        ],
+        "actions": [
+          "type",
+          "click"
+        ]
+      }
+    },
+    {
+      "id": "IT-3",
+      "app": "it-tools",
+      "port": 5303,
+      "issue": "https://github.com/CorentinTh/it-tools/issues/652",
+      "fix_commit": "02b0d0d1a13c",
+      "start_path": "/encryption",
+      "page": "/encryption",
+      "title": "Choosing RC4 in the decrypt panel makes the panel disappear",
+      "description": "Encrypt / decrypt text: selecting RC4 as the algorithm in the Decrypt section makes the whole decrypt section disappear.",
+      "reach": {
+        "path": "/encryption",
+        "any_text": [
+          "rc4"
+        ],
+        "actions": [
+          "select",
+          "click"
+        ]
+      },
+      "dropped": "The reported symptom (the Decrypt panel disappears) does not reproduce at the fix's parent in headless Chromium: choosing RC4 throws an uncaught 'Malformed UTF-8 data' error, the choice doesn't apply and the dropdown stays open, but the panel stays. Replaced by IT-5 (reserve)."
+    },
+    {
+      "id": "IT-4",
+      "app": "it-tools",
+      "port": 5304,
+      "issue": "https://github.com/CorentinTh/it-tools/issues/1365",
+      "fix_commit": "ae1363937bf3",
+      "start_path": "/token-generator",
+      "page": "/token-generator",
+      "title": "Favorite button on a tool page does nothing",
+      "description": "On a tool's page, clicking the favorite button does not add the tool to the favorites (it works from the home page only).",
+      "reach": {
+        "path": "",
+        "any_text": [
+          "favorite",
+          "favourite"
+        ],
+        "actions": [
+          "click"
+        ]
+      }
+    },
+    {
+      "id": "IT-5",
+      "app": "it-tools",
+      "port": 5305,
+      "issue": "https://github.com/CorentinTh/it-tools/issues/283",
+      "fix_commit": "7c40539ef9b4",
+      "start_path": "/otp-generator",
+      "page": "/otp-generator",
+      "title": "OTP generator rejects a lower-case secret",
+      "description": "OTP code generator: a lower-case base32 secret (e.g. 'abcd', as some services give them) is rejected with 'Secret should be a base32 string' and a wrong hexadecimal secret; the same secret in upper case works. Base32 is case-insensitive, so lower case should be accepted.",
+      "reach": {
+        "path": "/otp-generator",
+        "any_text": [
+          "secret"
+        ],
+        "actions": [
+          "type"
+        ]
+      },
+      "install": [
+        "corepack",
+        "pnpm@7.33.0",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "start": [
+        "corepack",
+        "pnpm@7.33.0",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+        "--port",
+        "{port}"
+      ]
+    },
+    {
+      "id": "RA-1",
+      "app": "react-admin",
+      "port": 5311,
+      "issue": "https://github.com/marmelab/react-admin/issues/10192",
+      "fix_commit": "5fa05d4ba037454a5a1256748c48983ce3794f5c",
+      "start_path": "/#/orders",
+      "page": "/",
+      "title": "Clearing all filters on the orders list empties the list",
+      "description": "Orders list: choosing 'clear all filters' (in the 'add filter' menu) shows no orders at all instead of all orders.",
+      "reach": {
+        "path": "orders",
+        "any_text": [
+          "clear",
+          "remove all filters",
+          "filter"
+        ],
+        "actions": [
+          "click"
+        ]
+      }
+    },
+    {
+      "id": "RA-2",
+      "app": "react-admin",
+      "port": 5312,
+      "issue": "https://github.com/marmelab/react-admin/issues/10136",
+      "fix_commit": "22dae61e51a880e9160cb7083f64d04849c04f78",
+      "start_path": "/#/orders",
+      "page": "/",
+      "title": "Previous/next buttons show the wrong position after paging",
+      "description": "Opening a record from the second (or a later) page of a paginated list: the previous/next navigation on the record page shows the wrong index (it ignores the page number).",
+      "reach": {
+        "path": "orders/",
+        "any_text": [
+          "next page",
+          "page 2",
+          "go to page 2",
+          "next"
+        ],
+        "actions": [
+          "click"
+        ]
+      }
+    },
+    {
+      "id": "RA-3",
+      "app": "react-admin",
+      "port": 5313,
+      "issue": "https://github.com/marmelab/react-admin/issues/9468",
+      "fix_commit": "2bed8b2244a9d25ecf227e58f857639b7edc5e26",
+      "start_path": "/#/products",
+      "page": "/",
+      "title": "Tabs of an edit form beyond the first can't be opened",
+      "description": "Edit page with tabs (a product): clicking a tab other than the first keeps showing the first tab, and the URL keeps growing with the clicked tab's index.",
+      "reach": {
+        "path": "products/",
+        "any_text": [
+          "details",
+          "description",
+          "reviews",
+          "tab"
+        ],
+        "actions": [
+          "click"
+        ]
+      },
+      "prepare": [
+        {
+          "dir": "packages/ra-core",
+          "command": [
+            "arch",
+            "-arm64",
+            "corepack",
+            "yarn",
+            "build"
+          ]
+        },
+        {
+          "dir": "examples/data-generator",
+          "command": [
+            "arch",
+            "-arm64",
+            "corepack",
+            "yarn",
+            "build"
+          ]
+        }
+      ],
+      "_prepare_why": "at this commit the demo imports data-generator-retail from its built dist/, which needs ra-core's types",
+      "dropped": "Does not reproduce: at the fix's parent the demo's own yarn.lock resolves react-router 6.2.1, and the bug came with react-router 6.19+, which users got from fresh installs (the fix pins react-router below 6.19). The tabs work in the repo's demo. No replacement (time)."
+    }
+  ]
+}
