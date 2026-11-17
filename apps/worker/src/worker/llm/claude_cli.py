@@ -341,11 +341,15 @@ def outside_repo(folder: Path) -> None:
     Checked before every call: the CLI's file tools reach its working folder and --add-dir,
     and the repo holds the demo apps' bug lists, which would spoil the benchmark.
     """
-    from worker.config import REPO_ROOT
+    from worker.config import REPO_ROOT, realworld_dir
 
     folder, repo = folder.resolve(), REPO_ROOT.resolve()
     if folder == repo or repo in folder.parents or folder in repo.parents:
         raise RuntimeError(f"claude-cli refused: {folder} is inside the repo or contains it")
+    # Run 8, N4: the real-world apps' clones hold their fix commits (the answer key).
+    apps = realworld_dir().resolve()
+    if folder == apps or apps in folder.parents or folder in apps.parents:
+        raise RuntimeError(f"claude-cli refused: {folder} is in the real-world apps' folder")
 
 
 def _tool_instructions(tools: list[ToolSpec]) -> str:

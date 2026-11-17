@@ -40,6 +40,10 @@ def test_prompt_and_tools_know_nothing_about_the_demo_apps():
     # every tester looks for those.)
     specifics = {"save10", "wool socks", "desk lamp", "ceramic mug", "localhost", "5173", "5175"}
     specifics |= {bug["title"].lower() for bug in planted}
+    # Run 8, N4: the real-world benchmark's apps and bugs (apps/realworld/bugs.json).
+    real = json.loads((REPO_ROOT / "apps" / "realworld" / "bugs.json").read_text(encoding="utf-8"))
+    specifics |= {bug["title"].lower() for bug in real["bugs"]}
+    specifics |= {"it-tools", "react-admin", "posters galore", "rc4", "roman numeral", "otp"}
     assert [s for s in specifics if s in text] == []
 
 

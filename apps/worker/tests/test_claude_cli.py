@@ -220,3 +220,16 @@ def test_an_ordinary_finish_is_taken_as_it_is(summary):
     cli = FakeCli(json.dumps({"name": "finish", "arguments": {"summary": summary}}))
     decision = ClaudeCliClient(run=cli).decide("s", "o", [CLICK, FINISH])
     assert decision.tool_call.name == "finish" and len(cli.calls) == 1
+
+
+def test_every_call_refuses_a_folder_inside_the_real_world_apps(tmp_path, monkeypatch):
+    """Run 8, N4: the real-world apps' clones hold their fix commits (the answer key)."""
+    import pytest
+
+    apps = tmp_path / "realworld"
+    (apps / "it-tools-IT-1").mkdir(parents=True)
+    monkeypatch.setenv("REALWORLD_DIR", str(apps))
+    cli = FakeCli([])
+    with pytest.raises(RuntimeError, match="real-world"):
+        ClaudeCliClient(run=cli, temp_dir=apps / "it-tools-IT-1").complete("hi")
+    assert cli.calls == []
