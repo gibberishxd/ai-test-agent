@@ -192,9 +192,135 @@ should come back to the agent as "this input did not accept typing", not as a to
 agent's own "should be rejected" reasoning after an unexpected `ok` result should make it report.
 The matcher question (same root cause, different symptom) is the owner's call.
 
+## Stronger models (2026-11-18)
+
+**Question:** is the 0 of 18 a Haiku problem? Same six bugs, same agent code, prompt, settings and
+judge; only the agent model changes. Paid from the owner's Anthropic API credits (budget $3.50,
+at most $0.80 per run), so Sonnet and Opus ran through the **real Claude API**
+(`LLM_PROVIDER=claude`), not claude-cli. The helper model stayed `claude-haiku-5-5`, as in the
+Haiku runs. Commit 152ef1c (agent code identical to 447c7fc), 40 steps / 480 s, start on the
+feature's page, judge `ollama/gemma4:12b`. All six bugs re-checked first with their scripted
+checks: all still reproduce. Raw rows: `apps/realworld/results.jsonl` (13 new lines).
+
+**Order and budget:** one Sonnet run on IT-1 to measure cost ($0.183), then Sonnet on the other
+five, a second Sonnet round on all six, then Opus on Sonnet's misses, hardest first (IT-1, IT-5,
+IT-4, ...). Before each run a script read the charged cost of every Claude API run of the session
+from the app's own records, set the run's cap to min($0.80, $3.50 − spent − $0.05) and started
+only if that cap was at least 2× (Sonnet) or 1.5× (Opus) the model's average run so far. Opus cost twice what was
+planned, so it got **one run** (IT-1); after it $0.47 was left, too little for a second Opus run
+($0.78 each).
+
+### Results per bug (hand-checked)
+
+Found / reached the trigger but didn't report it / never reached. "Found" is strict, as for Haiku:
+the reporter's symptom (see "Judge" below).
+
+| Bug | Haiku 5.5 (claude-cli) | Sonnet 5.5 (API) | Opus 5.5 (API) |
+|---|---|---|---|
+| IT-1 Roman numerals accept invalid numerals | 3 runs: 0 / 1 / 2 | 2 runs: 0 / 0 / 2 | 1 run: 0 / 1 / 0 |
+| IT-2 IPv4 input can't be edited | 3 runs: 0 / 2 / 1 | 2 runs: 0 / 2 / 0 | not run |
+| IT-4 favorite button on a tool page | 3 runs: 0 / 0 / 3 | 2 runs: 0 / 0 / 2 | not run |
+| IT-5 lower-case OTP secret rejected | 3 runs: 0 / 3 / 0 | 2 runs: 0 / 0 / 2 | not run |
+| RA-1 "Remove all filters" empties the list | 3 runs: 0 / 0 / 3 | 2 runs: 0 / 0 / 2 | not run |
+| RA-2 prev/next position wrong after paging | 3 runs: 0 / 0 / 3 | 2 runs: 0 / 0 / 2 | not run |
+| **Total found** | **0 of 18 (Wilson 95%: 0–18%)** | **0 of 12 (0–24%)** | **0 of 1 (0–79%)** |
+| Reached, not reported | 6 of 18 (16–56%) | 2 of 12 (5–45%) | 1 of 1 (21–100%) |
+| Automatic "reached" rule said | 12 | 8 | 1 |
+
+All three models together: **0 of 31 runs found a listed bug (0–11%)**. Stronger models did not
+change the result. Sonnet got *less* far than Haiku (it reached the trigger in 2 of 12 runs
+against 6 of 18), mostly because it stops early (below).
+
+**Judge:** the judge matched two reports to IT-1: Sonnet run 406ca352's and Opus run fe2581ce's
+"Roman to arabic shows NaN for invalid input ABC". It said **no** to the same report in all three
+Haiku runs. `ABC` is not a numeral made of Roman letters; it has the reported bug's root cause and
+fix (8930e139 adds Roman-numeral validation), not the reporter's symptom (`IVX` → `4`). To keep
+the models comparable, both are scored like Haiku's: not found. The column "found, not in our
+list" below counts them. The judge being inconsistent on near-identical reports is itself a
+result: gemma4:12b is a noisy judge for same-root-cause reports.
+
+### Why each run missed (read from the saved steps, no model)
+
+Sonnet 5.5:
+- IT-1, 96fa2403: **wrong input**: typed `MCMXCIV`, `ABC`, `4000`, `-5`; never a wrong combination
+  of Roman letters. Reported "4000 gives MMMM" (real, see below).
+- IT-1, 406ca352: **wrong input**: same set (`ABC`, `4000`, `4001`, `-5`); reported `ABC` → NaN
+  (judge yes, scored no, see above).
+- IT-2, e5b817fe: **didn't see the element**: its one fill on the real field timed out (the
+  read-only bug), then the field was missing from its element list and it spent 30 steps
+  scrolling and reloading to find it, until the step limit.
+- IT-2, 9c691637: **didn't see the element**: the same; it ended with "the input can't be
+  targeted, so there's nothing more I can test", the bug described as its own limitation.
+- IT-4, 30895abc and 06e06875: **wrong input**: never clicked the heart; clicked the Refresh
+  button and nav links. The first was ended by the loop detector, the second finished after 23
+  steps "as I judged the remaining budget better left unspent".
+- IT-5, f2084e08 and 74ffdfb4: **wrong input**: typed `!!!invalid 1`, an empty secret and the
+  upper-case `JBSWY3DPEHPK3PXP`; never a lower-case secret.
+- RA-1, 24a5e302 and 9aaf3549: **wrong input**: never opened "Add filter"; tested tabs, a customer
+  form and an order page, then finished after 16–17 steps.
+- RA-2, 5d5c5414 and 7962561f: **wrong input**: never paged and then opened an order; went to
+  customer pages, then finished after 14–23 steps "to conserve the budget".
+
+Opus 5.5:
+- IT-1, fe2581ce: **didn't notice**: it typed `IIII`, saw `4`, and its reasoning for that step
+  was "Invalid roman numeral should be rejected with an error"; then it typed `ABC` and reported
+  that instead. The same miss as Haiku's run fce7cc68. Before that it lost ~20 steps switching
+  between mobile and desktop, because IT-Tools' sidebar links fill the agent's 80-element list
+  and push the converter's inputs out of it (**didn't see the element**).
+
+**What changed with a stronger model:** the plans got better: Sonnet and Opus tested boundary
+values and wrote precise expectations. The failures did not change: the same blind spots as Haiku's
+(a timed-out fill on a read-only input read as a tool problem; its own "should be rejected" not
+turned into a report), plus one new one. **Sonnet stops early:** a median of 17 agent steps out of
+40 (10–40, 70–166 s), where Haiku used 26–40 (≈340 s). Its finish reasons cite the budget
+("to conserve the budget", "remaining budget better left unspent"). With half the steps unused,
+none of its RA-1, RA-2 or IT-4 runs got to the trigger.
+
+### Other reports, checked by hand
+
+**Found, not in our list (real):**
+
+| Real bug | How it was confirmed | Haiku | Sonnet | Opus |
+|---|---|---|---|---|
+| IT-Tools Roman → Arabic: `ABC` shows `NaN`, no error | the fix 8930e139 adds Roman-numeral validation | 3 runs | 1 run | 1 run |
+| IT-Tools Arabic → Roman: numbers above 3999 accepted (`4000` → `MMMM`, `5000` → `MMMMM`) | the same fix adds the 1–3999 range check, with a test for 4000 | 0 | 2 runs | 1 run |
+| react-admin demo: an `&` in the orders search (`Tom & Jerry`) breaks the list with "Unterminated string in JSON" | reproduced by hand at the fix's parent; `+`, `#`, quotes alone are fine | 5 runs (console errors, same message) | 1 run | 0 |
+| react-admin demo: a customer's "N orders" link counts all orders but opens the list filtered to `delivered` | the source (`visitors/Aside.tsx`), unchanged upstream; may be intended | 0 | 1 run | 0 |
+
+None of these was checked against the trackers. The two react-admin ones are in the demo app (the
+`&` one in its fake REST layer), not in the framework.
+
+**Not real or not confirmed:** a clipboard `NotAllowedError` (headless Chromium has no clipboard
+permission: our environment); the blocked Unsplash image (`ERR_BLOCKED_BY_ORB`: our network
+guard); axe accessibility rules (real but generic, not counted); "OTP codes still shown for an
+invalid secret" (unchanged upstream: the app's design); Sonnet's "Delivered tab shows 1-25 of 27"
+(did not reproduce in three tries by hand: read before the list loaded); "invalid email gives no
+error" (the browser's own validation bubble, which a screenshot doesn't show); mobile overflow on
+the order page and the IT-Tools sidebar covering the page at 375 px (layout, not checked).
+
+### Cost
+
+| | Runs | Cost per run (range) | Total | Real-bug finds (verified; run × bug) | Cost per find | Distinct real bugs | Cost per distinct real bug |
+|---|---|---|---|---|---|---|---|
+| Haiku 5.5 (claude-cli, API-equivalent estimate, $0 charged) | 18 | $0.13 ($0.09–0.16) | est. $2.27 | 8 | est. $0.28 | 2 | est. $1.13 |
+| Sonnet 5.5 (API, charged) | 12 | $0.18 ($0.09–0.37) | **$2.199** | 5 | $0.44 | 4 | $0.55 |
+| Opus 5.5 (API, charged) | 1 | $0.78 | **$0.779** | 2 | $0.39 | 2 | $0.39 |
+
+A find is one run reporting one real bug in a verified report (a report can cover two: Sonnet's
+406ca352 named `ABC` → NaN and `4001` together).
+
+**Total API spend this session: $2.977** of $3.50 (the app's own charged-cost records; no
+usage, credit or billing message appeared). The Haiku row is claude-cli's list-price estimate,
+which assumes 1-hour cache writes; on the real API Haiku costs about $0.02 a benchmark run (run 8).
+Opus cost 4.3× Sonnet per run, not the 2× the prices suggest: it used every step (40, ending at
+221 s) and wrote about 3× the output tokens of Sonnet's IT-1 runs (10.4k against 3.5k).
+
 ## Honest limits
 
 - **Small:** 18 runs over 6 bugs in 2 apps; 0 of 18 means "probably under ~18%", not "zero".
+- **Stronger models, smaller samples:** Sonnet 12 runs (2 per bug), Opus 1 run (IT-1 only).
+  Sonnet and Opus ran through the API, Haiku through claude-cli: same prompt and tools, different
+  transport (the CLI may set its own defaults); the API agent call uses effort `medium`.
 - **The start page helps:** each run starts on the feature's page (D102); from the home page it
   would be harder.
 - **The automatic "reached" rule over-counts** (12 vs 6 by hand); use the hand-checked column.
@@ -202,4 +328,5 @@ The matcher question (same root cause, different symptom) is the owner's call.
   counts as not found.
 - **react-admin's random data** breaks our replay, so verified reports there are few.
 - **Not checked against the trackers:** whether the other reports are real, known bugs.
-- **One model:** Haiku 5.5 through claude-cli only.
+- **Judge noise:** gemma4:12b matched `ABC → NaN` for Sonnet and Opus but not for Haiku; the
+  hand-check column is the one to trust.

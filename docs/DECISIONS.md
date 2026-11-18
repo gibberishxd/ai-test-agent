@@ -1371,3 +1371,24 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   them needs model runs, and the usage limit had stopped those. Written up for the owner.
 - **Resumed (later on 2026-11-17):** the owner said to resume the model runs; IT-5 ×2, RA-1 ×3
   and RA-2 ×3 ran on the same commit and settings with no limit message. Final: 0 of 18 found.
+
+## D104. Real-world model comparison: Sonnet and Opus through the API (2026-11-18)
+- **Transport:** Sonnet 5.5 and Opus 5.5 ran through the real Claude API (`LLM_PROVIDER=claude`),
+  as the owner asked (credits, not the Pro limit); Haiku's rows are from claude-cli. Same prompt,
+  tools, settings and judge; the API agent call uses effort `medium`. Alternative: rerun Haiku
+  through the API too for a same-transport baseline. Not done: the owner's budget was for the
+  stronger models, and Haiku's misses are already explained step by step.
+- **Helper model stays Haiku** (`CHEAP_MODEL=claude-haiku-5-5`), as in the Haiku runs, so only
+  the agent model changes.
+- **Budget rule:** before each run, the charged cost of every API run of the session (from the
+  runs table) sets the cap to min($0.80, $3.50 − spent − $0.05); a run starts only if that cap
+  is at least 2× (Sonnet) or 1.5× (Opus) the model's average run so far. The per-run cap makes the
+  total impossible to pass. Opus cost $0.78, twice the estimate, so it got one run.
+- **Strict scoring over the judge:** the judge matched `ABC` → NaN to IT-1 for Sonnet (406ca352)
+  and Opus (fe2581ce) but said no to the same report from all three Haiku runs (D103). Scored as
+  not found for every model, so the columns compare; listed under "found, not in our list".
+  Alternative: accept the judge. Not done: one judge rule must apply to all models, and which
+  rule is the owner's matcher question.
+- **IT-Tools start command:** `arch -arm64` added to IT-Tools' install and start commands in
+  `bugs.json`. Started from the worker's Python, Node ran as x64 and found the arm64 esbuild
+  binary wrong. react-admin already had the same prefix. Harness only, no agent change.

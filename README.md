@@ -18,11 +18,11 @@ below.
 |---|---|---|
 | Demo shop, planted bugs that need judgement (recall, 95% interval) | 40% (30–52%), 8 runs | 48% (31–66%), 3 runs |
 | Holdout app, never used for tuning | 62% (45–77%), 8 runs | 50% (22–78%), 2 runs |
-| Real reported bugs in IT-Tools and react-admin (run locally) | **0 of 18 runs (0–18%)**; reached the bug in 6 and didn't report it | not run |
+| Real reported bugs in IT-Tools and react-admin (run locally) | **0 of 18 runs (0–18%)**; reached the bug in 6 and didn't report it | **0 of 12 runs (0–24%)**; reached it in 2 ($0.18 a run charged, real API). Opus 5.5: 0 of 1 ($0.78) |
 | Cost per benchmark run | **$0.016 charged** (real Claude API) | est. $1.4–1.7 (CLI, list-price estimate) |
 
 On the demos the differences between Claude setups are within noise; on real bugs exploration
-doesn't work yet. Details: [Real-world results](#real-world-results),
+doesn't work yet, and a stronger model doesn't fix it. Details: [Real-world results](#real-world-results),
 [Results at a glance](#results-at-a-glance), [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 | A verified report | Watching the agent work |
@@ -149,6 +149,20 @@ find real bugs.** In a third of the runs the agent got to the bug and didn't rep
 `IIII`, saw `4` and noted it "should be rejected"; it took a read-only input for its own tool
 failing; it trusted the app's wrong error message. On react-admin it never did the trigger. That
 "reached but not reported" gap is the main open problem.
+
+**Stronger models (2026-11-18, real Claude API, $2.98 charged):** same bugs, code and settings.
+
+| | Runs | Real bug found | Reached the bug, didn't report it | Cost per run |
+|---|---|---|---|---|
+| Haiku 5.5 | 18 | 0 (0–18%) | 6 | est. $0.13 (claude-cli; ≈$0.02 a run on the API in run 8's demo-shop runs) |
+| Sonnet 5.5 | 12 | 0 (0–24%) | 2 | $0.18 |
+| Opus 5.5 | 1 (IT-1) | 0 (0–79%) | 1 | $0.78 |
+
+The stronger models planned better tests but missed the same way. Opus typed `IIII`, saw `4`,
+wrote "should be rejected" and reported something else, exactly as Haiku did. Sonnet stopped
+early (a median of 17 of 40 steps) and so reached the trigger less often than Haiku. Between them they
+did turn up four real bugs that aren't in the answer key (two in IT-Tools' Roman converter, two
+in react-admin's demo); details in [`docs/REAL_WORLD.md`](docs/REAL_WORLD.md#stronger-models-2026-11-18).
 
 ## How it works
 

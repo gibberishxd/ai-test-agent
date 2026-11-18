@@ -155,6 +155,14 @@ Runs: shop 99bd8afb, 1b473b32, d63e628c, clean a345d91b; holdout d6ff4d1c, 55592
 28db5b07. The false alarms are real behaviour of the clean builds, not hallucinations (see
 Needs me). Per bug: `docs/MISS_ANALYSIS.md`.
 
+## Real-world model comparison (branch `real-world-models`, 2026-11-18)
+| Step | Status | Evidence |
+|---|---|---|
+| Reproduce | done | All six bugs (IT-1, IT-2, IT-4, IT-5, RA-1, RA-2) still reproduce with their scripted checks. IT-Tools' dev server needed `arch -arm64` (Node started from the worker's Python ran as x64), as react-admin already had: `bugs.json` only (D104). |
+| Sonnet 5.5, 2 runs per bug | done | Real Claude API, commit 152ef1c (agent code = 447c7fc). **0 of 12 found** (Wilson 0–24%); hand-checked 2 reached (both IT-2), 10 never. $0.18 a run ($0.09–0.37). Stops early: median 17 of 40 agent steps. |
+| Opus 5.5 on Sonnet's misses | done (1 run) | IT-1 only: **not found, reached** (typed `IIII`, saw `4`, reasoned "should be rejected", reported `ABC` → NaN instead). $0.78; a second run didn't fit the budget. |
+| Report | done | `docs/REAL_WORLD.md` "Stronger models": per-bug table, a reason per miss, four real bugs not in our list (hand-checked), cost per run and per real bug. **API spend $2.977 of $3.50**, no usage or billing message. README, D104. Apps stopped by PID. |
+
 ## Run 8 (branch `agent-v8`, plan in `docs/RUN_PLAN_8.md`)
 | Goal | Status | Evidence |
 |---|---|---|
@@ -250,7 +258,20 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
 ## Needs me
-0. **Run 8 (branch `agent-v8`, PR #13, not merged):**
+0. **Real-world model comparison (branch `real-world-models`, PR open, not merged):**
+   - **A stronger model is not the fix:** Sonnet 0 of 12, Opus 0 of 1, Haiku 0 of 18 on the real
+     bugs. The two blind spots below are the same for all three models; Opus repeated Haiku's
+     `IIII` miss step for step.
+   - **Sonnet stops early** (median 17 of 40 steps, finish reasons cite "the budget"). If Sonnet
+     is ever offered, a finish rule ("don't finish while untried charter techniques remain and
+     steps are left") is an agent-loop change, your call.
+   - **The 80-element list on IT-Tools:** the sidebar's links fill it and push the tool's own
+     inputs out (Opus lost ~20 steps, Sonnet's IT-2 runs never found the field again). Listing
+     the main content's elements first would help every model; agent-loop change, your call.
+   - **Judge noise:** gemma4:12b matched `ABC` → NaN for Sonnet and Opus but not for Haiku.
+     Scored strictly for all (D104); the matcher question below decides it.
+   - **Opus with more budget:** IT-5 and IT-4 were next (≈$0.80 a run, ≈$4.80 for all six).
+0. **Run 8 (branch `agent-v8`, PR #13, merged):**
    - **Study the 6 real-world runs that reached a real bug without reporting it**
      (`docs/REAL_WORLD.md`) before changing the agent.
    - **Two agent blind spots the real-world runs showed** (AI core, your call, D103): a fill that
