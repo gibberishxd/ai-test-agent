@@ -5,12 +5,16 @@
       "repo": "https://github.com/CorentinTh/it-tools.git",
       "license": "GPL-3.0",
       "install": [
+        "arch",
+        "-arm64",
         "corepack",
         "pnpm@8.15.3",
         "install",
         "--frozen-lockfile"
       ],
       "start": [
+        "arch",
+        "-arm64",
         "corepack",
         "pnpm@8.15.3",
         "exec",
@@ -161,12 +165,16 @@
         ]
       },
       "install": [
+        "arch",
+        "-arm64",
         "corepack",
         "pnpm@7.33.0",
         "install",
         "--frozen-lockfile"
       ],
       "start": [
+        "arch",
+        "-arm64",
         "corepack",
         "pnpm@7.33.0",
         "exec",
