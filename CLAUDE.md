@@ -85,10 +85,13 @@ Merged in PR #13 (2026-11-17).
 
 ## Current phase
 **Paused (2026-11-17).** The owner is focused on studies and a job search; nothing is in progress.
-Demo v1 and runs 2–8 are all merged into `main` (last: PR #13, run 8). The license is
-FSL-1.1-ALv2 since PR #10; versions up to commit 5faa299 were MIT. The normal "How to work with
-me" rules apply. Haiku 5.5 is the default agent (D91, D92).
+Demo v1 and runs 2–8 are all merged into `main` (run 8: PR #13), and so is the real-world model
+comparison (PR #15, 2026-11-18). The license is FSL-1.1-ALv2 since PR #10; versions up to
+commit 5faa299 were MIT. The normal "How to work with me" rules apply. Haiku 5.5 is the default
+agent (D91, D92); on the real bugs Sonnet 5.5 (0 of 12) and Opus 5.5 (0 of 1) did no better than
+Haiku (0 of 18), so the default stays (D104).
 
 **Next, when the owner resumes:** study the real-world runs where the agent reached a real bug
-and didn't report it (`docs/REAL_WORLD.md`, "What happened, run by run": 6 of 18 runs) before
-changing the agent. Other open items are under "Needs me" in `docs/PROGRESS.md`.
+and didn't report it (`docs/REAL_WORLD.md`: "What happened, run by run" and "Stronger models")
+before changing the agent. The blind spots are the same for every model. Other open items are
+under "Needs me" in `docs/PROGRESS.md`.
