@@ -269,3 +269,49 @@ def test_a_submit_the_browser_refuses_for_a_required_field_is_a_response(context
     assert diff.meaningful
     assert any("Guest name" in line for line in diff.validation)
     assert "browser refused to submit" in diff.summary()
+
+
+# --- Content revealed with CSS only (no text added to the DOM) -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("control", "text"),
+    [
+        ("Delivery options", "Standard delivery takes three to five working days."),  # height
+        ("Size guide", "Order one size up for a loose fit."),  # opacity and transform
+    ],
+)
+def test_text_revealed_with_css_counts_as_a_change(context, site_url, control, text):
+    page = context.new_page()
+    recorder = StateRecorder(page)
+    page.goto(f"{site_url}/reveal.html")
+    before = recorder.capture()
+    assert text in before.lines  # in the DOM text all along: the old diff saw no change
+    assert text not in before.visible
+    page.get_by_role("button", name=control).click()
+    recorder.settle()
+    diff = diff_states(before, recorder.capture())
+    assert diff.meaningful
+    assert diff.revealed == [text]
+    assert diff.added == []
+    assert "Text that became visible" in diff.summary()
+    assert any("hidden → shown" in change for change in diff.shown)
+
+
+def test_scrolling_doesnt_count_as_text_becoming_visible(context, site_url):
+    page = context.new_page()
+    page.set_viewport_size({"width": 800, "height": 200})
+    recorder = StateRecorder(page)
+    page.goto(f"{site_url}/reveal.html")
+    before = recorder.capture()
+    page.mouse.wheel(0, 600)
+    page.wait_for_timeout(200)
+    diff = diff_states(before, recorder.capture())
+    assert diff.revealed == [] and diff.concealed == [] and diff.shown == []
+    assert not diff.meaningful
+
+
+def test_a_dead_button_still_changes_nothing(context, site_url):
+    before, after = run_action(context, f"{site_url}/reveal.html", "#apply")
+    diff = diff_states(before, after)
+    assert not diff.meaningful

@@ -1510,3 +1510,46 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   noticed; a request sent by a service worker or another tab isn't seen. A form that posts
   to a third-party script before showing "Thanks" counts as sending, which is right: the
   data went somewhere.
+
+## D110. Seeing CSS-only changes, and a pixel check for "nothing happens" (2026-11-22)
+- **The false-alarm pattern:** content revealed with CSS (height, max-height, opacity,
+  visibility, display, transform) without a change to the page's text or accessibility tree
+  was reported as "clicking did nothing", and replay "confirmed" it, because both read the
+  same DOM text (`innerText` keeps text hidden by a zero height, opacity or a transform).
+- **(a) Perception:** the page state now includes the text a user can actually see (drawn,
+  not clipped to nothing by an ancestor with overflow hidden, not transparent, not pushed off
+  the side of the screen) and the elements whose shown state flipped since the previous
+  capture. The replay diff lists "Text that became visible / was hidden" and "Elements shown
+  or hidden", and these count as a response. The agent's click result says "now visible: …"
+  instead of "nothing on the page changed". Spinners and clocks shown or hidden are set aside
+  as before. Before comparing, finite CSS animations and transitions are waited for (2 s cap).
+- **Vertical scrolling never counts:** "visible" ignores whether something is above or below
+  the fold, otherwise a click that scrolls the page would look like a response. Being pushed
+  off the left or right side (an off-canvas menu) does count.
+- **(b) Independent check:** for a "nothing happens" report on a click, replay also compares
+  screenshots of the region around the element, before and after (`worker/pixels.py`). If it
+  changed noticeably, the report is dismissed with the measurement as the reason, without a
+  model call. What is compared and why:
+  - the full width, from a quarter of the screen height above the element to half below it;
+  - minus the element and 8 px around it (its focus ring, hover and pressed styles), the
+    element that had the focus before (its ring and caret go when the click moves the
+    focus), and the text the diff set aside as harmless (a spinner, a ticking clock);
+  - minus pixels that changed by themselves between two "before" screenshots 500 ms apart;
+  - the pointer is moved off the content before every screenshot, and animations finish
+    first; the target is scrolled into view before the "before" pictures (the click would
+    scroll it anyway).
+  - A pixel changed when a colour channel differs by more than 10% (pixelmatch's default
+    threshold); the region changed noticeably at 100 changed CSS pixels (about two
+    characters of body text). Chromium draws a page the same way twice (a dead button
+    measured 0 changed pixels outside its mask) and Playwright's screenshot assertions count
+    any differing pixel by default; the floor absorbs stray anti-aliased edges. A share of
+    the screen was tried first and rejected: one revealed sentence is 0.8% of a desktop
+    region and 2.6% of a phone's.
+- **Alternatives:** the accessibility tree (doesn't see CSS-only changes either); a share
+  threshold (depends on screen size); asking the judge with the pictures (it was shown them
+  before and still confirmed these reports).
+- **Tradeoffs:** a visible change that isn't the app's response (an ad rotating slower than
+  500 ms near the button) can dismiss a real "does nothing" report; the regression benchmark
+  checks the planted ones stay confirmed. A report whose evidence is a request that wasn't
+  sent, while the screen does change, is now dismissed: from the user's side something
+  happened, and the report should say what was wrong instead.

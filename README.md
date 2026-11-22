@@ -195,6 +195,9 @@ flowchart LR
    - watches every form submit: a success message ("Thanks!", "Saved") with no request that
      sent anything is put to the model (or the reviewer) as a candidate, with the network log
      of that moment as evidence. Not a bug by itself: client-only apps exist;
+   - sees content revealed with CSS alone (an accordion opening by height, a tooltip fading
+     in): what changed after an action includes text that became visible or hidden and
+     elements shown or hidden, not only text added to the page;
    - runs a **keyboard probe** (no model) on the dialogs, menus and show/hide toggles the agent
      opened: each is opened again in a fresh tab and checked for role=dialog and aria-modal,
      focus moving into a dialog and staying there on Tab, Escape closing it, and aria-expanded

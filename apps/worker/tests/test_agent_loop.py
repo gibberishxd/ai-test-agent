@@ -658,3 +658,33 @@ def test_a_failure_message_is_not_a_success_message(agent):
     )
     result = run.run()
     assert "MISMATCH" not in result.steps[0].result
+
+
+# reveal.html: [1] Delivery options, [2] Size guide, [3] Dark card, [4] Apply
+
+
+@pytest.mark.parametrize(
+    ("element_id", "text"),
+    [
+        (1, "Standard delivery takes three to five working days."),  # max-height
+        (2, "Order one size up for a loose fit."),  # opacity and transform
+    ],
+)
+def test_the_agent_sees_content_revealed_with_css_only(agent, element_id, text):
+    run, _, _ = agent(
+        [call("click", element_id=element_id), call("finish", summary="done")],
+        target="/reveal.html",
+    )
+    result = run.run()
+    step = result.steps[0]
+    assert "nothing on the page changed" not in step.result
+    assert f"now visible: {text}" in step.result
+    assert step.changed
+
+
+def test_a_click_that_changes_nothing_visible_is_still_reported_as_such(agent):
+    run, _, _ = agent(
+        [call("click", element_id=4), call("finish", summary="done")], target="/reveal.html"
+    )
+    result = run.run()
+    assert result.steps[0].result == "ok, but nothing on the page changed"
