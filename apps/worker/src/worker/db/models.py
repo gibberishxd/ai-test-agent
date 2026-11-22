@@ -160,6 +160,8 @@ class Run(Base):
     # API key that started the run.
     max_steps: Mapped[int | None]
     max_seconds: Mapped[int | None]
+    # The screen the run starts on, "WIDTHxHEIGHT" (e.g. "390x844"); None = desktop 1280×800.
+    viewport: Mapped[str | None]
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("api_keys.id"))
     # When retention deleted this run's screenshots and steps (its findings stay).
     purged_at: Mapped[datetime | None] = mapped_column(_timestamp())

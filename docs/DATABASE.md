@@ -241,6 +241,7 @@ erDiagram
     uuid api_key_id FK
     integer max_seconds
     integer max_steps
+    text viewport
     timestamp_with_time_zone purged_at
     text reviewer_provider
     text reviewer_model
@@ -503,6 +504,12 @@ are deleted in the same pass.
 ### runs: budgets from the API (run 4)
 `max_steps` and `max_seconds` (nullable): a CI caller may lower the worker's limits for one run,
 never raise them (`run_limits()` takes the smaller value).
+
+### runs: viewport per run
+`viewport` (nullable, `"WIDTHxHEIGHT"`, e.g. `390x844`, `768x1024`, `1440x900`; a CHECK keeps the
+format): the screen the crawl, the agent and replay verification start on. NULL = desktop 1280×800.
+The agent's `set_viewport` tool still switches to its named desktop and mobile sizes; a report is
+replayed at the size it names, else at the run's viewport.
 
 ### targets, specs, spec_chunks — a team's own requirements (run 7, M3)
 - **`targets`**: an app a workspace tests, by `origin` (`scheme://host[:port]`, a CHECK keeps it
@@ -792,7 +799,7 @@ forgets them sees no tenant rows at all (tested from both apps).
 ### Check constraints
 | Table | Constraint |
 |---|---|
-| runs | counts, tokens and costs (also the reviewer's) ≥ 0; `max_steps` 1–500, `max_seconds` 1–86400; `finished_at ≥ started_at` |
+| runs | counts, tokens and costs (also the reviewer's) ≥ 0; `max_steps` 1–500, `max_seconds` 1–86400; `viewport` is `WIDTHxHEIGHT`; `finished_at ≥ started_at` |
 | steps | index, tokens, cost ≥ 0 |
 | bugs | category 1–40 characters (the set is open: models name categories); title not empty |
 | workspaces | quota ≥ 0; retention 1–3650 days |

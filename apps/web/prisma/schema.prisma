@@ -176,6 +176,8 @@ model Run {
   purgedAt                 DateTime? @map("purged_at") @db.Timestamptz(3)
   maxSteps                 Int?      @map("max_steps")
   maxSeconds               Int?      @map("max_seconds")
+  /// The screen size the run starts on, "WIDTHxHEIGHT" (e.g. "390x844"); null = desktop 1280x800.
+  viewport                 String?
   /// The API key that started the run (null: started from the dashboard).
   apiKeyId                 String?   @map("api_key_id") @db.Uuid
 

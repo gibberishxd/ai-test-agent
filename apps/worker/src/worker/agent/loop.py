@@ -30,7 +30,7 @@ from worker.agent.policy import Budget, card_number_reason, deny_reason
 from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.reviewer import review_mismatch
 from worker.agent.tools import TOOL_NAMES, TOOLS
-from worker.browser import VIEWPORTS, listen, viewport_label, wait_until_quiet
+from worker.browser import VIEWPORTS, listen, viewport_label, viewport_size, wait_until_quiet
 from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage, UsageLimitReached
 from worker.login import LoginConfig, SignInResult, on_login_page
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
@@ -70,6 +70,8 @@ class AgentConfig:
     known_lists: dict | None = None
     # Run 7, M3: the target's requirements, retrieved per page (spec_store.SpecRetriever).
     specs: SpecSource | None = None
+    # The screen the run starts on: "desktop", or the run's own size ("390x844").
+    viewport: str = "desktop"
 
 
 @dataclass
@@ -148,11 +150,11 @@ class AgentRun:
         self._seen_urls: set[str] = set()
         self._shown_specs: list[RetrievedChunk] = []  # the requirements in the last observation
         self._last_site_url = config.target_url  # where to return to if a step leaves the site
-        self._viewport = "desktop"
+        self._viewport = config.viewport
         self._pending: list[Candidate] = []  # mismatches the model hasn't resolved yet
         self._lists = ListTracker()  # list pages and whether an item of each was opened
         self._lists.seed(config.known_lists or {})
-        page.set_viewport_size(VIEWPORTS[self._viewport])
+        page.set_viewport_size(viewport_size(self._viewport))
         listen(page, self._console, self._failed)
 
     # --- the loop ---------------------------------------------------------------------------
@@ -235,7 +237,7 @@ class AgentRun:
             events=events,
             usage=decision.usage,
             screenshot=self._save(screenshot, index),
-            viewport=VIEWPORTS[self._viewport],
+            viewport=viewport_size(self._viewport),
             **outcome,
         )
         self.result.steps.append(step)

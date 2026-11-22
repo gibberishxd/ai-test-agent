@@ -36,12 +36,13 @@ def guarded_context(
     target_url: str,
     browser: Browser | None = None,
     login: LoginConfig | None = None,
+    viewport: dict | None = None,
 ) -> Iterator[tuple[BrowserContext, NetworkGuard]]:
     """A browser context whose traffic goes through the safety proxy (rule 6.1).
 
     Pass `browser` to reuse one (tests); otherwise a browser is launched and closed here.
     """
-    with guarded_browser(settings, target_url, browser, login) as (new_context, guard):
+    with guarded_browser(settings, target_url, browser, login, viewport) as (new_context, guard):
         context = new_context()
         try:
             yield context, guard
@@ -55,6 +56,7 @@ def guarded_browser(
     target_url: str,
     browser: Browser | None = None,
     login: LoginConfig | None = None,
+    viewport: dict | None = None,
 ) -> Iterator[tuple[Callable[[], BrowserContext], NetworkGuard]]:
     """One browser and safety proxy, and a function that opens fresh contexts through it.
 
@@ -64,6 +66,8 @@ def guarded_browser(
 
     With `login`, every context is signed in before it is handed out (the crawl, the agent and
     each replay alike); if signing in fails, SignInFailed says why, without any secret.
+
+    `viewport`: the screen size every context opens at (a run's own viewport); default desktop.
     """
     guard = make_guard(settings, target_url)
     reason = guard.check(target_url)
@@ -77,7 +81,9 @@ def guarded_browser(
         launched = browser
 
         def new_context() -> BrowserContext:
-            context = launched.new_context(proxy=proxy.playwright_config, viewport=VIEWPORT)
+            context = launched.new_context(
+                proxy=proxy.playwright_config, viewport=viewport or VIEWPORT
+            )
             if login is not None:
                 result = sign_in(context, login)
                 if not result.ok:
@@ -97,6 +103,7 @@ def passive_scan(
     should_stop: Callable[[], bool] | None = None,
     browser: Browser | None = None,
     login: LoginConfig | None = None,
+    viewport: dict | None = None,
 ) -> Report:
     """Crawl and check `target_url`: look only, follow links, run every deterministic check.
 
@@ -114,7 +121,7 @@ def passive_scan(
     def save_mobile(png: bytes, url: str) -> str:
         return storage.save(f"{key_prefix}/page-{number:03d}-mobile.png", png)
 
-    with guarded_context(settings, target_url, browser, login) as (context, guard):
+    with guarded_context(settings, target_url, browser, login, viewport) as (context, guard):
         options = VisitOptions(save_screenshot=save, save_mobile_screenshot=save_mobile)
 
         def visit(url: str) -> tuple[PageResult, list[str]]:
