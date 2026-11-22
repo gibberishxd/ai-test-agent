@@ -1456,3 +1456,34 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   inline page scripts and injected ones, so it can't).
 - **Tradeoff:** a page message logged in the instant our script runs is muted too. Our scripts
   run for well under a second, once per page.
+
+## D108. Keyboard probe on what the agent opens (2026-11-22)
+- **Decision:** during the agent's exploration, each click is bracketed by a snapshot of the
+  elements on screen and a comparison afterwards. What appeared is a **dialog** (role=dialog,
+  alertdialog or an open `<dialog>`, or a fixed layer covering more than half the screen), a
+  **menu** (a button showed two or more new links or buttons) or a **disclosure** (a button
+  showed content that was already in the page, hidden, with the same text). After the agent
+  finishes, up to 8 of those controls are opened again in a fresh browser context by
+  replaying the agent's steps (the same replay plans as bug verification), then probed with
+  real key presses. One finding per failing control, `confirmed` (deterministic), category
+  `accessibility`, at the severity of its worst failure.
+- **Checks and severities (the owner's call):** dialog: focus moves into it, Tab keeps focus
+  inside it, Escape closes it (`medium`); exposed as role=dialog, aria-modal (`low`). Menu:
+  Escape closes it (`medium`); the button has aria-expanded and an accessible name (`low`).
+  Disclosure: aria-expanded (`low`). From the WAI-ARIA Authoring Practices (Dialog (Modal),
+  Disclosure, Menu Button patterns) and WCAG 2.4.3 / 4.1.2.
+- **Choices:**
+  - The crawl stays look-only (rule 6.2), so only controls the agent opened are probed.
+  - Probing happens in a fresh context, not in the agent's tab: Escape and Tab there would
+    change what the agent is looking at.
+  - A missing accessible name is `low` here: axe's `button-name` rule already reports it at
+    `medium` on crawled pages, so this finding doesn't double the weight.
+  - "Covers most of the screen" is more than half the viewport's area. New text in an element
+    that was empty ("Saved.") is a response, not a disclosure; `<summary>` is skipped (the
+    browser reports its state itself); submit buttons don't open menus or disclosures.
+- **Alternatives:** clicking every toggle-looking button during the crawl (breaks look-only,
+  and needs a guess at which buttons are toggles); probing in the agent's own tab (cheaper,
+  but disturbs its exploration); judging with the model (the checks are mechanical).
+- **Tradeoffs:** a content panel mounted fresh by a framework on click (not hidden before)
+  isn't recognised as a disclosure, so those are missed rather than guessed at. Each probe
+  replays the agent's steps, which adds seconds per control after the run (no model cost).

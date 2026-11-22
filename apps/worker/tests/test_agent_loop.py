@@ -583,3 +583,22 @@ def test_console_warnings_become_page_evidence_but_not_model_events(agent):
     ]
     assert not any("Deprecated" in e for e in result.steps[0].events)
     assert any("Something broke" in e for e in result.steps[0].events)  # errors still shown
+
+
+def test_clicks_that_open_a_dialog_menu_or_toggle_are_recorded_for_the_keyboard_probe(agent):
+    # keyboard.html's visible buttons, in order: good dialog, bad dialog, good menu, bad menu,
+    # good toggle, bad toggle, Save.
+    run, _, _ = agent(
+        [
+            call("click", element_id=5),  # "Shipping details": a disclosure
+            call("click", element_id=7),  # Save: new status text, nothing opened
+            call("click", element_id=2),  # a dialog over the page
+            call("finish", summary="done"),
+        ],
+        target="/keyboard.html",
+    )
+    result = run.run()
+    assert [(o.step, o.kind, o.element["name"]) for o in result.opened] == [
+        (1, "disclosure", "Shipping details"),
+        (3, "dialog", "Open bad dialog"),
+    ]

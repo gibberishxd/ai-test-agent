@@ -192,6 +192,10 @@ flowchart LR
    - in **interactive** mode, runs the **agent loop**: observe (numbered interactive elements,
      page text as untrusted data, a screenshot only when needed) → the model picks exactly one
      tool → the worker checks it against the safety rules → runs it → logs it;
+   - runs a **keyboard probe** (no model) on the dialogs, menus and show/hide toggles the agent
+     opened: each is opened again in a fresh tab and checked for role=dialog and aria-modal,
+     focus moving into a dialog and staying there on Tab, Escape closing it, and aria-expanded
+     and a name on the button that opens a menu or toggle;
    - sends steps where what the agent expected didn't happen to an optional **reviewer** model,
      which decides whether it's a bug;
    - **replays** every reported bug in a fresh browser, compares the page just before and after

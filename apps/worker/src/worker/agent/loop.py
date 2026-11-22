@@ -31,6 +31,7 @@ from worker.agent.prompt import SYSTEM_PROMPT
 from worker.agent.reviewer import review_mismatch
 from worker.agent.tools import TOOL_NAMES, TOOLS
 from worker.browser import VIEWPORTS, listen, viewport_label, viewport_size, wait_until_quiet
+from worker.keyboard_probe import Opened, opened_by, snapshot
 from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage, UsageLimitReached
 from worker.login import LoginConfig, SignInResult, on_login_page
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
@@ -110,6 +111,8 @@ class AgentResult:
     ignored: list[int] = field(default_factory=list)
     relogins: int = 0  # times the session ended and the worker signed in again
     reviewer_usage: list[Usage] = field(default_factory=list)  # one per reviewer call
+    # Controls whose click opened a dialog, menu or disclosure (the keyboard probe's list).
+    opened: list[Opened] = field(default_factory=list)
 
 
 class ModelCallFailed(Exception):
@@ -385,6 +388,7 @@ class AgentRun:
         before = self.page.url
         before_text = self._page_text()
         before_scroll = self._scroll_position()
+        control = self._before_click(action, element)
         try:
             if action == "click":
                 self.page.locator(element.locator).click(timeout=ACTION_TIMEOUT_MS)
@@ -427,6 +431,8 @@ class AgentRun:
         if self.page.url != before:
             self._want_screenshot = True
             return f"ok, now on {self.page.url}", True
+        if control is not None:
+            self._note_opened(control, element, index)
         after_text = self._page_text()
         new_lines = text_changes(before_text, after_text)
         if action == "reload":
@@ -437,6 +443,30 @@ class AgentRun:
             return "ok, but nothing on the page changed", False
         changed = after_text != before_text or self._scroll_position() != before_scroll
         return (f"ok; new on the page: {new_lines}" if new_lines else "ok"), changed
+
+    def _before_click(self, action: str, element: Element | None):
+        """Before a click: remember what is on screen, and the control (the keyboard probe
+        compares afterwards to see whether the click opened a dialog, a menu or a toggle)."""
+        if action != "click" or element is None:
+            return None
+        try:
+            control = self.page.locator(element.locator).element_handle(timeout=ACTION_TIMEOUT_MS)
+        except PlaywrightError:
+            return None
+        snapshot(self.page)
+        return control
+
+    def _note_opened(self, control, element: Element, index: int) -> None:
+        """Record the control if its click opened something (once per control)."""
+        kind = opened_by(self.page, control)
+        target = element.target()
+        key = (target.get("role"), target.get("name"), target.get("css"))
+        known = {
+            (o.element.get("role"), o.element.get("name"), o.element.get("css"))
+            for o in self.result.opened
+        }
+        if kind and key not in known:
+            self.result.opened.append(Opened(step=index, kind=kind, element=target))
 
     def _set_viewport(self, size: str) -> tuple[str, bool]:
         if size not in VIEWPORTS:

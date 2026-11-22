@@ -80,7 +80,10 @@ def _key(bug: BugReport) -> str:
         return normalize_message(evidence["console_errors"][0].get("text", ""))
     if bug.category == "accessibility" and evidence.get("a11y"):
         return evidence["a11y"][0].get("rule_id", "")
-    if evidence.get("check"):  # a deterministic page check (layout, meta): which one
+    if evidence.get("check"):  # a deterministic page check (layout, meta, keyboard): which one
+        control = evidence.get("control")  # the keyboard probe: one finding per control
+        if isinstance(control, dict):
+            return f"check:{evidence['check']}:{control.get('role')}:{control.get('name')}"
         return f"check:{evidence['check']}"
     if bug.category == "broken-link" and evidence.get("link"):
         return normalize_route(evidence["link"])
