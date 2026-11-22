@@ -113,3 +113,48 @@ def test_document_404_of_a_broken_link_isnt_also_a_failed_request():
         PageResult(url="http://shop.test/old", status=404, found_on=HOME, failed_requests=[doc]),
     ]
     assert [b.category for b in findings_from_pages(pages)] == ["broken-link"]
+
+
+def test_layout_problems_are_one_finding_each_per_page():
+    from worker.report import LayoutCheck
+
+    layout = LayoutCheck(
+        viewport_width=390,
+        overflow_px=120,
+        sticking_out=[{"selector": "body > div.hero", "tag": "div", "right": 510, "width": 510}],
+        small_targets=[
+            {"selector": "#close", "tag": "button", "name": "Close", "width": 20, "height": 20}
+        ],
+        small_target_count=3,
+        small_text=[{"selector": "p.fine", "text": "Small print", "font_size": 10}],
+        small_text_count=2,
+    )
+    bugs = findings_from_pages([page(layout=layout), page(CART, layout=layout)])
+    assert len(bugs) == 6  # three problems × two pages: each page's elements differ
+    home = {b.evidence["check"]: b for b in bugs if b.page_url == HOME}
+    assert home["overflow"].severity == "medium"
+    assert home["overflow"].category == "layout"
+    assert "body > div.hero" in home["overflow"].actual
+    assert home["small-targets"].severity == "low"
+    assert home["small-targets"].evidence["count"] == 3
+    assert "Close" in home["small-targets"].actual
+    assert home["small-text"].severity == "low"
+    assert home["small-text"].evidence["count"] == 2
+    assert all(b.source == "deterministic" and b.status == "confirmed" for b in bugs)
+
+
+def test_a_page_without_layout_problems_gives_no_layout_finding():
+    from worker.report import LayoutCheck
+
+    assert findings_from_pages([page(layout=LayoutCheck(viewport_width=1280))]) == []
+
+
+def test_layout_fingerprint_is_the_check_not_the_numbers():
+    from worker.fingerprint import fingerprint
+    from worker.report import LayoutCheck
+
+    def overflow(px: int):
+        layout = LayoutCheck(viewport_width=390, overflow_px=px)
+        return findings_from_pages([page(layout=layout)])[0]
+
+    assert fingerprint(overflow(120)) == fingerprint(overflow(300))
