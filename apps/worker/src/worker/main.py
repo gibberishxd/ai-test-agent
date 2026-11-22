@@ -6,10 +6,12 @@ uv run worker scan URL    passive scan without the database; writes reports/<tim
 uv run worker bench       benchmark: N runs on the buggy shop + 1 on the clean shop, scored
 uv run worker reverify ID replay an old run's agent reports again (read-only); --judge asks
                           the pinned judge model too
+uv run worker export ID --out FILE   a run's findings as JSON (read-only); --data-dir DIR where
+                          its screenshots are (default DATA_DIR)
 uv run worker make-admin EMAIL        let a user see usage across workspaces (/admin/usage)
 uv run worker set-plan SLUG PLAN      put a workspace on a plan (free, team, business)
-Operator commands (bench, reverify, backfill-fingerprints, make-admin, set-plan) use the admin
-connection (DATABASE_URL); the worker loop uses its own role (WORKER_DATABASE_URL).
+Operator commands (bench, reverify, export, backfill-fingerprints, make-admin, set-plan) use the
+admin connection (DATABASE_URL); the worker loop uses its own role (WORKER_DATABASE_URL).
 """
 
 import argparse
@@ -114,6 +116,12 @@ def main(argv: list[str] | None = None) -> None:
     again = sub.add_parser("reverify", help="replay an old run's agent reports (read-only)")
     again.add_argument("run_id", help="the run's id (a unique prefix is enough)")
     again.add_argument("--judge", action="store_true", help="also ask JUDGE_* whether it shows")
+    export = sub.add_parser("export", help="write a run's findings to a JSON file (read-only)")
+    export.add_argument("run_id", help="the run's id (a unique prefix is enough)")
+    export.add_argument("--out", type=Path, required=True, help="the JSON file to write")
+    export.add_argument(
+        "--data-dir", type=Path, help="where the run's screenshots are (default: DATA_DIR)"
+    )
     sub.add_parser(
         "backfill-fingerprints", help="give findings stored before run 4 their fingerprint (J4)"
     )
@@ -138,6 +146,16 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "reverify":
         reverify(settings, args.run_id, args.judge)
+        return
+
+    if args.command == "export":
+        from worker.export import find_run_id, write_export
+
+        data_dir = args.data_dir or settings.data_path()
+        with make_session_factory(make_engine(settings, admin=True))() as session:  # operator's
+            run_id = find_run_id(session, args.run_id)
+            out = write_export(session, run_id, args.out, data_dir=data_dir.resolve())
+        log.info("run %s → %s", run_id, out)
         return
 
     if args.command in ("make-admin", "set-plan"):
