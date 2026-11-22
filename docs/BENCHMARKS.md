@@ -91,6 +91,40 @@ the API-equivalent estimate ("est."), computed from the CLI's token counts at li
 | claude-cli · claude-haiku-5-5, run 8 N3 part B, **holdout** | 69% (44–86) | 79% | 96% | 0.0 | $0.00 | | gemma4:12b (pinned) | 447c7fc |
 | **N3 pooled (A + B): 8 shop + 8 holdout runs** | **shop 40% (30–52), holdout 62% (45–77)** | 59% / 75% | | 2.0 / 0.0 | | | | 447c7fc |
 | claude · claude-sonnet-5-5 (API) | not run (run 8: no Sonnet, Opus or Fable runs) | | | | | | | |
+| **claude (API)** · claude-haiku-5-5, benchmark v2 after the **six check improvements** (PRs #20–#25), shop (real charge; 2026-11-23) | 37% (22–56) | 56% | 74% | 2.0 (1 new metadata finding + 1 real behaviour) | $0.017 | 154 s | gemma4:12b (pinned) | 92fc566 |
+| claude (API) · claude-haiku-5-5, six check improvements, **holdout** | 75% (41–93) | 83% | 88% | 1.0 (the new metadata finding) | $0.013 | | gemma4:12b (pinned) | 92fc566 |
+
+## Six check improvements (2026-11-23): regression against run 8's API row
+
+Same command, settings and judge as run 8's API row (`LLM_PROVIDER=claude`, Haiku 5.5, 40 steps,
+480 s, judge gemma4:12b; shop 3 buggy + 1 clean, holdout 2 buggy + 1 clean), after the layout,
+meta, console-warning, keyboard-probe, success-without-request and CSS-visibility changes
+(D105–D110). Result `f3c996c4`, total charge $0.107 for the 7 runs.
+
+| | Run 8 API (b5aaf9b) | After (92fc566) |
+|---|---|---|
+| Shop AI-only recall | 33% (9/27) | 37% (10/27; Wilson 22–56%) |
+| Shop recall | 54% | 56% |
+| Shop false alarms per clean run | 0.0 | 2.0: the new metadata finding (1) + "cart emptied on reload" (1, real clean-build behaviour reported in run 8 too) |
+| Shop precision | 100% | 74% |
+| Holdout AI-only recall | 62% (5/8) | 75% (6/8; Wilson 41–93%) |
+| Holdout recall | 75% | 83% |
+| Holdout false alarms per clean run | 1.0 | 1.0: the new metadata finding |
+| Holdout precision | 100% | 88% |
+| Charge per run | $0.016 / $0.013 | $0.017 / $0.013 |
+
+- **Recall:** within noise (the intervals overlap widely). The planted "'Save changes' does
+  nothing" (shop bug 8) was found in 1 of 3 runs, as before, and stayed verified: the new pixel
+  check measured 0 changed pixels around the button. No report matching a planted bug was
+  discarded.
+- **False alarms:** the only new deterministic finding on either clean build is the
+  metadata check (neither demo app has Open Graph tags, a canonical link or an
+  apple-touch-icon: true of the apps, not planted). Layout, console warnings, axe
+  best-practice and the keyboard probe added nothing on the clean builds. Without the metadata
+  category: shop 1.0, holdout 0.0.
+- **Precision:** lower because the new deterministic checks report real but unplanted things
+  on the buggy builds (the metadata finding, about two axe best-practice findings per shop
+  run). Agent reports that matched nothing didn't increase.
 
 ## Real-world v1 (run 8, N4): real reported bugs in IT-Tools and react-admin
 
