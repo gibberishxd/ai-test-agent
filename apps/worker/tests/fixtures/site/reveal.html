@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Revealed with CSS</title>
+  <style>
+    body { margin: 0; font: 16px sans-serif; }
+    main { padding: 16px; }
+    .hack { display: none; }
+    /* A CSS-only accordion: the panel's height opens, its text was in the page all along. */
+    .panel { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
+    #acc:checked ~ .panel { max-height: 200px; }
+    /* A CSS-only toggle: the tip fades and slides in. */
+    .tip { opacity: 0; transform: translateY(-8px); transition: opacity 0.2s, transform 0.2s; }
+    #tip:checked ~ .tip { opacity: 1; transform: none; }
+    /* A CSS-only colour switch: nothing but pixels change. */
+    .card { width: 600px; height: 160px; background: #f4f4f4; }
+    #dark:checked ~ .card { background: #222; }
+    .control { display: inline-block; padding: 8px 12px; border: 1px solid #888; cursor: pointer; }
+    /* A button that does nothing, with a thick focus ring. */
+    #apply:focus { outline: 4px solid #1a5fd0; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Revealed with CSS</h1>
+    <section>
+      <input type="checkbox" id="acc" class="hack">
+      <label for="acc" role="button" class="control">Delivery options</label>
+      <div class="panel"><p>Standard delivery takes three to five working days.</p></div>
+    </section>
+    <section>
+      <input type="checkbox" id="tip" class="hack">
+      <label for="tip" role="button" class="control">Size guide</label>
+      <p class="tip">Order one size up for a loose fit.</p>
+    </section>
+    <section>
+      <input type="checkbox" id="dark" class="hack">
+      <label for="dark" role="button" class="control">Dark card</label>
+      <div class="card"></div>
+    </section>
+    <section>
+      <button id="apply">Apply</button>
+    </section>
+  </main>
+</body>
+</html>

@@ -113,6 +113,92 @@ STATE_JS = """() => {
   return { url, title: document.title, lines, fields, storage, seen, invalid, focused };
 }"""
 
+# What a user can actually see: the text that is drawn (not hidden by opacity, visibility,
+# display, a zero height with overflow hidden, or a transform off the side of the screen), and
+# the elements whose shown state flipped since the previous call. The DOM text (STATE_JS) misses
+# content revealed with CSS alone: it is in the page before and after. Vertical scrolling never
+# counts, so a click that scrolls the page doesn't look like a response.
+VISIBLE_JS = r"""(opts) => {
+  const body = document.body;
+  if (!body) return { visible: [], changed: [] };
+  const vw = document.documentElement.clientWidth;
+  const clipCache = new Map();
+  // Is `el` cut to nothing by an ancestor that hides its overflow (max-height: 0 and the like)?
+  const clipped = (el, box) => {
+    for (let n = el.parentElement; n && n !== body; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (s.overflowX === 'visible' && s.overflowY === 'visible') continue;
+      const r = n.getBoundingClientRect();
+      const w = Math.min(box.right, r.right) - Math.max(box.left, r.left);
+      const h = Math.min(box.bottom, r.bottom) - Math.max(box.top, r.top);
+      if (w < 1 || h < 1) return true;
+    }
+    return false;
+  };
+  const shownBox = (el, box) => {
+    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+    if (box.width < 1 || box.height < 1) return false;
+    if (box.right <= 0 || box.left >= vw) return false;  // pushed off the side of the screen
+    if (!clipCache.has(el)) clipCache.set(el, clipped(el, box));
+    return !clipCache.get(el);
+  };
+
+  // 1. Visible text: each text node that is drawn, as trimmed lines.
+  const lines = [];
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  let scanned = 0;
+  for (let node = walker.nextNode(); node && scanned < opts.maxTextNodes;
+       node = walker.nextNode()) {
+    scanned++;
+    const text = node.textContent.replace(/\s+/g, ' ').trim();
+    const parent = node.parentElement;
+    if (!text || !parent || parent.closest('script, style, noscript, template')) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const box = range.getBoundingClientRect();
+    if (!shownBox(parent, box)) continue;
+    lines.push(text.slice(0, opts.maxChars));
+    if (lines.length >= opts.maxLines) break;
+  }
+
+  // 2. Elements whose shown state or size class changed since the previous call.
+  const previous = window.__ataShown || new WeakMap();
+  const now = new WeakMap();
+  const changed = [];
+  const describe = (el) => {
+    const id = el.id ? '#' + el.id : '';
+    const cls = typeof el.className === 'string' && el.className.trim()
+      ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+    return el.tagName.toLowerCase() + id + cls;
+  };
+  const all = Array.from(body.querySelectorAll('*')).slice(0, opts.maxElements);
+  for (const el of all) {
+    const box = el.getBoundingClientRect();
+    const state = shownBox(el, box) ? 'shown' : 'hidden';
+    now.set(el, state);
+    const before = previous.get(el);
+    if (before && before !== state) changed.push({ el, state });
+  }
+  window.__ataShown = now;
+  const flipped = new Set(changed.map((c) => c.el));
+  const outer = changed.filter((c) => !flipped.has(c.el.parentElement));
+  return {
+    visible: lines,
+    changed: outer.slice(0, opts.maxChanged).map((c) => ({
+      what: describe(c.el),
+      text: (c.el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60),
+      shown: c.state === 'shown',
+    })),
+  };
+}"""
+VISIBLE_OPTIONS = {
+    "maxTextNodes": 20000,
+    "maxLines": 600,
+    "maxChars": 200,
+    "maxElements": 5000,
+    "maxChanged": 20,
+}
+
 # Starts collecting text that is added to the page from now on, so a toast that disappears
 # before the "after" capture still counts.
 WATCH_JS = """(limit) => {
@@ -149,6 +235,8 @@ class PageState:
     seen: list[str] = field(default_factory=list)  # text added to the page meanwhile
     invalid: list[str] = field(default_factory=list)  # "Guest name: Please fill out this field."
     focused: str | None = None  # the form field that has the focus, if any
+    visible: list[str] = field(default_factory=list)  # text a user can see (VISIBLE_JS)
+    shown: list[dict] = field(default_factory=list)  # {what, text, shown}: flipped meanwhile
 
 
 def _fingerprint(value: str | None) -> str:
@@ -219,6 +307,7 @@ class StateRecorder:
         except PlaywrightError:
             pass
         lines = raw["lines"][:MAX_LINES]
+        seen_now = visible_now(self.page)
         page_origin = _origin(raw["url"])
         state = PageState(
             url=raw["url"],
@@ -234,6 +323,8 @@ class StateRecorder:
             seen=raw["seen"],
             invalid=raw.get("invalid") or [],
             focused=raw.get("focused"),
+            visible=seen_now["visible"],
+            shown=seen_now["changed"],
         )
         try:
             self.page.evaluate(WATCH_JS, MAX_SEEN)
@@ -244,6 +335,36 @@ class StateRecorder:
     def _since(self, name: str, items: list) -> list:
         start, self._marks[name] = self._marks[name], len(items)
         return list(items[start:])
+
+
+ANIMATIONS_CAP_MS = 2000
+# Resolves when the page's finite animations and transitions have finished (endless ones, a
+# spinner, are left running), or after `cap` ms.
+ANIMATIONS_JS = """(cap) => new Promise((resolve) => {
+  const finite = document.getAnimations().filter((a) => a.playState === 'running'
+    && a.effect && a.effect.getComputedTiming().endTime !== Infinity);
+  if (!finite.length) return resolve();
+  const timer = setTimeout(resolve, cap);
+  Promise.all(finite.map((a) => a.finished.catch(() => null)))
+    .then(() => { clearTimeout(timer); resolve(); });
+})"""
+
+
+def wait_for_animations(page: Page) -> None:
+    """Wait for the page's finite CSS animations and transitions to finish (a panel sliding
+    open), so what is measured is where they end, not a frame in between."""
+    try:
+        page.evaluate(ANIMATIONS_JS, ANIMATIONS_CAP_MS)
+    except PlaywrightError:
+        pass
+
+
+def visible_now(page: Page) -> dict:
+    """{"visible": lines a user can see, "changed": elements shown/hidden since the last call}."""
+    try:
+        return page.evaluate(VISIBLE_JS, VISIBLE_OPTIONS)
+    except PlaywrightError:
+        return {"visible": [], "changed": []}
 
 
 def _path(url: str) -> str:
@@ -293,6 +414,9 @@ class StateDiff:
     validation: list[str]
     totals: tuple[list[str], list[str]]
     ignored: list[str]
+    revealed: list[str] = field(default_factory=list)  # text that became visible (CSS)
+    concealed: list[str] = field(default_factory=list)  # text that stopped being visible
+    shown: list[str] = field(default_factory=list)  # elements shown or hidden
 
     @property
     def meaningful(self) -> bool:
@@ -311,6 +435,9 @@ class StateDiff:
             or self.dialogs
             or self.popups
             or self.validation
+            or self.revealed
+            or self.concealed
+            or self.shown
         )
 
     def summary(self) -> str:
@@ -321,6 +448,9 @@ class StateDiff:
             ("Text that appeared", self.added),
             ("Text that disappeared", self.removed),
             ("Text that appeared briefly and went away", self.transient),
+            ("Text that became visible (it was in the page, hidden)", self.revealed),
+            ("Text that was hidden (it is still in the page)", self.concealed),
+            ("Elements shown or hidden", self.shown),
             ("Form fields that changed", self.fields),
             ("Stored data (local/session storage, cookies)", self.storage),
             ("Requests sent", self.requests),
@@ -345,8 +475,8 @@ class StateDiff:
         if not self.meaningful:
             out.insert(
                 0,
-                "No change: no new or removed text, no field, storage or URL change, "
-                "no request, no dialog and no new tab after the action.",
+                "No change: no new or removed text, nothing shown or hidden, no field, storage "
+                "or URL change, no request, no dialog and no new tab after the action.",
             )
         return "\n".join(out)
 
@@ -416,6 +546,7 @@ def diff_states(before: PageState, after: PageState, typed: str | None = None) -
     if after.focused and after.focused != before.focused:
         validation = [v for v in after.invalid if v.split(": ", 1)[0] == after.focused]
     url_change = (before.url, after.url) if before.url != after.url else None
+    revealed, concealed, shown = _visibility_changes(before, after, added, removed, ignored)
     return StateDiff(
         url_change=url_change,
         added=added,
@@ -430,7 +561,41 @@ def diff_states(before: PageState, after: PageState, typed: str | None = None) -
         validation=validation,
         totals=(before.totals, after.totals),
         ignored=ignored,
+        revealed=revealed,
+        concealed=concealed,
+        shown=shown,
     )
+
+
+def _visibility_changes(
+    before: PageState, after: PageState, added: list[str], removed: list[str], ignored: list[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """Text that became visible or hidden while staying in the page, and elements shown or
+    hidden. Text that was added or removed outright is already listed, so it isn't repeated;
+    on another page (the URL changed) visibility isn't compared."""
+    if before.url != after.url or not (before.visible or after.visible):
+        return [], [], []
+    new = Counter(after.visible) - Counter(before.visible)
+    gone = Counter(before.visible) - Counter(after.visible)
+    listed = set(added) | set(removed)
+    revealed, concealed = [], []
+    for source, out in ((new, revealed), (gone, concealed)):
+        for line in dict.fromkeys(source.elements()):
+            if any(line == other or line in other for other in listed):
+                continue
+            if is_noise_line(line):
+                ignored.append(line) if line not in ignored else None
+                continue
+            out.append(line)
+    shown = []
+    for change in after.shown:
+        text = change.get("text") or ""
+        if text and is_noise_line(text):  # a spinner shown while saving
+            ignored.append(text) if text not in ignored else None
+            continue
+        label = f'{change["what"]} "{text}"' if text else change["what"]
+        shown.append(f"{label}: {'hidden → shown' if change['shown'] else 'shown → hidden'}")
+    return revealed, concealed, shown
 
 
 def _requests_that_count(earlier: list[str], during: list[str], ignored: list[str]) -> list[str]:

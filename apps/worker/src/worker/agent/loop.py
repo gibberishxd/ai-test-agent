@@ -37,7 +37,7 @@ from worker.browser import VIEWPORTS, listen, viewport_label, viewport_size, wai
 from worker.keyboard_probe import Opened, opened_by, snapshot
 from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage, UsageLimitReached
 from worker.login import LoginConfig, SignInResult, on_login_page
-from worker.page_state import WATCH_JS
+from worker.page_state import WATCH_JS, visible_now, wait_for_animations
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
@@ -400,6 +400,7 @@ class AgentRun:
         before_text = self._page_text()
         before_scroll = self._scroll_position()
         control = self._before_click(action, element)
+        before_visible = self._visible() if action in CLICK_ACTIONS else None
         try:
             if action == "click":
                 self.page.locator(element.locator).click(timeout=ACTION_TIMEOUT_MS)
@@ -451,6 +452,10 @@ class AgentRun:
             seen = f"new on the page: {new_lines}" if new_lines else "it looks the same as before"
             return f"ok, the page was reloaded; {seen}", after_text != before_text
         if action in (*CLICK_ACTIONS, "go_back") and after_text == before_text:
+            wait_for_animations(self.page)  # a panel sliding open: measure where it ends
+            shown = self._visibility_change(before_visible)
+            if shown:
+                return f"ok; {shown}", True
             return "ok, but nothing on the page changed", False
         changed = after_text != before_text or self._scroll_position() != before_scroll
         return (f"ok; new on the page: {new_lines}" if new_lines else "ok"), changed
@@ -478,6 +483,29 @@ class AgentRun:
         }
         if kind and key not in known:
             self.result.opened.append(Opened(step=index, kind=kind, element=target))
+
+    def _visible(self) -> list[str]:
+        """The text a user can see now (not only what is in the page: CSS can hide it)."""
+        return visible_now(self.page)["visible"]
+
+    def _visibility_change(self, before: list[str] | None, limit: int = 600) -> str:
+        """What a click showed or hid while the page's text stayed the same (an accordion, a
+        tooltip, a menu revealed with CSS), as a line for the model; "" if nothing."""
+        if before is None:
+            return ""
+        now = visible_now(self.page)
+        shown = [line for line in dict.fromkeys(now["visible"]) if line not in set(before)]
+        hidden = [line for line in dict.fromkeys(before) if line not in set(now["visible"])]
+        parts = []
+        if shown:
+            parts.append("now visible: " + " | ".join(shown))
+        if hidden:
+            parts.append("now hidden: " + " | ".join(hidden))
+        if not parts and now["changed"]:
+            flipped = [f"{c['what']} {'shown' if c['shown'] else 'hidden'}" for c in now["changed"]]
+            parts.append("on the page: " + ", ".join(flipped))
+        text = "; ".join(parts)
+        return text if len(text) <= limit else text[: limit - 1] + "…"
 
     def _set_viewport(self, size: str) -> tuple[str, bool]:
         if size not in VIEWPORTS:

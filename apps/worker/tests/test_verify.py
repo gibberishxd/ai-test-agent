@@ -289,10 +289,12 @@ def test_a_dead_button_reported_as_doing_nothing_is_confirmed_without_a_model_ca
     assert verdict.diff and verdict.diff["meaningful"] is False
 
 
-def test_a_no_effect_report_on_a_button_that_works_goes_to_the_judge_with_the_diff(
+def test_a_no_effect_report_on_a_button_that_visibly_works_is_dismissed_without_the_judge(
     context, site_url
 ):
-    llm = FakeClient(texts=['{"reproduced": false, "reason": "Saved appeared"}'])
+    # "Saved" appears next to the button: the pixels around it change, so the report that
+    # nothing happens is dismissed by measurement, with the diff kept as evidence.
+    llm = FakeClient(texts=['{"reproduced": true, "reason": "nothing"}'])
     verdict = verify_bug(
         context,
         llm,
@@ -303,9 +305,9 @@ def test_a_no_effect_report_on_a_button_that_works_goes_to_the_judge_with_the_di
         None,
     )
     assert verdict.reproduced is False
-    prompt = llm.calls[0]["prompt"]
-    assert "WHAT CHANGED" in prompt and "Saved" in prompt
-    assert verdict.diff["meaningful"] is True
+    assert llm.calls == []
+    assert "changed visibly" in verdict.reason
+    assert verdict.diff["meaningful"] is True and "Saved" in verdict.diff["summary"]
 
 
 def test_the_judge_gets_before_and_after_in_one_picture(context, site_url):
@@ -414,3 +416,54 @@ def test_a_no_effect_report_on_a_form_the_browser_blocked_is_not_confirmed_by_me
     )
     assert verdict.reproduced is False and len(llm.calls) == 1
     assert "browser refused to submit" in llm.calls[0]["prompt"]
+
+
+# --- Independent check: the pixels around the element (CSS-only changes) ----------------------
+
+REVEAL_URL = "/reveal.html"
+
+
+def no_effect(context, site_url, control: dict, llm=None):
+    llm = llm or FakeClient(texts=['{"reproduced": true, "reason": "nothing changed"}'])
+    url = f"{site_url}{REVEAL_URL}"
+    verdict = verify_bug(
+        context,
+        llm,
+        url,
+        [ReplayStep("click", {}, control, url)],
+        f"Clicking '{control['name']}' does nothing",
+        "Something opens",
+        "Nothing happens",
+    )
+    return verdict, llm
+
+
+def test_a_css_only_accordion_reported_as_doing_nothing_is_dismissed(context, site_url):
+    verdict, llm = no_effect(context, site_url, {"role": "button", "name": "Delivery options"})
+    assert verdict.reproduced is False and verdict.replayed is True
+    assert "changed visibly" in verdict.reason
+    assert llm.calls == []  # measured, not judged
+    assert verdict.diff["pixels"]["noticeable"] is True
+
+
+def test_a_css_only_toggle_reported_as_doing_nothing_is_dismissed(context, site_url):
+    verdict, _ = no_effect(context, site_url, {"role": "button", "name": "Size guide"})
+    assert verdict.reproduced is False
+    assert "changed visibly" in verdict.reason
+
+
+def test_a_change_only_pixels_show_is_seen(context, site_url):
+    # No text, no element shown or hidden: only a colour. The page-state diff can't see it.
+    verdict, _ = no_effect(context, site_url, {"role": "button", "name": "Dark card"})
+    assert verdict.diff["meaningful"] is False
+    assert verdict.reproduced is False
+    assert "changed visibly" in verdict.reason
+
+
+def test_a_focus_ring_alone_doesnt_dismiss_a_dead_button(context, site_url):
+    # The button draws a thick focus ring when clicked; nothing else changes. That is the
+    # browser answering the click, not the app: the report stays confirmed.
+    verdict, llm = no_effect(context, site_url, {"role": "button", "name": "Apply"})
+    assert verdict.reproduced is True
+    assert llm.calls == []
+    assert verdict.diff["pixels"]["noticeable"] is False

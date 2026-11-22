@@ -28,7 +28,9 @@ from worker.page_state import (
     claims_no_effect,
     diff_states,
     side_by_side,
+    wait_for_animations,
 )
+from worker.pixels import region_change
 from worker.safety.secrets import redact
 from worker.urls import normalize
 
@@ -399,9 +401,14 @@ def verify_bug(
     captured: dict = {}
 
     def before_last(step: ReplayStep) -> None:
+        captured["box"] = _bring_into_view(page, step)  # where the click lands, for (b)
+        captured["focused"] = _focused_box(page)  # loses its focus ring when the click lands
+        _quiet_pointer(page)
         captured["step"] = step
         captured["state"] = recorder.capture()
         captured["shot"] = _screenshot(page)
+        page.wait_for_timeout(SECOND_SHOT_MS)
+        captured["shot_again"] = _screenshot(page)  # what changes by itself (animations)
 
     try:
         try:
@@ -411,6 +418,7 @@ def verify_bug(
             failure = failure_of(error)
             reason = f"step {failure['step']} ({failure['action']}): {failure['detail']}"
             return Verdict(False, reason, replayed=False, failure=failure)
+        _quiet_pointer(page)  # the pointer off the page and animations finished, as before
         after_shot = _screenshot(page)
         diff = None
         if "state" in captured:
@@ -420,7 +428,18 @@ def verify_bug(
             state_diff = diff_states(captured["state"], after, typed=typed)
             summary = redact(scrub(state_diff.summary()))
             diff = {"meaningful": state_diff.meaningful, "summary": summary}
-            if not state_diff.meaningful and claims_no_effect(title, actual):
+            no_effect = claims_no_effect(title, actual)
+            noise = _boxes_of(page, state_diff.ignored) if no_effect else []
+            change = _pixel_change(captured, step, after_shot, size, noise) if no_effect else None
+            if change is not None:
+                diff["pixels"] = {
+                    "noticeable": change.noticeable,
+                    "share": round(change.share, 4),
+                    "detail": change.describe(),
+                }
+                if change.noticeable:
+                    return Verdict(False, _visible_change_reason(step, change, scrub), diff=diff)
+            if not state_diff.meaningful and no_effect:
                 if _is_control_action(step):
                     return Verdict(True, _no_effect_reason(step, scrub), None, diff=diff)
                 if _is_click_into_field(step):
@@ -436,6 +455,103 @@ def verify_bug(
     reproduced = answer.get("reproduced") is True
     reason = redact(str(answer.get("reason") or "no clear answer from the model"))[:300]
     return Verdict(reproduced, reason, result.usage, diff=diff)
+
+
+SECOND_SHOT_MS = 500  # between the two "before" screenshots
+
+
+def _quiet_pointer(page: Page) -> None:
+    """Move the pointer off the content (hover styles off) and let animations finish, so two
+    screenshots differ only by what the page itself changed."""
+    try:
+        page.mouse.move(0, 0)
+    except PlaywrightError:
+        pass
+    wait_for_animations(page)
+
+
+def _bring_into_view(page: Page, step: ReplayStep) -> dict | None:
+    """Scroll the step's target into view (the click would anyway, and the "before" pictures
+    must show the same part of the page as the "after" one); its box in viewport pixels."""
+    if step.action not in ("click", "double_click") or not step.element:
+        return None
+    try:
+        wait_for_target(page, step.element)
+        target = find_target(page, step.element)
+        target.scroll_into_view_if_needed(timeout=ACTION_TIMEOUT_MS)
+        wait_until_drawn(page)
+        return target.bounding_box()
+    except (ReplayError, PlaywrightError):
+        return None  # replay itself will say why the step can't be repeated
+
+
+FOCUSED_BOX_JS = """() => {
+  const active = document.activeElement;
+  if (!active || active === document.body || active === document.documentElement) return null;
+  const r = active.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+}"""
+
+
+def _focused_box(page: Page) -> dict | None:
+    """The box of the element that has the focus now, if any (viewport pixels)."""
+    try:
+        return page.evaluate(FOCUSED_BOX_JS)
+    except PlaywrightError:
+        return None
+
+
+# Boxes of the text nodes reading exactly one of the given lines (viewport pixels).
+TEXT_BOXES_JS = """(lines) => {
+  const wanted = new Set(lines);
+  const boxes = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node && boxes.length < 50; node = walker.nextNode()) {
+    if (!wanted.has(node.textContent.replace(/\\s+/g, ' ').trim())) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const r = range.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      boxes.push({ x: r.x, y: r.y, width: r.width, height: r.height });
+    }
+  }
+  return boxes;
+}"""
+
+
+def _boxes_of(page: Page, ignored: list[str]) -> list[dict]:
+    """Where the text the diff set aside as harmless is drawn (a spinner, a ticking clock), so
+    the pixel check sets it aside too. Polling requests have no place on screen."""
+    lines = [
+        line.removeprefix("time changed: ") for line in ignored if not line.startswith("polling: ")
+    ]
+    if not lines:
+        return []
+    try:
+        return page.evaluate(TEXT_BOXES_JS, lines)
+    except PlaywrightError:
+        return []
+
+
+def _pixel_change(
+    captured: dict, step: ReplayStep, after_shot: bytes, size: dict, noise: list[dict]
+):
+    """(b) For a "nothing happens" report on a click: how much of the screen around the
+    element changed, independent of the page-state view. None when it can't be measured."""
+    if not (_is_control_action(step) and step.action in ("click", "double_click")):
+        return None
+    box = captured.get("box")
+    if not box:
+        return None
+    masks = ([captured["focused"]] if captured.get("focused") else []) + noise
+    return region_change(captured["shot"], captured["shot_again"], after_shot, box, size, masks)
+
+
+def _visible_change_reason(step: ReplayStep, change, scrub: Callable[[str], str]) -> str:
+    return (
+        f"The replayed {_describe_step(step, scrub)} changed visibly: {change.describe()}, "
+        "beyond the element's own focus and hover styles. Something does happen."
+    )
 
 
 def _screenshot(page: Page) -> bytes:
