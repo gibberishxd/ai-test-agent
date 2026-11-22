@@ -30,9 +30,31 @@ VIEWPORTS = {
 }
 
 
+# A run's own screen size, "WIDTHxHEIGHT" (e.g. "390x844"): within what real screens have.
+_SIZE = re.compile(r"(\d+)x(\d+)")
+MIN_SIDE, MAX_SIDE = 200, 4000
+
+
+def parse_viewport(text: str) -> dict[str, int]:
+    """Parse "390x844" into {"width": 390, "height": 844}; ValueError for anything else."""
+    match = _SIZE.fullmatch(text.strip().lower())
+    if not match:
+        raise ValueError(f"viewport must look like 390x844, got {text!r}")
+    width, height = int(match[1]), int(match[2])
+    if not (MIN_SIDE <= width <= MAX_SIDE and MIN_SIDE <= height <= MAX_SIDE):
+        raise ValueError(f"viewport sides must be {MIN_SIDE}–{MAX_SIDE} px, got {text!r}")
+    return {"width": width, "height": height}
+
+
+def viewport_size(name: str) -> dict[str, int]:
+    """A named viewport ("desktop", "mobile") or a run's own size ("390x844")."""
+    return VIEWPORTS[name] if name in VIEWPORTS else parse_viewport(name)
+
+
 def viewport_label(name: str) -> str:
-    size = VIEWPORTS[name]
-    return f"{name} ({size['width']}×{size['height']})"
+    size = viewport_size(name)
+    text = f"{size['width']}×{size['height']}"
+    return f"{name} ({text})" if name in VIEWPORTS else text
 
 
 NETWORK_IDLE_TIMEOUT_MS = 5_000

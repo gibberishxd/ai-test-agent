@@ -45,7 +45,7 @@ from worker.specs import OllamaEmbedder
 from worker.storage import Storage
 from worker.triage import suppressed_count
 from worker.urls import normalize
-from worker.verify import ReplayStep, Verdict, find_duplicates, verify_bug
+from worker.verify import ReplayStep, Verdict, find_duplicates, size_or_desktop, verify_bug
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ def run_passive(
         should_stop=lambda: _stop_requested(session, run),
         browser=browser,
         login=login,
+        viewport=size_or_desktop(run.viewport) if run.viewport else None,
     )
     bugs = list(report.bugs)
 
@@ -456,6 +457,7 @@ def run_interactive(
         should_stop=lambda: _stop_requested(session, run),
         browser=browser,
         login=login,
+        viewport=size_or_desktop(run.viewport) if run.viewport else None,
     )
     known_titles = {bug.title for bug in report.bugs}
     for bug in report.bugs:
@@ -516,6 +518,7 @@ def run_interactive(
                 login=login,
                 known_lists=lists_from_crawl([(p.url, p.found_on) for p in report.pages]),
                 specs=specs,
+                viewport=run.viewport or "desktop",
             )
             return AgentRun(
                 context.new_page(),
@@ -775,7 +778,7 @@ def _replay_bug(
                 bug.title,
                 bug.expected,
                 bug.actual,
-                viewport=(bug.evidence or {}).get("viewport", "desktop"),
+                viewport=replay_viewport(bug, run),
                 scrub=login.scrub if login else (lambda text: text),
                 requirement=cited_requirement(session, bug),
             )
@@ -785,6 +788,12 @@ def _replay_bug(
         if verdict.reproduced or over_budget(settings, run):
             break
     return verdict, start_url
+
+
+def replay_viewport(bug, run) -> str:
+    """The screen to check a report on: the one it names (a phone-width screenshot review),
+    else the run's own viewport, else desktop."""
+    return (bug.evidence or {}).get("viewport") or run.viewport or "desktop"
 
 
 def replay_plans(bug, steps: dict, target_url: str) -> list[tuple[str, list[ReplayStep]]]:

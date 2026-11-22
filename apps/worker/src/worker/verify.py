@@ -20,7 +20,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from worker.agent.observe import CONTEXT_JS, fence
-from worker.browser import VIEWPORTS, wait_until_quiet
+from worker.browser import VIEWPORTS, viewport_size, wait_until_quiet
 from worker.llm import LLMClient, Usage
 from worker.page_state import (
     PageState,
@@ -358,6 +358,14 @@ def parse_json_object(text: str) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def size_or_desktop(viewport: str) -> dict[str, int]:
+    """The size of a named or "WxH" viewport; desktop for anything unknown (older records)."""
+    try:
+        return viewport_size(viewport)
+    except ValueError:
+        return VIEWPORTS["desktop"]
+
+
 def verify_bug(
     context: BrowserContext,
     llm: LLMClient,
@@ -382,10 +390,11 @@ def verify_bug(
     before/after picture.
 
     `viewport`: the screen the bug was seen on. A layout bug found on the phone-width
-    screenshot only shows at that width, so the check has to look there too.
+    screenshot only shows at that width, so the check has to look there too. A run's own
+    size ("390x844") works too.
     """
     page = context.new_page()
-    size = VIEWPORTS.get(viewport, VIEWPORTS["desktop"])
+    size = size_or_desktop(viewport)
     recorder = StateRecorder(page)
     captured: dict = {}
 

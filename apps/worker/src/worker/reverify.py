@@ -16,11 +16,11 @@ from sqlalchemy.orm import Session
 
 from worker.config import Settings
 from worker.db.models import Bug, Run, Step
-from worker.execute import replay_plans
+from worker.execute import replay_plans, replay_viewport
 from worker.llm import LLMClient
 from worker.login import login_at_the_time
 from worker.scan import guarded_browser
-from worker.verify import VIEWPORTS, ReplayError, failure_of, replay, verify_bug
+from worker.verify import ReplayError, failure_of, replay, size_or_desktop, verify_bug
 
 
 def reverify_run(
@@ -56,13 +56,13 @@ def reverify_run(
                 "reason": None,
                 "diff": None,  # what the last replayed action changed (with a judge only)
             }
-            viewport = (bug.evidence or {}).get("viewport", "desktop")
+            viewport = replay_viewport(bug, run)
             for start_url, replay_steps in replay_plans(bug, steps, run.target_url):
                 context = new_context()
                 try:
                     if judge is None:
                         page = context.new_page()
-                        page.set_viewport_size(VIEWPORTS.get(viewport, VIEWPORTS["desktop"]))
+                        page.set_viewport_size(size_or_desktop(viewport))
                         try:
                             replay(page, start_url, replay_steps)
                             replayed, reproduced, failure, reason = True, None, None, page.url
