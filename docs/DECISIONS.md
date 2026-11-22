@@ -1438,3 +1438,21 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Alternatives:** one finding per page always (the owner's first wording; on a site whose
   template misses the tags, that's one identical finding per page); a HEAD request (many image
   hosts answer HEAD wrongly).
+
+## D107. Console warnings (2026-11-22)
+- **Decision:** `console.warn` messages are captured on every crawled page and during the agent's
+  session, each distinct text once per page (at most 50), stored as `console_warnings` on the
+  page result, and reported as one `low` finding per page listing them (category
+  `console-warning`). Errors and uncaught exceptions keep their own findings and severities.
+  The agent's model isn't shown warnings: they are evidence, not something to act on.
+- **Not the site's:** warnings from browser extensions (an extension URL in the location or the
+  text) are dropped. Our injected scripts run with the page's console muted
+  (`evaluate_quietly`), since axe-core is third-party code that could log; our own scripts don't
+  log. The wrapper is built as a string, not with `eval` in the page, which a site's Content
+  Security Policy may forbid.
+- **Alternatives:** one finding per warning text across pages, like errors (a page's warnings
+  are usually one cause, a library or framework notice, so per page is less noise); telling
+  harness messages apart by their source location (Chromium reports an empty URL for both
+  inline page scripts and injected ones, so it can't).
+- **Tradeoff:** a page message logged in the instant our script runs is muted too. Our scripts
+  run for well under a second, once per page.

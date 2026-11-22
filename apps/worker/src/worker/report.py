@@ -13,9 +13,10 @@ from pydantic import BaseModel, Field
 
 
 class ConsoleError(BaseModel):
-    """A console.error() call ("console") or an uncaught JavaScript exception ("pageerror")."""
+    """A console.error() call ("console"), an uncaught JavaScript exception ("pageerror"), or a
+    console.warn() call ("warning", kept apart in PageResult.console_warnings)."""
 
-    kind: Literal["console", "pageerror"]
+    kind: Literal["console", "pageerror", "warning"]
     text: str
     location: str | None = None  # "file.js:12:5" when the browser provides it
 
@@ -80,6 +81,7 @@ class PageResult(BaseModel):
     screenshot: str | None = None  # path relative to the report folder
     mobile_screenshot: str | None = None  # the same page at 375 px wide
     console_errors: list[ConsoleError] = Field(default_factory=list)
+    console_warnings: list[ConsoleError] = Field(default_factory=list)  # each text once
     failed_requests: list[FailedRequest] = Field(default_factory=list)
     a11y_violations: list[A11yViolation] = Field(default_factory=list)
     error: str | None = None  # set when navigation itself failed or timed out

@@ -25,6 +25,7 @@ def findings_from_pages(pages: list[PageResult]) -> list[BugReport]:
     broken_urls = {bug.evidence["link"] for bug in broken}
     return (
         _console_errors(pages)
+        + _console_warnings(pages)
         + _failed_requests(pages, skip_urls=broken_urls)
         + broken
         + _accessibility(pages)
@@ -56,6 +57,34 @@ def _console_errors(pages: list[PageResult]) -> list[BugReport]:
                 actual=f"{'Uncaught exception' if uncaught else 'console.error'}: {text}",
                 repro_steps=[f"Open {urls[0]}", "Open the browser's developer console"],
                 evidence={"console_errors": [{"kind": kind, "text": text}], "pages": _unique(urls)},
+            )
+        )
+    return bugs
+
+
+def _console_warnings(pages: list[PageResult]) -> list[BugReport]:
+    """A page's console warnings, as one low finding per page (errors are reported apiece)."""
+    bugs = []
+    for page in pages:
+        warnings = list({w.text: w for w in page.console_warnings}.values())
+        if not warnings:
+            continue
+        listed = "; ".join(_short(w.text, 120) for w in warnings[:10])
+        more = f" (and {len(warnings) - 10} more)" if len(warnings) > 10 else ""
+        bugs.append(
+            _deterministic(
+                title=f"Console warnings on {_path(page.url)}",
+                severity="low",
+                category="console-warning",
+                page_url=page.url,
+                expected="The page runs without console warnings.",
+                actual=f"{len(warnings)} console.warn message(s): {listed}{more}",
+                repro_steps=[f"Open {page.url}", "Open the browser's developer console"],
+                evidence={
+                    "check": "console-warnings",
+                    "console_warnings": [w.model_dump() for w in warnings],
+                    "pages": [page.url],
+                },
             )
         )
     return bugs

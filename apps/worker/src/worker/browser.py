@@ -97,7 +97,8 @@ def visit_page(
     page = context.new_page()
     console: list[ConsoleError] = []
     failed: list[FailedRequest] = []
-    listen(page, console, failed)
+    warnings: list[ConsoleError] = []
+    listen(page, console, failed, warnings)
     try:
         started = time.monotonic()
         try:
@@ -114,6 +115,7 @@ def visit_page(
             title=page.title() or None,
             load_ms=load_ms,
             console_errors=console,
+            console_warnings=warnings,
             failed_requests=[f for f in failed if f.url != response.url] if response else failed,
             soft_404=_looks_like_not_found(page),
         )
@@ -135,12 +137,27 @@ def visit_page(
         page.close()
 
 
-def listen(page: Page, console: list[ConsoleError], failed: list[FailedRequest]) -> None:
+def listen(
+    page: Page,
+    console: list[ConsoleError],
+    failed: list[FailedRequest],
+    warnings: list[ConsoleError] | None = None,
+) -> None:
+    """Collect the page's console errors, uncaught exceptions and failed requests, and (with
+    `warnings`) its console warnings, each distinct text once."""
+
     def on_console(message: ConsoleMessage) -> None:
-        if message.type != "error" or message.text.startswith("Failed to load resource"):
-            return  # Chrome's echo of a failed request: already captured as a FailedRequest
         loc = message.location
         where = f"{loc.get('url')}:{loc.get('lineNumber')}" if loc and loc.get("url") else None
+        if message.type == "warning" and warnings is not None:
+            if from_extension(loc, message.text) or len(warnings) >= MAX_WARNINGS:
+                return
+            text = redact(message.text)
+            if all(w.text != text for w in warnings):
+                warnings.append(ConsoleError(kind="warning", text=text, location=where))
+            return
+        if message.type != "error" or message.text.startswith("Failed to load resource"):
+            return  # Chrome's echo of a failed request: already captured as a FailedRequest
         console.append(ConsoleError(kind="console", text=redact(message.text), location=where))
 
     def on_page_error(error: PlaywrightError) -> None:
@@ -163,6 +180,40 @@ def listen(page: Page, console: list[ConsoleError], failed: list[FailedRequest])
     page.on("response", on_response)
 
 
+EXTENSION_SCHEMES = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
+MAX_WARNINGS = 50  # distinct warnings kept per page
+
+
+def from_extension(location: dict | None, text: str) -> bool:
+    """Does a console message come from a browser extension rather than the site?"""
+    url = (location or {}).get("url") or ""
+    return url.startswith(EXTENSION_SCHEMES) or any(s in text for s in EXTENSION_SCHEMES)
+
+
+# Runs one of our own scripts with the page's console muted, so whatever it logs (axe-core is
+# third-party code) isn't counted as the site's. The page's own messages during that moment
+# are muted too; scripts run for well under a second.
+# Wraps one of our own scripts so the page's console is muted while it runs, and whatever it
+# logs (axe-core is third-party code) isn't counted as the site's. The page's own messages in
+# that moment are muted too; scripts run for well under a second. Built as a string, not with
+# eval() in the page: a site's Content Security Policy may forbid eval.
+QUIET_JS = """async (arg) => {
+  const levels = ['log', 'info', 'debug', 'warn', 'error'];
+  const saved = levels.map((level) => console[level]);
+  levels.forEach((level) => { console[level] = () => {}; });
+  try {
+    return await (/*SCRIPT*/)(arg);
+  } finally {
+    levels.forEach((level, i) => { console[level] = saved[i]; });
+  }
+}"""
+
+
+def evaluate_quietly(page: Page, script: str, arg=None):
+    """page.evaluate(script, arg) with the console muted while it runs (see QUIET_JS)."""
+    return page.evaluate(QUIET_JS.replace("/*SCRIPT*/", script), arg)
+
+
 def _failed(request: PlaywrightRequest, status: int | None, failure: str | None) -> FailedRequest:
     return FailedRequest(
         url=redact(request.url),
@@ -179,8 +230,9 @@ def run_axe(page: Page) -> list[A11yViolation]:
     page.evaluate runs through the browser's debugging protocol, so the site's Content Security
     Policy can't block it (a <script> tag injection could be blocked).
     """
-    page.evaluate("() => {" + axe_source() + "\n}")
-    violations = page.evaluate(
+    evaluate_quietly(page, "() => {" + axe_source() + "\n}")
+    violations = evaluate_quietly(
+        page,
         """async (tags) => {
             const results = await axe.run(document, {
                 runOnly: { type: "tag", values: tags },

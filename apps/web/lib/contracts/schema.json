@@ -352,12 +352,13 @@
         "type": "object"
       },
       "ConsoleError": {
-        "description": "A console.error() call (\"console\") or an uncaught JavaScript exception (\"pageerror\").",
+        "description": "A console.error() call (\"console\"), an uncaught JavaScript exception (\"pageerror\"), or a\nconsole.warn() call (\"warning\", kept apart in PageResult.console_warnings).",
         "properties": {
           "kind": {
             "enum": [
               "console",
-              "pageerror"
+              "pageerror",
+              "warning"
             ],
             "title": "Kind",
             "type": "string"
@@ -535,6 +536,13 @@
               "$ref": "#/$defs/ConsoleError"
             },
             "title": "Console Errors",
+            "type": "array"
+          },
+          "console_warnings": {
+            "items": {
+              "$ref": "#/$defs/ConsoleError"
+            },
+            "title": "Console Warnings",
             "type": "array"
           },
           "error": {

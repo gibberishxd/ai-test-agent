@@ -184,7 +184,7 @@ flowchart LR
    service.
 2. **The worker** claims the run with `SELECT … FOR UPDATE SKIP LOCKED` and:
    - **crawls** same-origin pages and runs **deterministic checks** on each: console errors and
-     uncaught exceptions, failed and 4xx/5xx requests, broken links, axe-core WCAG A/AA and
+     uncaught exceptions, console warnings (one low finding per page), failed and 4xx/5xx requests, broken links, axe-core WCAG A/AA and
      best-practice rules, slow loads, a screenshot, and a **layout check** at the run's screen
      size (a page wider than the screen, tap targets under 44×44 px below 768 px wide, text
      under 12 px outside code), and a **meta check** (Open Graph tags with a real, loading

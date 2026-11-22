@@ -146,6 +146,7 @@ class AgentRun:
         self.token = secrets.token_hex(3)  # makes test data unique per run
         self._console: list[ConsoleError] = []
         self._failed: list[FailedRequest] = []
+        self._warnings: list[ConsoleError] = []  # evidence only: not shown to the model
         self._want_screenshot = True
         self._seen_urls: set[str] = set()
         self._shown_specs: list[RetrievedChunk] = []  # the requirements in the last observation
@@ -155,7 +156,7 @@ class AgentRun:
         self._lists = ListTracker()  # list pages and whether an item of each was opened
         self._lists.seed(config.known_lists or {})
         page.set_viewport_size(viewport_size(self._viewport))
-        listen(page, self._console, self._failed)
+        listen(page, self._console, self._failed, self._warnings)
 
     # --- the loop ---------------------------------------------------------------------------
 
@@ -812,15 +813,19 @@ class AgentRun:
         return line
 
     def _drain_events(self, url: str) -> list[str]:
-        """New console errors and failed requests since the last step, as short lines."""
+        """New console errors and failed requests since the last step, as short lines. Console
+        warnings are kept as page evidence (they become findings) but not shown to the model."""
         events = [f"{e.kind} error: {e.text[:200]}" for e in self._console]
         events += [f"network: {r.method} {r.url} → {r.status or r.failure}" for r in self._failed]
-        if self._console or self._failed:
+        if self._console or self._failed or self._warnings:
             page = self.result.pages.setdefault(url, PageResult(url=url, status=200))
             page.console_errors += self._console
             page.failed_requests += self._failed
+            known = {w.text for w in page.console_warnings}
+            page.console_warnings += [w for w in self._warnings if w.text not in known]
         self._console.clear()
         self._failed.clear()
+        self._warnings.clear()  # listen() de-duplicates against this list, so per step
         return events
 
     def _save(self, png: bytes | None, index: int) -> str | None:
