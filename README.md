@@ -273,6 +273,23 @@ configured, development offers **Sign in as demo user** and **Create a test acco
 
 All settings are documented in [.env.example](.env.example).
 
+### Testing another app on your machine (external fixture)
+
+Any app served on localhost can be tested from the command line, without the web app, with its
+own screen size and artifact folder (`DEV_MODE=true` required):
+
+```bash
+cd apps/worker
+uv run worker run-local http://localhost:8080/ --viewport 390x844 \
+    --data-dir ~/some/folder/data --export ~/some/folder/results/run.json
+uv run worker export RUN_ID --out run.json   # export any earlier run's findings as JSON
+```
+
+`--viewport WIDTHxHEIGHT` sets the size the crawl, the agent and replay start at (default desktop
+1280×800). `--data-dir` keeps the run's screenshots out of `DATA_DIR`. The JSON export lists
+the run's model, viewport, cost and duration, and per finding its description, severity, steps,
+console/network/accessibility evidence, screenshot path and whether replay verified it.
+
 ### Tests
 
 ```bash

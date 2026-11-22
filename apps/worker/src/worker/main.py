@@ -8,10 +8,12 @@ uv run worker reverify ID replay an old run's agent reports again (read-only); -
                           the pinned judge model too
 uv run worker export ID --out FILE   a run's findings as JSON (read-only); --data-dir DIR where
                           its screenshots are (default DATA_DIR)
+uv run worker run-local URL          one interactive run of an app on localhost (DEV_MODE=true);
+                          --viewport WxH, --data-dir DIR for its screenshots, --export FILE
 uv run worker make-admin EMAIL        let a user see usage across workspaces (/admin/usage)
 uv run worker set-plan SLUG PLAN      put a workspace on a plan (free, team, business)
-Operator commands (bench, reverify, export, backfill-fingerprints, make-admin, set-plan) use the
-admin connection (DATABASE_URL); the worker loop uses its own role (WORKER_DATABASE_URL).
+Operator commands (bench, reverify, export, run-local, backfill-fingerprints, make-admin, set-plan)
+use the admin connection (DATABASE_URL); the worker loop uses its own role (WORKER_DATABASE_URL).
 """
 
 import argparse
@@ -122,6 +124,13 @@ def main(argv: list[str] | None = None) -> None:
     export.add_argument(
         "--data-dir", type=Path, help="where the run's screenshots are (default: DATA_DIR)"
     )
+    local = sub.add_parser("run-local", help="one interactive run of an app on localhost")
+    local.add_argument("url", help="http://localhost:PORT/... or http://127.0.0.1:PORT/...")
+    local.add_argument("--viewport", help="the screen to start on, WIDTHxHEIGHT (default desktop)")
+    local.add_argument(
+        "--data-dir", type=Path, help="where to store the run's screenshots (default: DATA_DIR)"
+    )
+    local.add_argument("--export", type=Path, help="also write the run's findings to a JSON file")
     sub.add_parser(
         "backfill-fingerprints", help="give findings stored before run 4 their fingerprint (J4)"
     )
@@ -157,6 +166,18 @@ def main(argv: list[str] | None = None) -> None:
             out = write_export(session, run_id, args.out, data_dir=data_dir.resolve())
         log.info("run %s → %s", run_id, out)
         return
+
+    if args.command == "run-local":
+        from worker.local_run import local_settings, run_local
+
+        local = local_settings(settings, args.url, args.data_dir or settings.data_path())
+        llm = make_client(local)
+        log.info("local run: provider=%s model=%s", llm.provider, llm.agent_model)
+        # Creates its own workspace and reads the run back: an operator's command, like bench.
+        sessions = make_session_factory(make_engine(local, admin=True))
+        result = run_local(sessions, local, llm, args.url, args.viewport, export=args.export)
+        print(json.dumps(result, indent=2))
+        raise SystemExit(0 if result["status"] == "done" else 1)
 
     if args.command in ("make-admin", "set-plan"):
         # Operator commands: the admin connection, never the web app.
