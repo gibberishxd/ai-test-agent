@@ -63,6 +63,13 @@ class LayoutCheck(BaseModel):
         return found
 
 
+class MetaCheck(BaseModel):
+    """The meta/SEO check's result for one page (meta.py)."""
+
+    og_image: str | None = None  # the absolute og:image URL, if the page has one
+    problems: list[str] = Field(default_factory=list)  # "og:title missing", ...
+
+
 class PageResult(BaseModel):
     """Everything the checker found on one visited page."""
 
@@ -80,6 +87,7 @@ class PageResult(BaseModel):
     soft_404: bool = False  # status 200, but the page says "not found" (single-page apps)
     blocked_requests: list[str] = Field(default_factory=list)  # refused by the safety guard
     layout: LayoutCheck | None = None  # measured at the run's screen size
+    meta: MetaCheck | None = None  # Open Graph, twitter:card, canonical, icons
 
 
 class BrokenLink(BaseModel):

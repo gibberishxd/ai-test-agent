@@ -30,6 +30,7 @@ def findings_from_pages(pages: list[PageResult]) -> list[BugReport]:
         + _accessibility(pages)
         + _slow_pages(pages)
         + _layout(pages)
+        + _meta(pages)
     )
 
 
@@ -243,6 +244,33 @@ def _layout(pages: list[PageResult]) -> list[BugReport]:
                     **common,
                 )
             )
+    return bugs
+
+
+def _meta(pages: list[PageResult]) -> list[BugReport]:
+    """Metadata problems: pages with exactly the same problems share one finding (a site-wide
+    template), pages whose problems differ get their own."""
+    groups: dict[tuple[str, ...], list[str]] = defaultdict(list)
+    for page in pages:
+        if page.meta and page.meta.problems:
+            groups[tuple(page.meta.problems)].append(page.url)
+    bugs = []
+    for problems, urls in groups.items():
+        urls = _unique(urls)
+        where = _path(urls[0]) if len(urls) == 1 else f"{len(urls)} pages"
+        bugs.append(
+            _deterministic(
+                title=f"Sharing and icon metadata incomplete on {where}",
+                severity="low",
+                category="seo",
+                page_url=urls[0],
+                expected="Open Graph tags (og:title, og:description, og:url, a real og:image), "
+                "twitter:card, a canonical link, a favicon and an apple-touch-icon.",
+                actual="; ".join(problems),
+                repro_steps=[f"Open {urls[0]}", "View the page source's <head>"],
+                evidence={"check": "meta", "problems": list(problems), "pages": urls},
+            )
+        )
     return bugs
 
 

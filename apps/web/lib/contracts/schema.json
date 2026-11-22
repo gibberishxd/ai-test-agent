@@ -487,6 +487,32 @@
         "title": "LayoutCheck",
         "type": "object"
       },
+      "MetaCheck": {
+        "description": "The meta/SEO check's result for one page (meta.py).",
+        "properties": {
+          "og_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Og Image"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "title": "MetaCheck",
+        "type": "object"
+      },
       "PageResult": {
         "description": "Everything the checker found on one visited page.",
         "properties": {
@@ -564,6 +590,17 @@
             ],
             "default": null,
             "title": "Load Ms"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MetaCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "mobile_screenshot": {
             "anyOf": [
