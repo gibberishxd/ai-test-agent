@@ -1538,8 +1538,13 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   - the pointer is moved off the content before every screenshot, and animations finish
     first; the target is scrolled into view before the "before" pictures (the click would
     scroll it anyway).
-  - A pixel changed when a colour channel differs by more than 10% (pixelmatch's default
-    threshold); the region changed noticeably at 100 changed CSS pixels (about two
+  - A pixel changed when its brightness differs by more than 10% (pixelmatch's default
+    threshold) after a 1-pixel blur of both pictures. First written as "any colour channel";
+    CI on Linux showed why not: Chromium there redraws unchanged text with different
+    sub-pixel (coloured) anti-aliasing when the focus moves, ~1,000 changed pixels on a page
+    where nothing happened (0 with blurred brightness). pixelmatch and Playwright ignore
+    anti-aliasing by default for the same reason. The region changed noticeably at 100 changed
+    CSS pixels (about two
     characters of body text). Chromium draws a page the same way twice (a dead button
     measured 0 changed pixels outside its mask) and Playwright's screenshot assertions count
     any differing pixel by default; the floor absorbs stray anti-aliased edges. A share of

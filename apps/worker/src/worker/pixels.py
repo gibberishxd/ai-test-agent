@@ -16,9 +16,16 @@ What is compared:
 - minus pixels that changed between two "before" screenshots taken a moment apart (a carousel,
   a blinking caret, an animation that runs by itself).
 
-A pixel counts as changed when any colour channel differs by more than PIXEL_THRESHOLD (10% of
-the range, pixelmatch's default threshold). The region changed noticeably when at least
-MIN_CHANGED_CSS_PX pixels did (in CSS pixels, so the device's pixel density doesn't matter).
+A pixel counts as changed when its brightness differs by more than PIXEL_THRESHOLD (10% of the
+range, pixelmatch's default threshold), after a 1-pixel blur of both pictures. That is how
+anti-aliasing is ignored, as pixelmatch and Playwright's screenshot comparison do by default:
+Chromium on Linux redraws unchanged text with different sub-pixel (coloured) anti-aliasing when
+the focus moves, which changed ~1,000 pixels of a page where nothing happened. Brightness
+ignores the colour fringes, and the blur averages out edges that moved by a fraction of a
+pixel; a real change (new text, a panel) is far larger than one pixel and still shows.
+
+The region changed noticeably when at least MIN_CHANGED_CSS_PX pixels did (in CSS pixels, so
+the device's pixel density doesn't matter).
 Chromium draws the same page the same way twice (a dead button measured 0 changed pixels
 outside its mask), and Playwright's own screenshot assertions count any differing pixel by
 default; the floor only absorbs a stray anti-aliased edge. It is an area, not a share of the
@@ -28,9 +35,10 @@ screen: the same revealed sentence is 0.8% of a desktop region and 2.6% of a pho
 import io
 from dataclasses import dataclass
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 PIXEL_THRESHOLD = 26  # of 255: 10%, pixelmatch's default
+BLUR_PX = 1  # anti-aliasing tolerance
 MIN_CHANGED_CSS_PX = 100  # a 10×10 area: about two characters of body text
 MASK_MARGIN_PX = 8  # focus rings are 2–4 px wide plus an offset; box-shadow rings similar
 ABOVE_SHARE, BELOW_SHARE = 0.25, 0.5  # of the screen height
@@ -62,12 +70,14 @@ def _image(png: bytes) -> Image.Image:
 
 
 def _changed_mask(a: Image.Image, b: Image.Image) -> Image.Image:
-    """1-bit image: white where any channel differs by more than PIXEL_THRESHOLD."""
-    diff = ImageChops.difference(a, b)
-    channels = [c.point(lambda v: 255 if v > PIXEL_THRESHOLD else 0) for c in diff.split()]
-    return ImageChops.lighter(ImageChops.lighter(channels[0], channels[1]), channels[2]).convert(
-        "1"
-    )
+    """1-bit image: white where the blurred brightness differs by more than PIXEL_THRESHOLD."""
+    diff = ImageChops.difference(_softened(a), _softened(b))
+    return diff.point(lambda v: 255 if v > PIXEL_THRESHOLD else 0).convert("1")
+
+
+def _softened(image: Image.Image) -> Image.Image:
+    """Brightness only, blurred by one pixel: anti-aliasing differences average out."""
+    return image.convert("L").filter(ImageFilter.BoxBlur(BLUR_PX))
 
 
 def region_change(
