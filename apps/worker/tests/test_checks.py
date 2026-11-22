@@ -127,3 +127,35 @@ def test_guard_vets_the_og_image_request(guarded_context, site_url):
     # Its requests reach the proxy as a tunnel (CONNECT), so the guard logs the host.
     assert any("10.0.0.5" in b.url for b in guard.blocked)
     assert any(p.startswith("og:image fails to load") for p in page.meta.problems)
+
+
+def test_collects_console_warnings_separately_from_errors(context, site_url):
+    page, _ = visit_page(context, f"{site_url}/warnings.html")
+    assert [w.text for w in page.console_warnings] == [
+        "Deprecated option 'size' used; use 'width'",
+        "Missing translation for key cart.title",
+    ]  # each distinct warning once
+    assert all(w.kind == "warning" for w in page.console_warnings)
+    assert [e.text for e in page.console_errors] == ["Something broke"]
+
+
+def test_the_harness_own_scripts_dont_count_as_page_warnings(context, site_url):
+    from worker.browser import evaluate_quietly, listen
+
+    tab = context.new_page()
+    errors, failed, warnings = [], [], []
+    listen(tab, errors, failed, warnings)
+    tab.goto(f"{site_url}/clean.html")
+    evaluate_quietly(tab, "async () => { console.warn('from our script'); return 1; }")
+    tab.evaluate("() => console.warn('from the page')")
+    tab.wait_for_timeout(100)
+    assert [w.text for w in warnings] == ["from the page"]
+    tab.close()
+
+
+def test_warnings_from_browser_extensions_are_ignored():
+    from worker.browser import from_extension
+
+    assert from_extension({"url": "chrome-extension://abc/content.js"}, "x")
+    assert from_extension({"url": ""}, "Error in chrome-extension://abc/bg.js")
+    assert not from_extension({"url": "https://shop.test/app.js"}, "x")

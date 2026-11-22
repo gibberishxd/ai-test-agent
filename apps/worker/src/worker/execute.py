@@ -124,6 +124,7 @@ def run_passive(
 def page_events(page: PageResult) -> list[dict]:
     """A compact list of what went wrong on the page, for the live timeline."""
     events = [{"type": e.kind, "text": e.text[:300]} for e in page.console_errors]
+    events += [{"type": "warning", "text": w.text[:300]} for w in page.console_warnings]
     events += [
         {"type": "network", "text": f"{r.method} {r.url} → {r.status or r.failure}"}
         for r in page.failed_requests

@@ -158,3 +158,24 @@ def test_layout_fingerprint_is_the_check_not_the_numbers():
         return findings_from_pages([page(layout=layout)])[0]
 
     assert fingerprint(overflow(120)) == fingerprint(overflow(300))
+
+
+def test_a_pages_console_warnings_are_one_low_finding():
+    warnings = [
+        ConsoleError(kind="warning", text="Deprecated option"),
+        ConsoleError(kind="warning", text="Missing translation"),
+    ]
+    error = ConsoleError(kind="console", text="Something broke")
+    bugs = findings_from_pages(
+        [
+            page(console_warnings=warnings, console_errors=[error]),
+            page(CART, console_warnings=warnings),
+        ]
+    )
+    found = [b for b in bugs if b.category == "console-warning"]
+    assert [b.page_url for b in found] == [HOME, CART]  # per page
+    assert found[0].severity == "low"
+    assert found[0].evidence["console_warnings"] == [w.model_dump() for w in warnings]
+    assert "Deprecated option" in found[0].actual and "Missing translation" in found[0].actual
+    [error_bug] = [b for b in bugs if b.category == "console-error"]
+    assert error_bug.severity == "medium"  # errors keep their severity

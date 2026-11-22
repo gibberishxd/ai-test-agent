@@ -571,3 +571,15 @@ def test_without_specs_the_observation_has_no_requirements_section(agent):
     run.run()
     assert "REQUIREMENTS" not in llm.calls[0]["observation"]
     assert "SPECS:" not in llm.calls[0]["observation"]
+
+
+def test_console_warnings_become_page_evidence_but_not_model_events(agent):
+    run, _, _ = agent([call("finish", summary="done")], target="/warnings.html")
+    result = run.run()
+    [page] = result.pages.values()
+    assert [w.text for w in page.console_warnings] == [
+        "Deprecated option 'size' used; use 'width'",
+        "Missing translation for key cart.title",
+    ]
+    assert not any("Deprecated" in e for e in result.steps[0].events)
+    assert any("Something broke" in e for e in result.steps[0].events)  # errors still shown
