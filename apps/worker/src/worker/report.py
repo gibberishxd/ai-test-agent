@@ -40,6 +40,29 @@ class A11yViolation(BaseModel):
     targets: list[str]  # CSS selectors of the offending elements
 
 
+class LayoutCheck(BaseModel):
+    """The layout check's measurements of one page at the run's screen size (layout.py)."""
+
+    viewport_width: int
+    overflow_px: int = 0  # how much wider than the screen the page is (0: it fits)
+    sticking_out: list[dict] = Field(default_factory=list)  # {selector, tag, right, width}
+    small_targets: list[dict] = Field(default_factory=list)  # {selector, tag, name, width, height}
+    small_target_count: int = 0
+    small_text: list[dict] = Field(default_factory=list)  # {selector, text, font_size}
+    small_text_count: int = 0
+
+    def problems(self) -> list[str]:
+        """Which problems the page has: "overflow", "small-targets", "small-text"."""
+        found = []
+        if self.overflow_px > 0:
+            found.append("overflow")
+        if self.small_target_count:
+            found.append("small-targets")
+        if self.small_text_count:
+            found.append("small-text")
+        return found
+
+
 class PageResult(BaseModel):
     """Everything the checker found on one visited page."""
 
@@ -56,6 +79,7 @@ class PageResult(BaseModel):
     load_ms: int | None = None  # time until the "load" event
     soft_404: bool = False  # status 200, but the page says "not found" (single-page apps)
     blocked_requests: list[str] = Field(default_factory=list)  # refused by the safety guard
+    layout: LayoutCheck | None = None  # measured at the run's screen size
 
 
 class BrokenLink(BaseModel):

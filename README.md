@@ -44,8 +44,8 @@ More in [Run it locally](#run-it-locally).
 ## Highlights
 
 **Finds bugs like a tester**
-- Free deterministic checks first (console errors, failed requests, broken links, WCAG A/AA via
-  axe-core), then an agent that follows a QA charter: boundary values, invalid input,
+- Free deterministic checks first (console errors, failed requests, broken links, WCAG A/AA and
+  best-practice rules via axe-core, layout at the run's screen size), then an agent that follows a QA charter: boundary values, invalid input,
   arithmetic, doing things twice, sessions, small screens, list → detail pages.
 - Tests apps behind a login with a test account it never shows the model.
 - **Critical flows:** list the journeys that must never break ("add an item, check out, place
@@ -184,8 +184,10 @@ flowchart LR
    service.
 2. **The worker** claims the run with `SELECT … FOR UPDATE SKIP LOCKED` and:
    - **crawls** same-origin pages and runs **deterministic checks** on each: console errors and
-     uncaught exceptions, failed and 4xx/5xx requests, broken links, axe-core WCAG A/AA, slow
-     loads, a screenshot;
+     uncaught exceptions, failed and 4xx/5xx requests, broken links, axe-core WCAG A/AA and
+     best-practice rules, slow loads, a screenshot, and a **layout check** at the run's screen
+     size (a page wider than the screen, tap targets under 44×44 px below 768 px wide, text
+     under 12 px outside code);
    - in **interactive** mode, runs the **agent loop**: observe (numbered interactive elements,
      page text as untrusted data, a screenshot only when needed) → the model picks exactly one
      tool → the worker checks it against the safety rules → runs it → logs it;

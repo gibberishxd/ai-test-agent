@@ -8,8 +8,8 @@ fingerprint = first 16 hex characters of SHA-256 over "route | category | key":
 - key: what is wrong, normalised so run-to-run noise doesn't change it:
   network → method + normalised request path + status; console-error → the message without
   numbers, hashes or file positions; accessibility → the axe rule; broken-link → the normalised
-  link; agent reports → the element acted on (role + name), else the title's words (lowercase,
-  no numbers or stopwords, sorted).
+  link; page checks (layout, meta) → which check; agent reports → the element acted on
+  (role + name), else the title's words (lowercase, no numbers or stopwords, sorted).
 
 The same message on two different pages is two bugs (the route differs); a reworded agent report
 on the same element is one bug (the key is the element, not the wording).
@@ -80,6 +80,8 @@ def _key(bug: BugReport) -> str:
         return normalize_message(evidence["console_errors"][0].get("text", ""))
     if bug.category == "accessibility" and evidence.get("a11y"):
         return evidence["a11y"][0].get("rule_id", "")
+    if evidence.get("check"):  # a deterministic page check (layout, meta): which one
+        return f"check:{evidence['check']}"
     if bug.category == "broken-link" and evidence.get("link"):
         return normalize_route(evidence["link"])
     element = evidence.get("element")

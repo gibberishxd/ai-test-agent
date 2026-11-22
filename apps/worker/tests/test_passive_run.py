@@ -140,7 +140,10 @@ def test_interactive_run_records_agent_steps_bugs_and_cost(
         "navigate",
         "report_bug",
         "finish",
-        "verify_bug",  # no "dedupe": fewer than two bugs survive, so there's nothing to merge
+        # The crawl's axe best-practice findings (the fixture's index page has no <main>)
+        # are reports too, so there are reports to merge.
+        "dedupe",
+        "verify_bug",
     ]
     assert agent_steps[1].blocked and "origin" in agent_steps[1].block_reason
     assert agent_steps[0].reasoning == "fill the name"

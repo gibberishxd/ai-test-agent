@@ -1392,3 +1392,31 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **IT-Tools start command:** `arch -arm64` added to IT-Tools' install and start commands in
   `bugs.json`. Started from the worker's Python, Node ran as x64 and found the arm64 esbuild
   binary wrong. react-admin already had the same prefix. Harness only, no agent change.
+
+## D105. Layout check and axe best-practice rules (2026-11-22)
+- **Decision:** every crawled page gets a layout check at the run's own screen size, before the
+  phone-width screenshot: (1) the page is wider than the screen, naming up to 5 elements that
+  stick out, outermost first; (2) tap targets under 44×44 CSS px, on screens under 768 px wide;
+  (3) visible text under 12 px outside `code`/`pre`/`kbd`/`samp`. One finding per problem per
+  page (the elements differ page by page). Overflow is `medium` (WCAG 1.4.10 Reflow is AA);
+  targets and text are `low`. axe now also runs its `best-practice` rules (landmarks, skip
+  links, one main heading), still one finding per rule. This reverses part of D14.
+- **Where the thresholds come from:** 44 px: WCAG 2.2 SC 2.5.5 Target Size (Enhanced) and
+  Apple's Human Interface Guidelines (44 pt). 768 px: the common tablet breakpoint (Bootstrap
+  and Tailwind `md`), so phones and small tablets are covered. 12 px: Lighthouse's "legible font
+  sizes" audit. None of them comes from a measured site.
+- **Choices inside the checks:**
+  - "Wider than the screen" means content past the right edge that a user can scroll to:
+    `overflow-x: hidden` on the page clips instead, so it doesn't count. Elements inside their
+    own scroll box or fixed to the screen don't widen the page and aren't named.
+  - Tap targets keep WCAG's exceptions: a link inside a sentence (sized by the text around it)
+    and disabled controls. A visually hidden checkbox counts as big as its label (the label is
+    what a user taps). Elements outside the screen (a closed off-canvas menu) aren't checked.
+  - Small text skips visually hidden text (screen-reader-only, 1 px boxes).
+- **Alternatives:** the literal `scrollWidth > viewport` test (would flag pages that clip and
+  can't scroll); 48 px (Google's Material guidance) or 24 px (WCAG 2.5.8 AA, which axe's
+  `target-size` rule already checks); grouping across pages like D14 (the elements that fail
+  differ per page, so a per-page finding is what a developer fixes).
+- **Why reverse D14 on best-practice:** the owner asked for landmark and skip-link rules. The
+  cost is the one D14 named: findings on the clean benchmark builds that are advice rather than
+  failures. The benchmark's clean-build false alarms measure it, by category.

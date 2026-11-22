@@ -434,6 +434,59 @@
         "title": "FailedRequest",
         "type": "object"
       },
+      "LayoutCheck": {
+        "description": "The layout check's measurements of one page at the run's screen size (layout.py).",
+        "properties": {
+          "overflow_px": {
+            "default": 0,
+            "title": "Overflow Px",
+            "type": "integer"
+          },
+          "small_target_count": {
+            "default": 0,
+            "title": "Small Target Count",
+            "type": "integer"
+          },
+          "small_targets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Small Targets",
+            "type": "array"
+          },
+          "small_text": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Small Text",
+            "type": "array"
+          },
+          "small_text_count": {
+            "default": 0,
+            "title": "Small Text Count",
+            "type": "integer"
+          },
+          "sticking_out": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sticking Out",
+            "type": "array"
+          },
+          "viewport_width": {
+            "title": "Viewport Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "viewport_width"
+        ],
+        "title": "LayoutCheck",
+        "type": "object"
+      },
       "PageResult": {
         "description": "Everything the checker found on one visited page.",
         "properties": {
@@ -488,6 +541,17 @@
             ],
             "default": null,
             "title": "Found On"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LayoutCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "load_ms": {
             "anyOf": [

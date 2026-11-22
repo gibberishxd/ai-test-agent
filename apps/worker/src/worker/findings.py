@@ -11,6 +11,7 @@ Severity follows the rubric in the product brief (5.4).
 from collections import defaultdict
 from urllib.parse import urlsplit
 
+from worker.layout import MIN_FONT_PX, MIN_TARGET_PX
 from worker.report import BugReport, PageResult
 
 SLOW_PAGE_MS = 3000
@@ -28,6 +29,7 @@ def findings_from_pages(pages: list[PageResult]) -> list[BugReport]:
         + broken
         + _accessibility(pages)
         + _slow_pages(pages)
+        + _layout(pages)
     )
 
 
@@ -167,6 +169,81 @@ def _slow_pages(pages: list[PageResult]) -> list[BugReport]:
         for page in pages
         if page.load_ms is not None and page.load_ms > SLOW_PAGE_MS
     ]
+
+
+def _layout(pages: list[PageResult]) -> list[BugReport]:
+    """Layout problems, one finding per problem per page: the elements differ page by page."""
+    bugs = []
+    for page in pages:
+        layout = page.layout
+        if layout is None:
+            continue
+        width, path = layout.viewport_width, _path(page.url)
+        common = {
+            "category": "layout",
+            "page_url": page.url,
+            "repro_steps": [f"Open {page.url} in a {width} px wide window"],
+        }
+        if layout.overflow_px > 0:
+            names = ", ".join(e["selector"] for e in layout.sticking_out) or "(not found)"
+            bugs.append(
+                _deterministic(
+                    title=f"Page wider than the screen: {path} scrolls sideways at {width} px",
+                    severity="medium",
+                    expected=f"The page fits a {width} px wide screen (WCAG 1.4.10 Reflow).",
+                    actual=f"The page is {layout.overflow_px} px wider than the screen. "
+                    f"Sticking out: {names}",
+                    evidence={
+                        "check": "overflow",
+                        "viewport_width": width,
+                        "overflow_px": layout.overflow_px,
+                        "elements": layout.sticking_out,
+                        "pages": [page.url],
+                    },
+                    **common,
+                )
+            )
+        if layout.small_target_count:
+            listed = ", ".join(
+                f'{t["tag"]} "{t["name"]}" ({t["width"]}×{t["height"]})'
+                for t in layout.small_targets
+            )
+            bugs.append(
+                _deterministic(
+                    title=f"Small tap targets on {path} at {width} px",
+                    severity="low",
+                    expected=f"Controls are at least {MIN_TARGET_PX}×{MIN_TARGET_PX} px on a phone "
+                    "(WCAG 2.5.5, Apple's guidelines).",
+                    actual=f"{layout.small_target_count} control(s) are smaller: {listed}",
+                    evidence={
+                        "check": "small-targets",
+                        "viewport_width": width,
+                        "count": layout.small_target_count,
+                        "elements": layout.small_targets,
+                        "pages": [page.url],
+                    },
+                    **common,
+                )
+            )
+        if layout.small_text_count:
+            listed = ", ".join(f'"{t["text"]}" ({t["font_size"]} px)' for t in layout.small_text)
+            bugs.append(
+                _deterministic(
+                    title=f"Small text on {path}",
+                    severity="low",
+                    expected=f"Text is at least {MIN_FONT_PX} px, outside code.",
+                    actual=f"{layout.small_text_count} text element(s) are smaller: {listed}",
+                    evidence={
+                        "check": "small-text",
+                        "viewport_width": width,
+                        "count": layout.small_text_count,
+                        "elements": layout.small_text,
+                        "pages": [page.url],
+                    },
+                    **common,
+                )
+            )
+    return bugs
 
 
 def _is_error(status: int | None) -> bool:

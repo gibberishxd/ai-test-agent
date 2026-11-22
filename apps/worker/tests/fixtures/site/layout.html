@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Layout problems</title>
+  <style>
+    body { margin: 0; font-size: 16px; }
+    .wide { width: 2000px; height: 20px; background: #ccc; }
+    .scroller { overflow-x: auto; width: 100%; }
+    .scroller .inner { width: 3000px; height: 20px; }
+    .fixed { position: fixed; top: 0; left: 0; width: 5000px; height: 4px; }
+    .tiny { width: 20px; height: 20px; padding: 0; }
+    .big { width: 48px; height: 48px; }
+    .fine { font-size: 10px; }
+    code { font-size: 10px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
+               clip: rect(0 0 0 0); white-space: nowrap; font-size: 8px; }
+    .hidden-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+    .card-label { display: block; padding: 16px; min-height: 48px; }
+    .offcanvas { position: absolute; left: -500px; top: 0; width: 300px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Layout problems</h1>
+    <div class="wide" id="too-wide"></div>
+    <div class="scroller"><div class="inner"></div></div>
+    <div class="fixed"></div>
+    <button class="tiny" id="tiny" aria-label="Close">x</button>
+    <button class="tiny" disabled aria-label="Disabled">d</button>
+    <button class="big">Go</button>
+    <p>Read our <a href="/terms">terms</a> before you buy anything from this shop today.</p>
+    <label class="card-label"><input type="checkbox" class="hidden-input"> Gift wrap</label>
+    <nav class="offcanvas"><a href="/menu" class="tiny">m</a></nav>
+    <p class="fine">Small print under the price.</p>
+    <p>Use <code>npm test</code> to run it.</p>
+    <span class="sr-only">Only for screen readers</span>
+  </main>
+</body>
+</html>

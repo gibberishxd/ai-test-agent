@@ -19,6 +19,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Request as PlaywrightRequest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from worker.layout import check_layout
 from worker.report import A11yViolation, ConsoleError, FailedRequest, PageResult
 from worker.safety.secrets import redact
 
@@ -60,9 +61,9 @@ def viewport_label(name: str) -> str:
 NETWORK_IDLE_TIMEOUT_MS = 5_000
 AXE_PATH = Path(__file__).parent / "vendor" / "axe.min.js"
 
-# WCAG A/AA rules only. axe's "best-practice" rules are advice, not failures, and would make
-# the false-alarm count depend on taste.
-AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]
+# WCAG A/AA rules, plus axe's "best-practice" rules (landmarks, skip links, one main heading):
+# D14 left those out as advice; D105 adds them, still one finding per rule.
+AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"]
 
 # Failures that aren't the site's fault: navigation cancelled the request, or our guard did.
 IGNORED_FAILURES = {"net::ERR_ABORTED", "net::ERR_BLOCKED_BY_CLIENT"}
@@ -76,6 +77,7 @@ class VisitOptions:
     # Same, for a second screenshot at phone width (layout bugs only show there).
     save_mobile_screenshot: Callable[[bytes, str], str] | None = None
     run_axe: bool = True
+    check_layout: bool = True
 
 
 @cache
@@ -113,6 +115,8 @@ def visit_page(
         )
         if options.run_axe:
             result.a11y_violations = run_axe(page)
+        if options.check_layout:
+            result.layout = check_layout(page)  # at the run's own size, before the phone shot
         if options.save_screenshot:
             result.screenshot = options.save_screenshot(page.screenshot(full_page=True), url)
         if options.save_mobile_screenshot:
