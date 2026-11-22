@@ -1420,3 +1420,21 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Why reverse D14 on best-practice:** the owner asked for landmark and skip-link rules. The
   cost is the one D14 named: findings on the clean benchmark builds that are advice rather than
   failures. The benchmark's clean-build false alarms measure it, by category.
+
+## D106. Meta/SEO check (2026-11-22)
+- **Decision:** every crawled page that loaded is checked once for og:title, og:description,
+  og:url, og:image, twitter:card, a canonical link, a favicon (an icon link, or else the
+  browser's default `/favicon.ico`) and an apple-touch-icon. An og:image on a known placeholder
+  service (placehold.co, via.placeholder.com, dummyimage.com, picsum.photos and similar) or
+  one that doesn't load as an image is a problem. All `low`, category `seo`.
+- **Grouping (the owner's choice):** pages with exactly the same problems share one finding
+  listing the pages (a site-wide template); pages whose problems differ get their own.
+- **Where the list comes from:** the Open Graph protocol (ogp.me: og:title, og:image and og:url
+  are required properties, og:description recommended), X/Twitter's card markup, and the icons
+  browsers and iOS show. og:type isn't checked: a missing one defaults to `website`.
+- **Loading the og:image:** through the run's own browser context (`context.request`), so the
+  safety proxy vets it like any page request (a test checks a private address is refused);
+  once per scan, cached by URL. 5 s timeout. Not on error pages.
+- **Alternatives:** one finding per page always (the owner's first wording; on a site whose
+  template misses the tags, that's one identical finding per page); a HEAD request (many image
+  hosts answer HEAD wrongly).

@@ -118,3 +118,12 @@ def test_guard_lets_normal_pages_through(guarded_context, site_url):
     assert page.status == 200
     assert guard.blocked == []
     assert ("/status/500", 500) in {(urlsplit(r.url).path, r.status) for r in page.failed_requests}
+
+
+def test_guard_vets_the_og_image_request(guarded_context, site_url):
+    # The meta check loads og:image through the run's context, so the safety proxy applies.
+    context, guard = guarded_context
+    page, _ = visit_page(context, f"{site_url}/meta/private.html")
+    # Its requests reach the proxy as a tunnel (CONNECT), so the guard logs the host.
+    assert any("10.0.0.5" in b.url for b in guard.blocked)
+    assert any(p.startswith("og:image fails to load") for p in page.meta.problems)

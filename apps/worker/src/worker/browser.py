@@ -10,7 +10,7 @@ full-page screenshot.
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
@@ -20,6 +20,7 @@ from playwright.sync_api import Request as PlaywrightRequest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from worker.layout import check_layout
+from worker.meta import check_meta
 from worker.report import A11yViolation, ConsoleError, FailedRequest, PageResult
 from worker.safety.secrets import redact
 
@@ -78,6 +79,9 @@ class VisitOptions:
     save_mobile_screenshot: Callable[[bytes, str], str] | None = None
     run_axe: bool = True
     check_layout: bool = True
+    check_meta: bool = True
+    # og:image and /favicon.ico results (url → problem or None), shared by a scan's pages.
+    image_cache: dict = field(default_factory=dict)
 
 
 @cache
@@ -117,6 +121,8 @@ def visit_page(
             result.a11y_violations = run_axe(page)
         if options.check_layout:
             result.layout = check_layout(page)  # at the run's own size, before the phone shot
+        if options.check_meta and result.status is not None and result.status < 400:
+            result.meta = check_meta(page, options.image_cache)  # not on an error page
         if options.save_screenshot:
             result.screenshot = options.save_screenshot(page.screenshot(full_page=True), url)
         if options.save_mobile_screenshot:
