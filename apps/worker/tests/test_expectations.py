@@ -313,3 +313,67 @@ def test_a_reviewer_bug_on_a_step_without_a_named_element_is_recorded_not_a_cras
     [bug] = result.bugs
     assert bug.title == "Total ignores quantity"
     assert "element" not in bug.evidence
+
+
+# --- success without a request ---------------------------------------------------------------
+
+
+def test_success_messages_are_found_and_failures_are_not():
+    from worker.agent.expect import success_messages
+
+    lines = [
+        "Thanks for subscribing!",
+        "Your message was sent successfully.",
+        "Profile saved",
+        "Code could not be saved.",
+        "Failed to send: try again",
+        "Subscribe",
+        "Not submitted",
+        "Thank you",
+    ]
+    assert success_messages(lines) == [
+        "Thanks for subscribing!",
+        "Your message was sent successfully.",
+        "Profile saved",
+        "Thank you",
+    ]
+
+
+def test_what_counts_as_sending_data():
+    from worker.agent.expect import Request, sent_data
+
+    static = [Request("GET", "image", "/logo.png"), Request("GET", "stylesheet", "/app.css")]
+    assert not sent_data(static)
+    assert sent_data([Request("POST", "other", "/subscribe")])  # any non-GET
+    assert sent_data([Request("GET", "fetch", "/api/subscribe?email=x")])  # a fetch
+    assert sent_data([Request("GET", "xhr", "/api/check")])
+    assert sent_data([Request("GET", "document", "/thanks")])  # a page load reaches the server
+    assert sent_data([Request("POST", "ping", "/beacon")])  # sendBeacon
+    assert sent_data([Request("SEND", "websocket", "/socket")])
+
+
+def test_with_a_reviewer_a_success_without_request_is_judged_by_the_reviewer(context, site_url):
+    guard = NetworkGuard(
+        allowed_local={("127.0.0.1", urlsplit(site_url).port)}, target_url=f"{site_url}/"
+    )
+    explorer = FakeClient(
+        decisions=[call("type", element_id=1, text="a@example.com"), call("click", element_id=2)]
+    )
+    reviewer = FakeClient(
+        texts=[
+            '{"bug": true, "reason": "nothing is sent", "title": "Joining sends nothing", '
+            '"severity": "high", "category": "functional", "expected": "a request", '
+            '"actual": "only a message"}'
+        ]
+    )
+    reviewer.agent_model = "big-reviewer"
+    config = AgentConfig(
+        target_url=f"{site_url}/submit.html",
+        mode="interactive",
+        budget=Budget(max_steps=2, max_seconds=60, max_cost_usd=1.0),
+    )
+    result = AgentRun(context.new_page(), explorer, guard, config, reviewer=reviewer).run()
+    assert "reviewer filed a bug" in result.steps[1].result
+    [bug] = result.bugs
+    assert "Thanks for joining!" in bug.evidence["success_without_request"]["success"]
+    assert "network" in bug.evidence["success_without_request"]
