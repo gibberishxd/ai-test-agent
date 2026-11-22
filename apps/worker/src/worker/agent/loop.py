@@ -22,7 +22,10 @@ from worker.agent.expect import (
     RESOLVING_ACTIONS,
     Candidate,
     Effect,
+    Request,
     mismatches,
+    sent_data,
+    success_messages,
 )
 from worker.agent.lists import ListTracker
 from worker.agent.observe import Element, Memory, PageState, build_observation, read_page
@@ -34,6 +37,7 @@ from worker.browser import VIEWPORTS, listen, viewport_label, viewport_size, wai
 from worker.keyboard_probe import Opened, opened_by, snapshot
 from worker.llm import LLMClient, ModelTimeout, ToolCall, Usage, UsageLimitReached
 from worker.login import LoginConfig, SignInResult, on_login_page
+from worker.page_state import WATCH_JS
 from worker.report import BugReport, ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
@@ -160,6 +164,10 @@ class AgentRun:
         self._lists.seed(config.known_lists or {})
         page.set_viewport_size(viewport_size(self._viewport))
         listen(page, self._console, self._failed, self._warnings)
+        self._requests: list[Request] = []  # every request the page sends, in order
+        page.on("request", self._on_request)
+        page.on("response", self._on_response)
+        page.on("websocket", self._on_websocket)
 
     # --- the loop ---------------------------------------------------------------------------
 
@@ -317,11 +325,14 @@ class AgentRun:
                 "block_reason": blocked,
             }
         before = self._snapshot() if call.name in EXPECT_ACTIONS else None
+        submit = self._watch_submit(call.name, element)
         result, changed = self._execute(call.name, args, element, state, index)
         if call.name == "report_bug" and result == "bug recorded" and self._pending:
             result += f" (resolves the mismatch from #{self._pending.pop(0).step})"
         if before is not None and not result.startswith("error"):
             result = self._compare(args, before, result, index, outcome)
+        if submit is not None and not result.startswith("error"):
+            result = self._check_submit(submit, args, result, index, outcome)
         left = self._return_to_site()
         if left:
             # Marked blocked so replay doesn't repeat a step that leaves the site.
@@ -646,9 +657,81 @@ class AgentRun:
             extra={
                 "reviewer": self.reviewer.agent_model,
                 **(named if element.get("name") else {}),
+                **_submit_evidence(args["check"]),
             },
         )
         return f"{flagged}: the reviewer filed a bug: {review.report['title']}"
+
+    # --- success without a request ------------------------------------------------------------
+
+    def _on_request(self, request) -> None:
+        self._requests.append(Request(request.method, request.resource_type, _path(request.url)))
+
+    def _on_response(self, response) -> None:
+        path = _path(response.url)
+        for entry in reversed(self._requests):
+            if entry.path == path and entry.status is None:
+                entry.status = response.status
+                return
+
+    def _on_websocket(self, socket) -> None:
+        path = _path(socket.url)
+        socket.on(
+            "framesent", lambda _payload: self._requests.append(Request("SEND", "websocket", path))
+        )
+
+    def _watch_submit(self, action: str, element: Element | None) -> dict | None:
+        """Before a click on a form's submit button: where the request log stands, the page's
+        text, and a watch for text that appears only briefly (a toast)."""
+        if action != "click" or element is None or not _submits_a_form(element):
+            return None
+        try:
+            self.page.evaluate(WATCH_JS, MAX_WATCHED)
+        except PlaywrightError:
+            return None
+        return {"mark": len(self._requests), "text": self._page_text()}
+
+    def _check_submit(self, watch: dict, args: dict, result: str, index: int, outcome: dict) -> str:
+        """After a submit: a success message with no request that sent anything is a candidate
+        for the model (or the reviewer) to judge. Not a bug by itself: client-only apps exist."""
+        requests = self._requests[watch["mark"] :]
+        if sent_data(requests):
+            return result
+        try:
+            seen = self.page.evaluate("() => window.__ataSeen || []")
+        except PlaywrightError:
+            seen = []
+        old = set(_lines(watch["text"]))
+        appeared = [line for line in _lines(self._page_text()) if line not in old]
+        appeared += [line for text in seen for line in _lines(str(text)) if line not in old]
+        success = success_messages(appeared)
+        if not success:
+            return result
+        network = [r.describe() for r in requests][:MAX_NETWORK_LOG]
+        expected = "submitting the form sends its data somewhere (a network request)"
+        happened = (
+            f'a success message ("{redact(success[0])[:120]}") but no request: '
+            f"{'; '.join(network) or 'no requests at all'}"
+        )
+        flags = ["a success message appeared but no request was sent"]
+        evidence = {"success": [redact(line) for line in success], "network": network}
+        args["check"] = {"expected": expected, "happened": happened, "flags": flags, **evidence}
+        if self.reviewer is not None:
+            return self._review_flag(args, expected, happened, flags, result, index, outcome)
+        self._pending.append(
+            Candidate(
+                index, expected, happened, flags, evidence={"success_without_request": evidence}
+            )
+        )
+        return (
+            f"{result} | MISMATCH: a success message appeared, but no request was sent "
+            f"({'; '.join(network) or 'no requests at all'}). Report it with report_bug if the "
+            "data should have gone to a server, or dismiss it with a reason"
+        )
+
+    def _candidate_evidence(self) -> dict:
+        """The evidence of the open candidate a report resolves (its network log)."""
+        return dict(self._pending[0].evidence) if self._pending else {}
 
     def _charge_reviewer(self, usage: Usage | None) -> None:
         if usage is None:
@@ -735,7 +818,7 @@ class AgentRun:
             observed=str(args.get("evidence") or ""),
             reasoning=str(args.get("reasoning") or ""),
             # The element of its last step keys the fingerprint (a reworded report stays one bug).
-            extra=self._last_element(step_ids, steps),
+            extra={**self._last_element(step_ids, steps), **self._candidate_evidence()},
         )
         return "bug recorded"
 
@@ -943,6 +1026,27 @@ def describe(action: str, args: dict, element: Element | None) -> str:
 
 
 MAX_RELOGINS = 3
+MAX_WATCHED = 200  # texts kept by the watch for briefly shown messages
+MAX_NETWORK_LOG = 30  # requests listed in a candidate's evidence
+
+
+def _submit_evidence(check: dict) -> dict:
+    """A success-without-request check's evidence (its network log), for the bug it becomes."""
+    if "network" not in check:
+        return {}
+    return {"success_without_request": {k: check[k] for k in ("success", "network")}}
+
+
+def _submits_a_form(element: Element) -> bool:
+    """A submit button, or any button inside a <form>."""
+    is_button = element.role == "button" or element.input_type in ("submit", "button")
+    return is_button and (element.input_type == "submit" or element.form_action is not None)
+
+
+def _path(url: str) -> str:
+    """A request URL without its query string or fragment (they can carry tokens)."""
+    parts = urlsplit(url)
+    return f"{parts.netloc}{parts.path}" if parts.netloc else url
 
 
 # Field values by label, for expected-vs-actual. Passwords and hidden fields are never read.

@@ -151,9 +151,62 @@ class Candidate:
     happened: str
     flags: list[str]
     blocked_once: bool = False
+    evidence: dict = field(default_factory=dict)  # added to the bug if the model reports it
 
     def describe(self) -> str:
         return (
             f"- #{self.step}: you expected: {self.expected} | happened: {self.happened} | "
             f"why: {'; '.join(self.flags)}"
         )
+
+
+# --- success without a request ------------------------------------------------------------------
+#
+# A form that says "Thanks!" but sent nothing anywhere has probably lost the user's data. Not
+# always (client-only apps exist), so it is a candidate for the model to judge, never a bug by
+# itself. The words are common UI copy for a completed submission, not any site's.
+
+SUCCESS = re.compile(
+    r"\b(success(ful(ly)?)?|thanks?\b|thank you|saved|sent|submitted|received|subscribed|"
+    r"confirmed|registered|signed up|we('ll| will) (be in touch|get back|contact you))",
+    re.IGNORECASE,
+)
+FAILURE = re.compile(
+    r"\b(not|n't|never|fail(ed|ure|s)?|error|unable|couldn'?t|could not|invalid|"
+    r"unsuccessful|try again)\b",
+    re.IGNORECASE,
+)
+MAX_SUCCESS_CHARS = 200
+# Requests that carry data to a server, whatever their method: a script's fetch or XHR, a
+# page load (a form's own GET submit), a beacon, an event stream or a WebSocket message.
+SENDING_TYPES = {"fetch", "xhr", "document", "ping", "eventsource", "websocket"}
+
+
+@dataclass
+class Request:
+    method: str
+    type: str  # Playwright's resource type: fetch, xhr, document, image, ...
+    path: str
+    status: int | None = None
+
+    def describe(self) -> str:
+        status = f" → {self.status}" if self.status is not None else ""
+        return f"{self.method} {self.path} ({self.type}){status}"
+
+
+def success_messages(lines: list[str]) -> list[str]:
+    """The lines that announce success ("Thanks for subscribing!"), not failure."""
+    return [
+        line
+        for line in dict.fromkeys(line.strip() for line in lines)
+        if line
+        and len(line) <= MAX_SUCCESS_CHARS
+        and SUCCESS.search(line)
+        and not FAILURE.search(line)
+    ]
+
+
+def sent_data(requests: list[Request]) -> bool:
+    """Did any of `requests` carry something to a server? (Any non-GET, or a GET that a
+    script or a page load made: not an image, stylesheet, script or font.)"""
+    return any(r.method != "GET" or r.type in SENDING_TYPES for r in requests)

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Forms</title></head>
+<body>
+  <main>
+    <h1>Forms</h1>
+    <form id="subscribe">
+      <label for="email">Email</label>
+      <input id="email" type="email">
+      <button>Join the list</button>
+    </form>
+    <form id="contact">
+      <label for="message">Message</label>
+      <input id="message">
+      <button>Send message</button>
+    </form>
+    <form id="broken">
+      <label for="code">Code</label>
+      <input id="code">
+      <button>Apply code</button>
+    </form>
+    <p id="status" role="status"></p>
+  </main>
+  <script>
+    const status = document.getElementById("status");
+    // Shows a success message without sending anything anywhere.
+    document.getElementById("subscribe").onsubmit = (event) => {
+      event.preventDefault();
+      status.textContent = "Thanks for joining!";
+    };
+    // Sends the message, then says so.
+    document.getElementById("contact").onsubmit = async (event) => {
+      event.preventDefault();
+      try { await fetch("/api/messages", { method: "POST", body: "hello" }); } catch (e) {}
+      status.textContent = "Message sent successfully.";
+    };
+    // A failure message is not a success message.
+    document.getElementById("broken").onsubmit = (event) => {
+      event.preventDefault();
+      status.textContent = "Code could not be saved.";
+    };
+  </script>
+</body>
+</html>

@@ -1487,3 +1487,26 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** a content panel mounted fresh by a framework on click (not hidden before)
   isn't recognised as a disclosure, so those are missed rather than guessed at. Each probe
   replays the agent's steps, which adds seconds per control after the run (no model cost).
+
+## D109. Success without a request (2026-11-22)
+- **Decision:** the agent's page keeps a log of every request (method, resource type, path,
+  status) and WebSocket message. When the agent clicks a form's submit button (or any button
+  inside a `<form>`), the loop notes where the log stands and watches for briefly shown text.
+  If a success message appears afterwards and no request in that interval sent anything, an
+  expected-vs-actual candidate opens (J1): the explorer must report or dismiss it, or the
+  reviewer decides when there is one. The interval's network log goes into the step's `check`
+  and, if it becomes a bug, into the bug's evidence (`success_without_request`).
+- **What counts:** "sent anything" is any non-GET request, or a GET of type fetch, xhr,
+  document (a page load), ping (sendBeacon), eventsource or websocket. A success message is
+  new text matching common completion copy (success, thanks / thank you, saved, sent,
+  submitted, received, subscribed, confirmed, registered, signed up, "we'll be in touch")
+  without a failure word (not, failed, error, unable, could not, invalid, try again).
+- **Why a candidate and not a bug:** a client-only app (a calculator, a local draft, a
+  settings page in localStorage) can rightly say "Saved" with no request. The model sees the
+  page and decides; replay verification then checks any report like every other.
+- **Alternatives:** a deterministic finding (would flag every client-only app); asking the
+  model on every submit (a model call per form, for the rare case).
+- **Tradeoffs:** success copy outside the word list (another language, an icon only) isn't
+  noticed; a request sent by a service worker or another tab isn't seen. A form that posts
+  to a third-party script before showing "Thanks" counts as sending, which is right: the
+  data went somewhere.

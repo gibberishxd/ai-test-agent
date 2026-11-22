@@ -602,3 +602,59 @@ def test_clicks_that_open_a_dialog_menu_or_toggle_are_recorded_for_the_keyboard_
         (1, "disclosure", "Shipping details"),
         (3, "dialog", "Open bad dialog"),
     ]
+
+
+# submit.html: [1] Email, [2] Join the list, [3] Message, [4] Send message, [5] Code, [6] Apply code
+
+
+def test_a_success_message_without_any_request_opens_a_candidate(agent):
+    run, _, _ = agent(
+        [
+            call("type", element_id=1, text="test@example.com"),
+            call("click", element_id=2),
+            call(
+                "report_bug",
+                title="Joining sends nothing",
+                severity="high",
+                category="functional",
+                expected="The email is sent to the server",
+                actual="A thank-you message, but no request",
+                step_ids=[1, 2],
+                evidence="network log",
+            ),
+            call("finish", summary="done"),
+        ],
+        target="/submit.html",
+    )
+    result = run.run()
+    click = result.steps[1]
+    assert "MISMATCH" in click.result and "no request" in click.result
+    check = click.args["check"]
+    assert check["flags"] == ["a success message appeared but no request was sent"]
+    assert any("Thanks for joining!" in line for line in check["success"])
+    assert isinstance(check["network"], list)  # the interval's requests (none that send)
+    [bug] = result.bugs
+    assert bug.evidence["success_without_request"]["network"] == check["network"]
+    assert "Thanks for joining!" in bug.evidence["success_without_request"]["success"]
+
+
+def test_a_success_message_after_a_post_is_not_a_candidate(agent):
+    run, _, _ = agent(
+        [
+            call("type", element_id=3, text="hello"),
+            call("click", element_id=4),
+            call("finish", summary="done"),
+        ],
+        target="/submit.html",
+    )
+    result = run.run()
+    assert "MISMATCH" not in result.steps[1].result
+    assert "check" not in result.steps[1].args
+
+
+def test_a_failure_message_is_not_a_success_message(agent):
+    run, _, _ = agent(
+        [call("click", element_id=6), call("finish", summary="done")], target="/submit.html"
+    )
+    result = run.run()
+    assert "MISMATCH" not in result.steps[0].result
