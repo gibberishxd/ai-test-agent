@@ -9,6 +9,7 @@ import logging
 import time
 from collections import Counter
 from collections.abc import Callable
+from types import SimpleNamespace
 from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext
@@ -33,6 +34,7 @@ from worker.flows import (
     replay_flow,
     script_from_steps,
 )
+from worker.keyboard_probe import MAX_PROBES, Opened, probe_finding, probe_opened
 from worker.llm import LLMClient, Usage
 from worker.login import LoginConfig, login_for_run, sign_in
 from worker.report import BugReport, PageResult
@@ -562,10 +564,18 @@ def run_interactive(
         budget.max_steps = max(max_steps - flow_steps, 0)
         budget.max_seconds = remaining_seconds()
         budget.max_cost_usd = remaining_budget(settings, run)
-        agent = agent_for(run.focus, budget, run.step_count, True)
+        explore_first = run.step_count
+        agent = agent_for(run.focus, budget, explore_first, True)
         result = agent.run()
     if reviewer is not None:
         _review_candidates(session, run, reviewer, result.reviewer_usage, login, settings)
+
+    # The dialogs, menus and toggles the agent opened, probed with the keyboard (no model).
+    for bug in keyboard_findings(
+        session, run, settings, browser, login, result.opened, explore_first
+    ):
+        session.add(Bug(run_id=run.id, **bug.model_dump()))
+    session.commit()
 
     # 3. Errors seen while the agent clicked around are deterministic findings too.
     extra = [
@@ -585,6 +595,46 @@ def run_interactive(
         "expectation_checks": {"dismissed": result.dismissed, "ignored": result.ignored},
     }
     session.commit()
+
+
+def keyboard_findings(
+    session: Session,
+    run: Run,
+    settings: Settings,
+    browser: Browser | None,
+    login: LoginConfig | None,
+    opened: list[Opened],
+    first_step: int,
+) -> list[BugReport]:
+    """Open each control again in a fresh context (replaying the agent's steps up to its
+    click) and probe it with the keyboard; one finding per control that fails a check.
+
+    `first_step`: the run's step index of the agent's step 1. At most MAX_PROBES controls.
+    """
+    if not opened or run.stop_requested:
+        return []
+    steps = {s.index: s for s in session.query(Step).filter_by(run_id=run.id)}
+    scrub = login.scrub if login else (lambda text: text)
+    findings = []
+    with guarded_browser(settings, run.target_url, browser, login) as (new_context, _guard):
+        for item in opened[:MAX_PROBES]:
+            click = first_step + item.step - 1  # the run's index of the click
+            target = SimpleNamespace(
+                evidence={"replay_from": first_step, "reported_at": click + 1},
+                step_indexes=[],
+                page_url=run.target_url,
+            )
+            plans = [plan for plan in replay_plans(target, steps, run.target_url) if plan[1]]
+            context = new_context()
+            try:
+                probe = probe_opened(context, plans, item.kind, run.viewport or "desktop")
+            finally:
+                context.close()
+            if probe is None:
+                log.info("keyboard probe: could not open %s again", item.kind)
+            elif probe.failures:
+                findings.append(probe_finding(probe, scrub))
+    return findings
 
 
 def _review_candidates(

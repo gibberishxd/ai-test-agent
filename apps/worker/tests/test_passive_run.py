@@ -230,3 +230,33 @@ def test_an_agent_report_of_a_deterministic_finding_is_merged_not_replayed(
     assert server.status == "confirmed"
     assert not any(s.action == "verify_bug" for s in steps)
     assert all(b.status == "confirmed" for b in bugs if b.source == "deterministic")
+
+
+def test_a_dialog_the_agent_opened_is_probed_with_the_keyboard(
+    sessions, workspace, settings, site_url, tmp_path, browser
+):
+    from worker.llm import ToolCall
+
+    with sessions() as session:
+        run = Run(
+            workspace_id=workspace.id, target_url=f"{site_url}/keyboard.html", mode="interactive"
+        )
+        session.add(run)
+        session.commit()
+    llm = FakeClient(
+        decisions=[
+            ToolCall("click", {"element_id": 2, "reasoning": "open the newsletter dialog"}),
+            ToolCall("finish", {"summary": "done", "reasoning": "done"}),
+        ]
+    )
+    process_next(sessions, llm, make_execute(settings, LocalStorage(tmp_path), browser))
+
+    with sessions() as session:
+        stored = session.get(Run, run.id)
+        assert stored.status == RunStatus.DONE, stored.error
+        bugs = session.query(Bug).filter_by(run_id=run.id).all()
+    [probe] = [b for b in bugs if (b.evidence or {}).get("check") == "keyboard"]
+    assert probe.evidence["control"]["name"] == "Open bad dialog"
+    assert probe.severity == "medium"
+    assert probe.status == "confirmed"  # deterministic: not replayed again or judged
+    assert {f["check"] for f in probe.evidence["failures"]} >= {"focus-in", "escape"}

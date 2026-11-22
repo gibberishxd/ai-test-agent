@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Keyboard</title>
+  <style>
+    body { margin: 0; font-size: 16px; }
+    .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); }
+    .box { background: white; margin: 80px auto; width: 320px; padding: 16px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Keyboard</h1>
+    <button id="open-good">Open good dialog</button>
+    <button id="open-bad">Open bad dialog</button>
+    <button id="menu-good" aria-label="Main menu" aria-expanded="false" aria-controls="nav-good">☰</button>
+    <nav id="nav-good" hidden><a href="#a">Shop</a> <a href="#b">About</a> <a href="#c">Help</a></nav>
+    <button id="menu-bad"><svg width="16" height="16" aria-hidden="true"><rect width="16" height="16"></rect></svg></button>
+    <nav id="nav-bad" hidden><a href="#d">Shop</a> <a href="#e">About</a> <a href="#f">Help</a></nav>
+    <button id="more-good" aria-expanded="false" aria-controls="ship">Shipping details</button>
+    <p id="ship" hidden>Ships in two days.</p>
+    <button id="more-bad">Return policy</button>
+    <p id="returns" hidden>Returns within thirty days.</p>
+    <button id="save">Save</button>
+    <p id="status"></p>
+  </main>
+
+  <div id="good" class="overlay" hidden>
+    <div class="box" role="dialog" aria-modal="true" aria-labelledby="good-title">
+      <h2 id="good-title">Sign up</h2>
+      <label>Email <input id="good-email"></label>
+      <button id="good-close">Close</button>
+    </div>
+  </div>
+  <div id="bad" class="overlay" hidden>
+    <div class="box">
+      <h2>Newsletter</h2>
+      <label>Email <input></label>
+      <button id="bad-close">Close</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const opener = { good: $("open-good") };
+    $("open-good").onclick = () => { $("good").hidden = false; $("good-email").focus(); };
+    $("good-close").onclick = () => { $("good").hidden = true; opener.good.focus(); };
+    $("good").addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { $("good").hidden = true; opener.good.focus(); }
+      if (event.key !== "Tab") return;
+      const items = [$("good-email"), $("good-close")];
+      const last = items.length - 1;
+      const at = items.indexOf(document.activeElement);
+      if (!event.shiftKey && at === last) { event.preventDefault(); items[0].focus(); }
+      if (event.shiftKey && at === 0) { event.preventDefault(); items[last].focus(); }
+    });
+    $("open-bad").onclick = () => { $("bad").hidden = false; };
+    $("bad-close").onclick = () => { $("bad").hidden = true; };
+
+    $("menu-good").onclick = () => {
+      const open = $("nav-good").hidden;
+      $("nav-good").hidden = !open;
+      $("menu-good").setAttribute("aria-expanded", String(open));
+    };
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("nav-good").hidden) {
+        $("nav-good").hidden = true;
+        $("menu-good").setAttribute("aria-expanded", "false");
+      }
+    });
+    $("menu-bad").onclick = () => { $("nav-bad").hidden = !$("nav-bad").hidden; };
+
+    $("more-good").onclick = () => {
+      const open = $("ship").hidden;
+      $("ship").hidden = !open;
+      $("more-good").setAttribute("aria-expanded", String(open));
+    };
+    $("more-bad").onclick = () => { $("returns").hidden = !$("returns").hidden; };
+    $("save").onclick = () => { $("status").textContent = "Saved."; };
+  </script>
+</body>
+</html>
