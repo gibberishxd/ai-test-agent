@@ -27,6 +27,7 @@ def run_id(sessions, workspace):
             step_count=3,
             started_at=STARTED,
             finished_at=STARTED + timedelta(seconds=125.5),
+            summary={"stop_reason": "finished", "agent_summary": "looked around"},
         )
         session.add(run)
         session.flush()
@@ -102,6 +103,8 @@ def test_export_has_the_runs_facts(sessions, run_id, tmp_path):
     assert data["cost_usd"] == pytest.approx(0.0412)
     assert data["duration_s"] == pytest.approx(125.5)
     assert data["target_url"] == "http://localhost:9999/"
+    assert data["stop_reason"] == "finished"
+    assert data["agent_summary"] == "looked around"
 
 
 def test_every_finding_is_exported_with_its_status(sessions, run_id, tmp_path):

@@ -46,6 +46,9 @@ def export_run(session: Session, run_id: str, data_dir: Path | None = None) -> d
         "mode": run.mode,
         "status": run.status,
         "error": run.error,
+        # Why the agent stopped ("finished", a budget, "the model call failed: ...").
+        "stop_reason": (run.summary or {}).get("stop_reason"),
+        "agent_summary": (run.summary or {}).get("agent_summary"),
         "provider": run.provider,
         "model": run.model,
         "viewport": run.viewport or DEFAULT_VIEWPORT,
