@@ -126,6 +126,45 @@ meta, console-warning, keyboard-probe, success-without-request and CSS-visibilit
   on the buggy builds (the metadata finding, about two axe best-practice findings per shop
   run). Agent reports that matched nothing didn't increase.
 
+## Deep mode, first evaluation: demo shop (run 9, 2026-11-24)
+
+One deep run on the buggy shop (`75a366f0`) and one on the clean shop (`e2f17518`), signed in
+as the benchmark's shop runs are. Sonnet 5.5 at effort high through the Claude Agent SDK on the
+owner's Claude login (`DEEP_AUTH=cli`, $0 charged; the cost below is the API-equivalent
+estimate), 400 steps / 60 min limits. Replays and duplicates judged by claude-cli Haiku 5.5 (as
+in the loop's claude-cli rows); matching by the pinned judge gemma4:12b. Scored with the
+benchmark's own functions; no benchmark row was saved (the `bench` run stopped on a usage limit
+before the clean run, see below). **One run per build: the intervals are wide.**
+
+| | Deep mode, Sonnet 5.5 | Loop, Haiku 5.5, after the six check improvements (92fc566) | Loop, Sonnet 5.5, run 7 (dde46e0) |
+|---|---|---|---|
+| Shop AI-only recall | **67%** (6/9; Wilson 35–88%) | 37% (10/27; 22–56%) | 48% |
+| Shop recall | **77%** (10/13) | 56% | 64% |
+| Precision (verified reports matching a planted bug) | 58% (11/19) | 74% | 91% |
+| False alarms per clean run | 5.0 (1 metadata finding + 4 agent reports, see below) | 2.0 | 2.0 |
+| Verified / unverified, buggy run | 11 confirmed, 1 dismissed, 6 duplicates, 0 unverified | | |
+| Verified / unverified, clean run | 4 confirmed, 1 duplicate, 1 unverified | | |
+| Cost per run | est. $1.60 buggy, $1.51 clean ($0 charged) | $0.017 (charged, API) | est. $1.65 |
+| Agent time per run | 471 s, 374 steps (buggy); 394 s, 329 steps (clean) | 154 s, 40 steps | 241 s |
+| Coverage | buggy: 7 pages, 25/25 plan items, screenshots at all three viewports; clean: 10 pages, 20/20 | | |
+
+- **Found:** planted bugs 1–8, 10 and 13. **Missed:** 9 (`$NaN`: found and reported, then
+  dismissed by a measurement-gate flaw, fixed afterwards in D120), 11 (logout: the shop runs
+  are signed in with logout denied, as for the loop) and 12 (the wrong-password message).
+- **The clean run's 5 reports:** the metadata finding every engine now reports (D105), and 4
+  agent reports that look like real clean-build behaviour, not yet checked by hand: quantities
+  of 999999 and 1.5 accepted, the footer's "Returns policy" link reloading the app and emptying
+  the cart (the loop reported the same cart loss in run 8), the shop list ignoring search text
+  still shown in the search box, and the search toggle without `aria-expanded` that Escape
+  doesn't close. The buggy run's 5 unmatched agent reports are of the same kind.
+- **Two harness flaws found by this run, both fixed before the clean run:** a usage limit
+  during verification failed the run instead of pausing it (D119; the buggy run was paused at
+  that point, set back to paused and resumed); and a measurement report could be accepted while
+  the harness's own measurement didn't show the bug (D120). The buggy run used the code before
+  D120; the clean run the code after it.
+- **Usage limit:** the buggy run reached the owner's five-hour plan limit after 347 steps (7
+  minutes, est. $1.12); it paused as designed and was resumed after the reset.
+
 ## Real-world v1 (run 8, N4): real reported bugs in IT-Tools and react-admin
 
 A separate benchmark (`docs/REAL_WORLD.md`, rows in `apps/realworld/results.jsonl`): real bugs
