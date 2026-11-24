@@ -193,3 +193,64 @@ def test_only_a_paused_run_can_be_resumed(sessions, site_url):
     run_id = queue(sessions, site_url)
     with sessions() as session, pytest.raises(ValueError):
         resume(session, run_id)
+
+
+class LimitedJudge(FakeClient):
+    """The judge's model is out of its plan's usage too (the same login): every call refuses."""
+
+    def complete(self, prompt, system=None, cheap=True):
+        raise UsageLimitReached("usage limit reached (five_hour)")
+
+    def review_screenshot(self, prompt, image, system=None):
+        raise UsageLimitReached("usage limit reached (five_hour)")
+
+
+class MustNotRun(ScriptedDriver):
+    def run(self, harness):
+        raise AssertionError("the agent ran again although it had finished")
+
+
+def test_a_usage_limit_during_verification_pauses_instead_of_failing(
+    sessions, settings, site_url, browser, tmp_path
+):
+    storage = LocalStorage(tmp_path)
+    run_id = queue(sessions, site_url)
+
+    def first(session, run, llm):
+        run_deep(session, run, llm, settings, storage, browser, driver=LimitDriver(script()[:1]))
+
+    process_next(sessions, LimitedJudge(), first, only=[run_id])
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        assert run.status == "paused", run.error
+        # The first reason is kept: the agent's own limit, before verification hit it too.
+        assert run.error is None and "weekly limit" in run.paused_reason
+
+
+def test_a_run_whose_agent_finished_resumes_with_verification_only(
+    sessions, settings, site_url, browser, tmp_path
+):
+    storage = LocalStorage(tmp_path)
+    run_id = queue(sessions, site_url)
+
+    def first(session, run, llm):
+        run_deep(session, run, llm, settings, storage, browser, driver=ScriptedDriver(script()))
+
+    process_next(sessions, LimitedJudge(), first, only=[run_id])
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        assert run.status == "paused" and run.coverage["stop_reason"] == "finished"
+        pending = session.query(Bug).filter_by(run_id=run.id, status="candidate").count()
+        assert pending >= 2  # the agent's findings wait for verification
+        resume(session, run_id)
+
+    def second(session, run, llm):
+        run_deep(session, run, llm, settings, storage, browser, driver=MustNotRun([]))
+
+    process_next(sessions, FakeClient(texts=[NO_DUPLICATES] * 3), second, only=[run_id])
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        assert run.status == "done", run.error
+        bugs = {b.title: b.status for b in session.query(Bug).filter_by(run_id=run.id)}
+        assert bugs["Total shows the count"] == "confirmed"
+        assert bugs["Depends on this tab's state"] == "unverified"

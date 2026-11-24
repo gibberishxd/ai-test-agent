@@ -1755,3 +1755,13 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Alternatives:** a separate deep-mode page (two places to start a run); showing unverified
   findings as greyed bug cards (too easy to read as found).
 
+## D119. A usage limit during verification pauses the run too (2026-11-24, found in the evaluation)
+- **What happened:** the first demo-shop deep run (`75a366f0`) paused correctly on the plan's
+  five-hour limit, then verification asked claude-cli (the same login) to dedupe, hit the same
+  limit, and the run was marked failed: 13 findings were left unchecked.
+- **Decision:** a usage limit raised by verification is caught in `run_deep`: the run is paused
+  (the first reason kept), the findings stay candidates, and verification continues on resume.
+  A run whose agent had finished (`coverage.stop_reason == "finished"`) resumes with
+  verification only; the agent doesn't run again.
+- **Alternatives:** skip verification on every pause (a pause on the API path, where the judge
+  may be another provider, could verify right away); fail the run (loses the findings).
