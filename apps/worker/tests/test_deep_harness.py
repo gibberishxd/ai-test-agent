@@ -260,7 +260,12 @@ def test_a_measurement_report_stores_what_the_harness_measured_itself(make):
             "title": "Faint text",
             "category": "accessibility",
             "candidate_id": "c1",
-            "verify": {"kind": "measure", "snippet": snippet, "setup_steps": []},
+            "verify": {
+                "kind": "measure",
+                "snippet": snippet,
+                "setup_steps": [],
+                "observed_value": "rgb(187, 187, 187)",
+            },
         },
     )
     assert not result.is_error
@@ -389,3 +394,51 @@ def test_finish_near_the_end_of_the_budget_lists_what_was_left(make):
     result = harness.call("finish", {"summary": "out of steps"})
     assert not result.is_error
     assert "flows-1" in recorder.coverage["unticked"]
+
+
+FAINT = "return getComputedStyle(document.querySelector('#faint')).color"
+
+
+def report_measured(harness, **verify):
+    harness.call("flag_candidate", {"title": "faint text", "observation": "light grey"})
+    harness.call("screenshot", {})
+    spec = {"kind": "measure", "snippet": FAINT, "setup_steps": [], **verify}
+    return harness.call("report_bug", {**BUG, "candidate_id": "c1", "verify": spec})
+
+
+def test_a_measurement_report_must_say_the_value_it_saw(make):
+    harness, recorder, _ = executing(make)
+    result = report_measured(harness)
+    assert result.is_error and "observed_value" in result.text
+    assert recorder.bugs == []
+
+
+def test_a_claimed_value_the_harness_doesnt_measure_now_is_refused(make):
+    # The evaluation's $NaN report: the snippet was run on a page where the bug didn't show.
+    harness, recorder, _ = executing(make)
+    result = report_measured(harness, observed_value="rgb(0, 0, 0)")
+    assert result.is_error
+    assert "rgb(187, 187, 187)" in result.text and "rgb(0, 0, 0)" in result.text
+    assert recorder.bugs == []
+    retry = harness.call(
+        "report_bug",
+        {
+            **BUG,
+            "candidate_id": "c1",
+            "verify": {
+                "kind": "measure",
+                "snippet": FAINT,
+                "setup_steps": [],
+                "observed_value": "rgb(187, 187, 187)",
+            },
+        },
+    )
+    assert not retry.is_error  # the candidate stays open, so it can be reported correctly
+
+
+def test_the_claim_allows_rounding_only(make):
+    harness, _, _ = executing(make)
+    harness.call("flag_candidate", {"title": "width", "observation": "w"})
+    harness.call("screenshot", {})
+    spec = {"kind": "measure", "snippet": "return 12.04", "setup_steps": [], "observed_value": 12}
+    assert not harness.call("report_bug", {**BUG, "candidate_id": "c1", "verify": spec}).is_error

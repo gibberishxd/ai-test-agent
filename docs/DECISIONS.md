@@ -1748,3 +1748,21 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   verification only; the agent doesn't run again.
 - **Alternatives:** skip verification on every pause (a pause on the API path, where the judge
   may be another provider, could verify right away); fail the run (loses the findings).
+
+## D120. A measurement report states its value, and the harness must measure it (2026-11-24, found in the evaluation)
+- **What happened:** in the first demo-shop deep run the model reported the `$NaN` price (a real,
+  planted bug) with the snippet `innerText.includes('$NaN')` while its tab was on a page without
+  it. The harness measured `false` there and accepted the report; the fresh browser reached the
+  bug state through the setup step, measured `true`, and "different from the report" dismissed
+  a real bug.
+- **Decision:** a `measure` report must give `observed_value`, the value its snippet returns
+  where the bug shows. The harness runs the snippet on the current page and refuses the report
+  (the candidate stays open) unless it gets that value (`deep/compare.py: same_result`, the same
+  comparison verification uses: numbers rounded to one decimal, key order ignored). The stored
+  result is then the bug's value by construction, and a fresh browser that measures it again
+  confirms it.
+- **Alternatives:** have the harness re-run the setup steps in a fresh page at report time (a
+  second browser per report, and slow); judge the snippet's meaning with a model (not
+  deterministic).
+- **Tradeoffs:** the model spends a step or two going back to the page that shows the bug. It
+  only adds a refusal, so it can't add false alarms.

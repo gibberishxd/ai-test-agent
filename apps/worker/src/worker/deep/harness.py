@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from worker.deep.checklist import AREA_KEYS, AREAS, VIEWPORTS
+from worker.deep.compare import same_result, shown
 from worker.deep.prompt import execute_prompt, map_prompt, nudge, plan_prompt, review_prompt
 from worker.deep.toolbox import Action, Toolbox, ToolResult
 from worker.deep.tools import PROCESS_TOOL_NAMES
@@ -478,6 +479,19 @@ class Harness:
                 raise GateError(f"the snippet failed when the harness ran it: {data.get('error')}")
             if data.get("changed_the_page") or data.get("blocked_requests"):
                 raise GateError("a measuring snippet must not change the page or send data")
+            # D120: the report says the value that shows the bug, and the harness must measure
+            # that value now; otherwise it measured a page where the bug doesn't show.
+            if "observed_value" not in raw:
+                raise GateError(
+                    "say the value the snippet returns where the bug shows (observed_value)"
+                )
+            claimed, now = raw["observed_value"], data.get("value")
+            if not same_result(now, claimed):
+                raise GateError(
+                    f"the snippet returns {shown(now)} on this page now, not the {shown(claimed)}"
+                    " you report: go to where the bug shows (or give the setup_steps that reach "
+                    "it from the start page), then report again"
+                )
             return {
                 "kind": "measure",
                 "snippet": snippet,
