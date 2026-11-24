@@ -1650,3 +1650,39 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** a model that disagrees with a gate spends steps on refused calls; the error says
   what is missing. A resumed run loses the browser's state (a cart, a sign-in) and has to
   rebuild it.
+
+## D115. Deep mode runs on the Claude Agent SDK, locked down to our tools (2026-11-24)
+- **Decision:** the real driver (`deep/sdk_driver.py`) uses `claude-agent-sdk==0.2.180` (Python),
+  the newest release at least two weeks old on 2026-11-24 (0.2.188 came out on 2026-11-23). The
+  SDK runs its bundled Claude Code CLI as a subprocess; our tools are an in-process MCP server
+  (`qa`). The CLI gets `tools=[]` (no built-in file, shell or web tools), `strict_mcp_config`
+  (no other MCP server: not the user's, not claude.ai connectors), `setting_sources=[]` (no
+  settings or CLAUDE.md), `permission_mode="dontAsk"` with only our tools allowed, our system
+  prompt instead of Claude Code's, and a per-run folder in the system temp folder (checked to be
+  outside the repo and the real-world apps' folder).
+- **Authentication:** `DEEP_AUTH=api` passes the key to the CLI in its environment.
+  `DEEP_AUTH=cli` (DEV_MODE only, never production) uses this machine's Claude login: the SDK
+  always gives the CLI the worker's whole environment (read in its source: it only drops
+  `CLAUDECODE`, and `options.env` can add but not remove), so the CLI is started through a
+  wrapper script that unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` first. The SDK's docs
+  say third-party products may not offer claude.ai login; the login path is for the owner's own
+  evaluation only, like claude-cli.
+- **Threads:** the SDK is async; Playwright's sync API only works on its own thread. The SDK runs
+  in a background thread and hands every harness call to the main thread through a queue.
+- **Usage limits:** a rejected rate limit, any sign of paid overage (extra usage), a billing or
+  rate-limit error, a 402/429 or a credit message, or a call paid from usage credits pauses the
+  run at once; on the login path it also stops every other claude-cli call in the process.
+- **Cost:** each turn's tokens from its result message, priced with `pricing.py`: charged on the
+  API path, an API-equivalent estimate ($0 charged) on the login path. The SDK's own
+  `total_cost_usd` is also a client-side estimate, so neither is a bill.
+- **Tested without a model:** a fake CLI speaks the SDK's control protocol (initialize, MCP
+  `tools/call`, interrupt) and plays scripted turns, so the driver runs end to end at $0.
+- **Alternatives:** the Messages API with our own tool loop (no Claude Code harness: context
+  compaction, retries and prompt caching would be ours to build); the `claude -p` subprocess the
+  current claude-cli client uses (one JSON tool call per process, no real tool use, no images);
+  Playwright's MCP server (no safety checks, nothing recorded for replay). ROADMAP's "Not planned:
+  LangChain or LangGraph" still holds: the SDK is Anthropic's own harness, used for the model
+  loop only, and the benchmark measures it against the current loop.
+- **Tradeoffs:** the SDK's `Transport` and control protocol are marked internal, so the fake CLI
+  can break on an SDK upgrade (the pin keeps that deliberate). Tool search is turned off with an
+  environment variable so every schema is loaded up front.

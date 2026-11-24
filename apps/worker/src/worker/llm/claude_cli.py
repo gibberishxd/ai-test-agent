@@ -113,6 +113,12 @@ def reset_limit_latch() -> None:
     _limit_message = None
 
 
+def latch(message: str) -> UsageLimitReached:
+    """Stop every claude-cli call in this process (deep mode's login path hit a limit too: the
+    same plan, so nothing else may draw on it)."""
+    return _latch(message)
+
+
 def _latch(message: str) -> UsageLimitReached:
     global _limit_message
     _limit_message = _limit_message or message

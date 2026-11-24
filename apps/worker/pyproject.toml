@@ -7,6 +7,7 @@ license = "FSL-1.1-ALv2"
 dependencies = [
     "anthropic>=2.6.0",
     "boto3>=1.40",
+    "claude-agent-sdk==0.2.180",
     "cryptography>=50.0.2",
     "httpx>=0.28.1",
     "pillow>=13.0.0",
