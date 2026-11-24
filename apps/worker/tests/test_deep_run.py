@@ -61,7 +61,12 @@ def script() -> list[list]:
                     "expected": "1",
                     "actual": "1",
                     "self_review": "measured twice",
-                    "verify": {"kind": "measure", "snippet": total, "setup_steps": [10]},
+                    "verify": {
+                        "kind": "measure",
+                        "snippet": total,
+                        "setup_steps": [10],
+                        "observed_value": "1",
+                    },
                 },
             ],
             ["evaluate_js", {"snippet": "window.__seen = [1, 2]; return 1"}],  # 14
@@ -81,6 +86,7 @@ def script() -> list[list]:
                         "kind": "measure",
                         "snippet": "return window.__seen.length",
                         "setup_steps": [],
+                        "observed_value": 2,
                     },
                 },
             ],

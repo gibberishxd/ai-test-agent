@@ -159,7 +159,9 @@ VERIFY = {
     "type": "object",
     "description": "How to check this bug in a fresh browser. kind=replay: `steps`, the step "
     "numbers of the browser actions that reproduce it from the start page. kind=measure: a "
-    "`snippet` that returns the wrong value, and `setup_steps` that reach the state to measure. "
+    "`snippet` that returns the wrong value, `observed_value` (what it returns where the bug "
+    "shows; the harness runs the snippet on the current page and must get it), and "
+    "`setup_steps` that reach that state from the start page. "
     "kind=check: `check` (run_axe, check_layout, check_meta) and the `rule` it reports, with "
     "`setup_steps`; or check=keyboard_probe with the probe's `step` and the failed check as "
     "`rule`.",
@@ -167,6 +169,9 @@ VERIFY = {
         "kind": {"type": "string", "enum": ["replay", "measure", "check"]},
         "steps": STEPS,
         "snippet": {"type": "string"},
+        "observed_value": {
+            "description": "kind=measure: the value the snippet returns where the bug shows."
+        },
         "setup_steps": STEPS,
         "check": {
             "type": "string",
