@@ -485,7 +485,7 @@ class Harness:
         if check == "keyboard_probe":
             return self._probe_spec(raw, rule)
         result = self.toolbox.call(check, {})
-        found = _rule_detail(check, rule, result.data or {})
+        found = rule_detail(check, rule, result.data or {})
         if found is None:
             raise GateError(f"{check} doesn't report {rule!r} on this page now")
         return {
@@ -629,7 +629,7 @@ def _clean(raw: dict, keys: tuple[str, ...]) -> dict:
     return {k: redact(_text(raw.get(k))) for k in keys if _text(raw.get(k))}
 
 
-def _rule_detail(check: str, rule: str, data: dict):
+def rule_detail(check: str, rule: str, data: dict):
     """What the check reports for `rule` now, or None if it doesn't report it."""
     if check == "run_axe":
         return next((v for v in data.get("violations") or [] if v.get("rule_id") == rule), None)

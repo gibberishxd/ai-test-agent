@@ -22,6 +22,7 @@ from worker.agent.policy import Budget
 from worker.agent.reviewer import review_candidate
 from worker.config import Settings
 from worker.db.models import Bug, Domain, Flow, FlowResult, Run, RunMode, Spec, Step
+from worker.deep.measure import verify_measurement
 from worker.findings import findings_from_pages
 from worker.flows import (
     MAX_FLOW_STEPS,
@@ -746,14 +747,23 @@ def verify_and_dedupe(
         "candidates": sum(1 for b in bugs if b.status == "candidate"),
         "confirmed": 0,
         "dismissed": 0,
+        "unverified": 0,
         "duplicates": _dedupe(session, run, llm, bugs),
     }
     candidates = [b for b in bugs if b.status == "candidate" and b.source != "deterministic"]
+    deep_run = run.engine == "deep"
 
     if candidates and not run.stop_requested:
-        with guarded_browser(settings, run.target_url, browser, login) as (new_context, _guard):
+        with guarded_browser(settings, run.target_url, browser, login) as (new_context, guard):
             for bug in candidates:
-                if over_budget(settings, run):
+                if is_deep_finding(bug):
+                    # Deep mode has no cost cap (D112): its findings are always checked.
+                    status = _verify_deep(
+                        session, run, llm, settings, new_context, guard, bug, steps, login
+                    )
+                    stats[status] += 1
+                    continue
+                if not deep_run and over_budget(settings, run):
                     break  # out of budget: leave the rest as unverified candidates
                 verdict, start_url = _replay_bug(
                     session, run, llm, settings, new_context, bug, steps, login
@@ -773,8 +783,104 @@ def verify_and_dedupe(
                 if verdict.diff:
                     bug.evidence["replay_diff"] = verdict.diff
                 stats["confirmed" if verdict.reproduced else "dismissed"] += 1
+    # Deep findings nothing checked (the run was stopped) are kept apart, never left as plain
+    # candidates that could be read as verified.
+    for bug in candidates:
+        if is_deep_finding(bug) and bug.status == "candidate":
+            why = "the run was stopped before it could be checked"
+            _set_deep_status(bug, "unverified", (bug.evidence or {}).get("verify", {}), why)
+            stats["unverified"] += 1
     session.commit()
     return stats
+
+
+def is_deep_finding(bug: Bug) -> bool:
+    return (bug.evidence or {}).get("engine") == "deep" and bug.source != "deterministic"
+
+
+def _verify_deep(
+    session: Session,
+    run: Run,
+    llm: LLMClient,
+    settings: Settings,
+    new_context: Callable[[], BrowserContext],
+    guard,
+    bug: Bug,
+    steps: dict[int, Step],
+    login: LoginConfig | None,
+) -> str:
+    """Check a deep-mode finding the way its report says (D116); returns its new status.
+
+    replay: the model's own steps first, then the usual replay plans. A replay that ran and
+    didn't show the bug dismisses it; one that couldn't run at all leaves it unverified.
+    measure / check: run again in a fresh page at the same viewport after the setup steps
+    (deep/measure.py). No way given: unverified."""
+    spec = (bug.evidence or {}).get("verify") or {}
+    kind = spec.get("kind")
+    if kind == "replay":
+        plans = deep_replay_plans(bug, steps, run.target_url)
+        verdict, start_url = _replay_bug(
+            session,
+            run,
+            llm,
+            settings,
+            new_context,
+            bug,
+            steps,
+            login,
+            plans=plans,
+            budgeted=False,
+        )
+        stale = ("replay_failure", "replay_diff")
+        evidence = {k: v for k, v in (bug.evidence or {}).items() if k not in stale}
+        bug.evidence = {**evidence, "replay": verdict.reason, "replay_start": start_url}
+        if verdict.failure:
+            bug.evidence["replay_failure"] = verdict.failure
+        if verdict.diff:
+            bug.evidence["replay_diff"] = verdict.diff
+        if verdict.reproduced:
+            status, reason = "confirmed", f"replay: {verdict.reason}"
+        elif verdict.replayed:
+            status, reason = "dismissed", f"replay: {verdict.reason}"
+        else:
+            status, reason = "unverified", f"could not replay: {verdict.reason}"
+    elif kind in ("measure", "check"):
+        setup = [_replay_step_of(steps[i]) for i in spec.get("setup_steps") or [] if i in steps]
+        context = new_context()
+        try:
+            measured = verify_measurement(context, guard, spec, setup, run.target_url)
+        finally:
+            context.close()
+        status, reason = measured.status, measured.reason
+        bug.evidence = {**(bug.evidence or {}), "remeasured": measured.result}
+    else:
+        status, reason = "unverified", "the report gave no way to verify it"
+    _set_deep_status(bug, status, spec, reason)
+    return status
+
+
+def _set_deep_status(bug: Bug, status: str, spec: dict, reason: str) -> None:
+    bug.status = status
+    bug.dismiss_reason = reason if status == "dismissed" else None
+    bug.evidence = {
+        **(bug.evidence or {}),
+        "verification": {"kind": spec.get("kind") or "none", "status": status, "reason": reason},
+    }
+
+
+def deep_replay_plans(bug: Bug, steps: dict, target_url: str) -> list[tuple[str, list[ReplayStep]]]:
+    """The model's own steps from the start page first, then the usual plans (every action up
+    to the report), without repeating a plan."""
+    own = [
+        _replay_step_of(steps[i])
+        for i in bug.step_indexes or []
+        if i in steps and _took_effect(steps[i])
+    ]
+    plans = [(target_url, own)] if own else []
+    for plan in replay_plans(bug, steps, target_url):
+        if plan not in plans:
+            plans.append(plan)
+    return plans
 
 
 def _dedupe(session: Session, run: Run, llm: LLMClient, bugs: list[Bug]) -> int:
@@ -810,6 +916,8 @@ def _replay_bug(
     bug: Bug,
     steps: dict[int, Step],
     login: LoginConfig | None = None,
+    plans: list[tuple[str, list[ReplayStep]]] | None = None,
+    budgeted: bool = True,
 ) -> tuple[Verdict, str]:
     """Try each replay plan until one reproduces the bug; returns the last verdict and start.
 
@@ -818,7 +926,7 @@ def _replay_bug(
     themselves rebuild the state the agent had (they include its sign-in and its cart).
     """
     verdict, start_url = Verdict(False, "nothing to replay", replayed=False), run.target_url
-    for start_url, replay_steps in replay_plans(bug, steps, run.target_url):
+    for start_url, replay_steps in plans or replay_plans(bug, steps, run.target_url):
         context = new_context()
         try:
             verdict = verify_bug(
@@ -836,7 +944,7 @@ def _replay_bug(
         finally:
             context.close()
         _log_model_step(session, run, "verify_bug", {"bug": bug.title}, verdict.usage)
-        if verdict.reproduced or over_budget(settings, run):
+        if verdict.reproduced or (budgeted and over_budget(settings, run)):
             break
     return verdict, start_url
 

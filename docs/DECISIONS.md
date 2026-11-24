@@ -1686,3 +1686,28 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** the SDK's `Transport` and control protocol are marked internal, so the fake CLI
   can break on an SDK upgrade (the pin keeps that deliberate). Tool search is turned off with an
   environment variable so every schema is loaded up front.
+
+## D116. Verifying deep-mode findings: replay, re-measure, or "unverified" (2026-11-24)
+- **Decision:** every deep-mode finding goes through the run's verification
+  (`execute.verify_and_dedupe`, after dedupe, as today), by the kind its report names:
+  - **replay** (interaction bugs): the model's own recorded steps from the start page first,
+    then the usual plans (every action up to the report); the existing judge, state diff and
+    pixel check decide. Reproduced → confirmed; replayed but not shown → dismissed; couldn't be
+    replayed at all → **unverified** (the current loop dismisses those: for deep mode a replay
+    that can't run says nothing about the bug).
+  - **measure / check** (`deep/measure.py`): a fresh page at the same viewport repeats the setup
+    steps, then runs the stored snippet or check again. The same result (numbers rounded to one
+    decimal, key order ignored) → confirmed; a different one → dismissed, with both values; a
+    setup that can't be repeated or a snippet that fails now → unverified. An axe finding must
+    be reported on the same element; a keyboard-probe finding opens the same control and must
+    fail the same check.
+  - no way given, or the run was stopped first → unverified.
+- **`unverified` is its own status** (D112): never shown or counted with verified findings.
+  Deep findings are always checked: the current loop's `MAX_RUN_COST_USD` doesn't apply to them
+  (no cost cap for deep runs, D111/D112).
+- **Alternatives:** dismiss what can't be checked (loses real bugs found in states replay can't
+  rebuild, as in run be495c9f); keep them as candidates (they would read as unchecked-but-open,
+  and the benchmark would count them).
+- **Tradeoffs:** a measurement that depends on timing or randomness is dismissed when it
+  differs; the model is told to report deterministic measurements. Rounding to one decimal can
+  hide a difference smaller than that (sub-pixel sizes), which is the point.

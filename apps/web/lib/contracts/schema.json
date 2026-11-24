@@ -105,7 +105,8 @@
         "enum": [
           "candidate",
           "confirmed",
-          "dismissed"
+          "dismissed",
+          "unverified"
         ],
         "title": "Status",
         "type": "string"
@@ -324,7 +325,8 @@
             "enum": [
               "candidate",
               "confirmed",
-              "dismissed"
+              "dismissed",
+              "unverified"
             ],
             "title": "Status",
             "type": "string"

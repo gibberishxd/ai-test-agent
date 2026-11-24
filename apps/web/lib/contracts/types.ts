@@ -6,7 +6,7 @@
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export type BugSource = "deterministic" | "agent";
-export type BugStatus = "candidate" | "confirmed" | "dismissed";
+export type BugStatus = "candidate" | "confirmed" | "dismissed" | "unverified";
 
 export type BugReport = {
   title: string;
