@@ -8,6 +8,15 @@ A B2B web product: a team pastes their web app's URL, an AI agent explores it li
 tester and reports bugs with evidence. It measures its own accuracy against a demo shop with
 planted bugs.
 
+## Product principle: quality first (D111)
+- The agent is designed to find as many real, verified bugs as possible. Customers pay model
+  costs with their own API keys, so we don't trade quality for lower token cost. Cost
+  optimisation comes later, and only where quality stays the same, measured on the benchmarks.
+- Development cost is separate: tests run on the fake model at $0, and the owner's evaluation
+  runs use the owner's Claude login. Never spend API credits without asking.
+- Earlier choices made to keep runs cheap (text-only perception, small step budgets, Haiku as the
+  default) are to be revisited under this principle.
+
 ## Layout
 - `apps/web` — Next.js (App Router, TypeScript, Tailwind, shadcn/ui) dashboard + API. Prisma owns the DB schema.
 - `apps/worker` — Python (uv, Playwright, pytest, ruff, Pydantic, SQLAlchemy). Deterministic checks, agent loop, replay.
@@ -83,8 +92,15 @@ Goals and acceptance checks: [`docs/RUN_PLAN_8.md`](docs/RUN_PLAN_8.md): the API
 failing-journey recheck, confidence intervals and a real-world benchmark (`docs/REAL_WORLD.md`).
 Merged in PR #13 (2026-11-17).
 
+## Run 9: deep mode (stacked branches `deep-*`)
+Goals, the owner's settings and acceptance checks: [`docs/RUN_PLAN_9.md`](docs/RUN_PLAN_9.md).
+A second agent engine next to the current loop, built for quality first. The AI core may change
+for deep mode (the owner's go-ahead); every PR explains itself in plain language. Questions that
+aren't the owner's to answer go to [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md) with the
+choice made. Paid or real evaluation runs always need the owner's OK first.
+
 ## Current phase
-**Paused (2026-11-17).** The owner is focused on studies and a job search; nothing is in progress.
+**Run 9 in progress (2026-11-24): deep mode** (see above). Before that, paused since 2026-11-17.
 Demo v1 and runs 2–8 are all merged into `main` (run 8: PR #13), and so is the real-world model
 comparison (PR #15, 2026-11-18). The license is FSL-1.1-ALv2 since PR #10; versions up to
 commit 5faa299 were MIT. The normal "How to work with me" rules apply. Haiku 5.5 is the default

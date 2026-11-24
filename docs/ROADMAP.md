@@ -169,6 +169,39 @@ L = 3–6 weeks.
 - **How we measure it:** the security review passes with its findings fixed; a restore drill
   works; one pilot team uses it for a month without our help.
 
+### 9. Deep mode (being built, run 9)
+- **Why a customer pays:** the current loop finds few real bugs, whatever the model (D104). A
+  strong model with general browser tools, a test plan and verified evidence is the bet for
+  quality first (D111). See `docs/RUN_PLAN_9.md`.
+
+### 10. Passive API checks during UI runs (M), after deep mode
+- **Why a customer pays:** many bugs show in the app's own API traffic before they show on the
+  screen. A UI run already sees every request; checking them costs no extra steps.
+- **What it needs:** checks on the requests a run makes anyway: 4xx and 5xx responses, slow
+  responses, error bodies behind a 200, sensitive data in responses (tokens, personal data,
+  stack traces), CORS settings, and responses that contradict what the UI shows (a total, a
+  count, a status).
+- **How we measure it:** planted API bugs in the demo apps, found without lowering UI recall or
+  adding false alarms on the clean builds.
+
+### 11. Active API testing from a spec (M–L), after deep mode
+- **Why a customer pays:** teams with an API want it tested directly, not only through the UI.
+- **What it needs:** tests generated from an OpenAPI spec or a Postman collection: the happy
+  path, missing and invalid fields, missing and invalid auth, boundary values, and validation of
+  every response against its schema.
+- **Safety:** on production, only reading requests. Creating and deleting only on a staging
+  environment the customer explicitly allows, with the same domain verification as today.
+- **How we measure it:** a demo API with planted bugs and a clean build, scored like the UI
+  benchmark.
+
+### 12. Coverage across several runs for big apps (M), after deep mode
+- **Why a customer pays:** a big app doesn't fit in one run. A team needs to know what was
+  tested, what is left, and to continue where the last run stopped.
+- **What it needs:** coverage kept per target across runs (pages, flows, checklist items), the
+  next run starting from what is left, and a report of coverage over time.
+- **How we measure it:** on an app larger than one run's budget, total coverage and findings
+  after several runs, against one long run.
+
 ### Not planned, and why
 - **FastAPI:** the API exists in Next.js (`/api/v1`, OpenAPI, API keys, rate limits). A second
   API service would add a deployment and a language boundary and find no more bugs.

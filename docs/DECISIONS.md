@@ -1558,3 +1558,22 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   checks the planted ones stay confirmed. A report whose evidence is a request that wasn't
   sent, while the screen does change, is now dismissed: from the user's side something
   happened, and the report should say what was wrong instead.
+
+## D111. Quality first (2026-11-24, the owner's principle)
+- **Decision:** the product is designed to find as many real, verified bugs as possible.
+  Customers pay model costs with their own API keys, so the product doesn't trade quality for
+  lower token cost. Cost optimisation comes later, and only where quality stays the same as
+  measured on the benchmarks.
+- **Development cost is separate:** tests run on the fake model at $0; the owner's evaluation
+  runs use the owner's Claude login; API credits are never spent without asking.
+- **What it reopens:** choices made earlier to keep runs cheap: text-only perception (the
+  current loop mostly reads the page as text), small step budgets (40 steps, 480 s) and Haiku as
+  the default agent (D91, D104). Each is to be revisited under this principle; deep mode (run 9)
+  is the first step.
+- **Alternatives:** keep optimising cost per run first (the approach of runs 6–8). Measured:
+  Sonnet and Opus did no better than Haiku in the current loop (D104), which points at the
+  harness, not at the model's price, as the limit.
+- **Tradeoffs:** a deep run costs much more than a current-loop run. That is acceptable for the
+  product (the customer's own key and choice), and kept off the owner's API budget for
+  development.
+
