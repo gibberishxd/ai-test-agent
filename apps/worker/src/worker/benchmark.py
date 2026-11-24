@@ -520,8 +520,9 @@ def _print_set(name: str, scores: BenchmarkScores) -> None:
         print(
             f"  verification   reported {funnel['reported']} → verified {funnel['verified']}"
             f" (duplicates {funnel['duplicates']},"
-            f" discarded at replay {funnel['discarded_at_replay']},"
-            f" unverified {funnel.get('unverified', 0)})"
+            f" discarded at replay {funnel['discarded_at_replay']}"
+            # Deep mode only (run 9): findings nothing could check.
+            + (f", unverified {funnel['unverified']})" if funnel.get("unverified") else ")")
         )
         print(f"  discarded because       {reasons}")
         print(
