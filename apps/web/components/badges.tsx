@@ -22,6 +22,7 @@ const STATUS_STYLES: Record<string, string> = {
   done: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   failed: "bg-red-500/15 text-red-700 dark:text-red-300",
   stopped: "bg-muted text-muted-foreground",
+  paused: "bg-amber-400/20 text-amber-800 dark:text-amber-300",
 };
 
 export function StatusBadge({ status }: { status: string }) {
@@ -32,6 +33,17 @@ export function StatusBadge({ status }: { status: string }) {
     >
       {status === "running" && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
       {status}
+    </Badge>
+  );
+}
+
+/** Run 9: deep mode, with the model that drives it. */
+export function EngineBadge({ engine, model }: { engine: string; model?: string | null }) {
+  if (engine !== "deep") return null;
+  const name = model?.includes("opus") ? "Opus 5.5" : "Sonnet 5.5";
+  return (
+    <Badge variant="outline" data-testid="engine-badge">
+      Deep · {name}
     </Badge>
   );
 }

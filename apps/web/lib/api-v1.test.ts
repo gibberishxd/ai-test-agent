@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { apiReport, junitReport, parseApiRunInput } from "./api-v1";
 
 describe("parseApiRunInput", () => {
+  it("takes mode deep and a deep model (run 9)", () => {
+    const deep = parseApiRunInput({ target_url: "https://staging.example.com", mode: "deep", engine_model: "claude-opus-5-5" });
+    expect(deep).toMatchObject({ ok: true, value: { body: { mode: "deep", engineModel: "claude-opus-5-5" } } });
+    expect(parseApiRunInput({ target_url: "https://x.test", mode: "turbo" })).toMatchObject({ ok: false, errors: { mode: expect.stringContaining("deep") } });
+    expect(parseApiRunInput({ target_url: "https://x.test", engine_model: 5 })).toMatchObject({ ok: false, errors: { engine_model: expect.any(String) } });
+  });
+
   it("maps the API's snake_case body to a run, defaulting to a passive scan", () => {
     expect(parseApiRunInput({ target_url: "https://staging.example.com" })).toEqual({
       ok: true,

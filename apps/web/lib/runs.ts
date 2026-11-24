@@ -44,6 +44,8 @@ export async function createRun(
       apiKeyId: extras.apiKeyId ?? null,
       maxSteps: extras.maxSteps ?? null,
       maxSeconds: extras.maxSeconds ?? null,
+      engine: input.engine,
+      engineModel: input.engine === "deep" ? input.engineModel : null,
     },
   });
 }
@@ -63,7 +65,7 @@ export type StartResult =
  */
 export async function startRun(
   context: RequestContext,
-  body: { targetUrl?: unknown; mode?: unknown; focus?: unknown; modelConfigId?: unknown },
+  body: { targetUrl?: unknown; mode?: unknown; focus?: unknown; modelConfigId?: unknown; engineModel?: unknown },
   ip: string,
   extras: RunExtras = {},
 ): Promise<StartResult> {
@@ -117,8 +119,11 @@ export async function startRun(
     const overQuota = quota.allowed ? null : quotaError(quota.used, quota.quota);
     if (overQuota) return { ok: false, status: 429, errors: { targetUrl: overQuota } };
 
-    // A run never takes more steps than the plan allows (the worker reads runs.max_steps).
-    const maxSteps = Math.min(extras.maxSteps ?? quota.max_steps, quota.max_steps);
+    // A run never takes more steps than the plan allows (the worker reads runs.max_steps). Deep
+    // runs have their own limits (the workspace's, default 400 steps): the plan's step limit is
+    // the current loop's, so a deep run keeps only a lower limit its caller asked for (run 9).
+    const maxSteps =
+      input.engine === "deep" ? (extras.maxSteps ?? null) : Math.min(extras.maxSteps ?? quota.max_steps, quota.max_steps);
     const run = await createRun(tx, context.workspaceId, context.userId, input, modelConfigId, { ...extras, maxSteps });
     return { ok: true, id: run.id };
   });
@@ -162,6 +167,12 @@ export async function requestStop(workspaceId: string, id: string): Promise<bool
     data: { status: "stopped", stopRequested: true, finishedAt: new Date() },
   });
   if (queued.count > 0) return true;
+  // Run 9: a paused deep run is given up: stopped, with what it found so far.
+  const paused = await tenantDb(workspaceId).run.updateMany({
+    where: { id, workspaceId, status: "paused" },
+    data: { status: "stopped", stopRequested: true, finishedAt: new Date() },
+  });
+  if (paused.count > 0) return true;
   const running = await tenantDb(workspaceId).run.updateMany({
     where: { id, workspaceId, status: "running" },
     data: { stopRequested: true },

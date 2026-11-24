@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import type { FieldErrors } from "@/lib/targets";
+import { DEEP_MODEL_LABELS, DEEP_MODELS, type FieldErrors } from "@/lib/targets";
 
 /** A workspace model offered in the picker. Only ones that passed Test connection can run. */
 export type PickerModel = { id: string; label: string; model: string; usable: boolean; isDefault: boolean };
@@ -21,7 +21,7 @@ export function initialModel(models: PickerModel[]): string {
   return models.find((m) => m.isDefault && m.usable)?.id ?? SERVER_DEFAULT;
 }
 
-export async function startRun(body: { targetUrl: string; mode: string; focus?: string; modelConfigId?: string }) {
+export async function startRun(body: { targetUrl: string; mode: string; focus?: string; modelConfigId?: string; engineModel?: string }) {
   const response = await fetch("/api/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -38,13 +38,20 @@ export function RunForm({ demoUrl, models = [], serverModel = "the server's defa
   const [targetUrl, setTargetUrl] = useState("");
   const [mode, setMode] = useState("passive");
   const [focus, setFocus] = useState("");
+  const [engineModel, setEngineModel] = useState<string>(DEEP_MODELS[0]);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
-    const result = await startRun({ targetUrl, mode, focus, modelConfigId: modelConfigId || undefined });
+    const result = await startRun({
+      targetUrl,
+      mode,
+      focus,
+      modelConfigId: modelConfigId || undefined,
+      engineModel: mode === "deep" ? engineModel : undefined,
+    });
     if ("id" in result) {
       router.push(`/runs/${result.id}`);
       return;
@@ -85,7 +92,7 @@ export function RunForm({ demoUrl, models = [], serverModel = "the server's defa
 
       <fieldset className="grid gap-2">
         <legend className="mb-2 text-sm font-medium">Mode</legend>
-        <RadioGroup value={mode} onValueChange={setMode} className="grid gap-3 sm:grid-cols-2">
+        <RadioGroup value={mode} onValueChange={setMode} className="grid gap-3 sm:grid-cols-3">
           <ModeOption
             value="passive"
             title="Passive scan"
@@ -96,8 +103,32 @@ export function RunForm({ demoUrl, models = [], serverModel = "the server's defa
             title="Interactive test"
             text="Also fills forms and walks through flows. Only on the demo shop and domains you've verified."
           />
+          <ModeOption
+            value="deep"
+            title="Deep test"
+            text="Maps the app, plans its tests and checks every viewport, with screenshots and measurements. Takes up to an hour; costs more."
+          />
         </RadioGroup>
         {errors.mode && <p className="text-sm text-destructive">{errors.mode}</p>}
+        {mode === "deep" && (
+          <div className="mt-2 grid gap-2">
+            <Label htmlFor="engine-model">Deep mode model</Label>
+            <select
+              id="engine-model"
+              value={engineModel}
+              onChange={(event) => setEngineModel(event.target.value)}
+              className="h-9 w-full rounded-md border bg-transparent px-3 text-sm sm:w-fit"
+              aria-invalid={Boolean(errors.engineModel)}
+            >
+              {DEEP_MODELS.map((m) => (
+                <option key={m} value={m}>
+                  {DEEP_MODEL_LABELS[m]}
+                </option>
+              ))}
+            </select>
+            {errors.engineModel && <p className="text-sm text-destructive">{errors.engineModel}</p>}
+          </div>
+        )}
       </fieldset>
 
       <div className="grid gap-2">

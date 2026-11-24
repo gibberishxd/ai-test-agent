@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronDown, Download, Link2Off, Loader2, OctagonX, SearchCheck, Share2, Square } from "lucide-react";
+import { ChevronDown, CirclePause, Download, Link2Off, Loader2, OctagonX, Play, SearchCheck, Share2, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ModeBadge, StatusBadge } from "@/components/badges";
+import { EngineBadge, ModeBadge, StatusBadge } from "@/components/badges";
 import { BugCard } from "@/components/bug-card";
+import { CoveragePanel } from "@/components/coverage-panel";
 import { EmptyState } from "@/components/empty-state";
 import { FlowResults } from "@/components/flow-results";
 import { LivePane } from "@/components/live-pane";
@@ -45,18 +46,21 @@ export function RunView({
   const [run, setRun] = useState(initial);
   const [now, setNow] = useState(() => Date.now());
   const [stopping, setStopping] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const final = isFinal(run.status);
+  const paused = run.status === "paused";
 
-  // Poll while the run is in progress; stop as soon as it reaches a final status.
+  // Poll while the run is in progress; stop as soon as it reaches a final status (or pauses:
+  // a paused run waits for Resume).
   useEffect(() => {
-    if (final || readOnly) return;
+    if (final || paused || readOnly) return;
     const timer = setInterval(async () => {
       setNow(Date.now());
       const response = await fetch(`/api/runs/${run.id}`, { cache: "no-store" }).catch(() => null);
       if (response?.ok) setRun(await response.json());
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [final, readOnly, run.id]);
+  }, [final, paused, readOnly, run.id]);
 
   const stop = async () => {
     setStopping(true);
@@ -64,8 +68,23 @@ export function RunView({
     if (!response.ok) toast.error("This run has already finished.");
   };
 
+  const resume = async () => {
+    setResuming(true);
+    const response = await fetch(`/api/runs/${run.id}/resume`, { method: "POST" });
+    if (response.ok) {
+      setRun({ ...run, status: "queued", pausedReason: null });
+    } else {
+      toast.error("This run can't be resumed.");
+    }
+    setResuming(false);
+  };
+
   const runUrl = typeof window === "undefined" ? `/runs/${run.id}` : window.location.href;
-  const shown = run.bugs.filter((bug) => bug.status !== "dismissed" && !bug.suppressed).sort(bySeverity);
+  // Unverified findings (deep mode: nothing could check them) are shown apart, never with these.
+  const shown = run.bugs
+    .filter((bug) => bug.status !== "dismissed" && bug.status !== "unverified" && !bug.suppressed)
+    .sort(bySeverity);
+  const unverified = run.bugs.filter((bug) => bug.status === "unverified" && !bug.suppressed).sort(bySeverity);
   const history = run.history ?? null;
   const dismissed = run.bugs.filter((bug) => bug.status === "dismissed");
   const counts = Object.fromEntries(SEVERITIES.map((s) => [s, shown.filter((b) => b.severity === s).length]));
@@ -76,11 +95,17 @@ export function RunView({
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={run.status} />
           <ModeBadge mode={run.mode} />
+          <EngineBadge engine={run.engine} model={run.engineModel ?? run.model} />
           {run.stopRequested && !final && <span className="text-sm text-muted-foreground">Stopping…</span>}
         </div>
         <h1 className="text-2xl font-semibold tracking-tight break-all">{run.targetUrl}</h1>
         {run.focus && <p className="text-muted-foreground">Focus: {run.focus}</p>}
         <div className="flex flex-wrap gap-2">
+          {paused && !readOnly && (
+            <Button onClick={resume} disabled={resuming} data-testid="resume">
+              <Play /> Resume
+            </Button>
+          )}
           {!final && !readOnly && (
             <Button variant="outline" onClick={stop} disabled={stopping || run.stopRequested}>
               <Square /> Stop
@@ -111,6 +136,23 @@ export function RunView({
           </CardContent>
         </Card>
       )}
+
+      {paused && (
+        <Card className="border-amber-500/50">
+          <CardContent className="flex gap-3 text-sm">
+            <CirclePause className="size-5 shrink-0 text-amber-600" />
+            <div>
+              <p className="font-medium">Paused: usage limit</p>
+              <p className="text-muted-foreground">
+                {run.pausedReason ?? "The model's usage limit was reached."} The map, plan, progress and findings so far are
+                kept; Resume continues from here.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {run.coverage && <CoveragePanel coverage={run.coverage} />}
 
       {run.status === "failed" && (
         <Card className="border-destructive/50">
@@ -186,6 +228,25 @@ export function RunView({
             {history.suppressed} finding{history.suppressed === 1 ? " was" : "s were"} hidden: your team marked{" "}
             {history.suppressed === 1 ? "it" : "them"} as a false positive in an earlier run.
           </p>
+        )}
+        {unverified.length > 0 && (
+          <div className="grid gap-3 rounded-lg border border-dashed p-4" data-testid="unverified">
+            <div>
+              <h3 className="font-medium">Unverified ({unverified.length})</h3>
+              <p className="text-sm text-muted-foreground">
+                Neither a replay nor a re-measurement in a fresh browser could check these. They aren&apos;t counted above; read
+                them as leads, not confirmed bugs.
+              </p>
+            </div>
+            <ul className="grid gap-2 text-sm">
+              {unverified.map((bug) => (
+                <li key={bug.id} className="rounded-lg border p-3">
+                  <p className="font-medium">{bug.title}</p>
+                  {bug.actual && <p className="text-muted-foreground">{bug.actual}</p>}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {dismissed.length > 0 && (
           <Collapsible>

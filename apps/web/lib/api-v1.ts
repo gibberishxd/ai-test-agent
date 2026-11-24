@@ -11,9 +11,9 @@ import { authenticateApiKey, rateLimit, type ApiCaller } from "@/lib/api-keys";
 export const MAX_API_STEPS = 100;
 export const MAX_API_MINUTES = 60;
 
-type RunBody = { targetUrl: unknown; mode: unknown; focus: unknown; modelConfigId: unknown };
+type RunBody = { targetUrl: unknown; mode: unknown; focus: unknown; modelConfigId: unknown; engineModel?: unknown };
 export type ApiRunInput = { body: RunBody; maxSteps: number | null; maxSeconds: number | null };
-export type ApiErrors = Partial<Record<"target_url" | "mode" | "focus" | "model_id" | "max_steps" | "max_minutes", string>>;
+export type ApiErrors = Partial<Record<"target_url" | "mode" | "focus" | "model_id" | "engine_model" | "max_steps" | "max_minutes", string>>;
 
 function wholeNumber(value: unknown, min: number, max: number): number | null | undefined {
   if (value === undefined || value === null) return null;
@@ -23,7 +23,12 @@ function wholeNumber(value: unknown, min: number, max: number): number | null | 
 export function parseApiRunInput(raw: Record<string, unknown>): { ok: true; value: ApiRunInput } | { ok: false; errors: ApiErrors } {
   const errors: ApiErrors = {};
   if (typeof raw.target_url !== "string") errors.target_url = "target_url is required: the URL to test.";
-  if (raw.mode !== undefined && raw.mode !== "passive" && raw.mode !== "interactive") errors.mode = 'mode is "passive" or "interactive".';
+  if (raw.mode !== undefined && raw.mode !== "passive" && raw.mode !== "interactive" && raw.mode !== "deep") {
+    errors.mode = 'mode is "passive", "interactive" or "deep".';
+  }
+  if (raw.engine_model !== undefined && raw.engine_model !== null && typeof raw.engine_model !== "string") {
+    errors.engine_model = 'engine_model is a deep run\'s model: "claude-sonnet-5-5" or "claude-opus-5-5".';
+  }
   if (raw.focus !== undefined && raw.focus !== null && typeof raw.focus !== "string") errors.focus = "focus is a string.";
   if (raw.model_id !== undefined && raw.model_id !== null && typeof raw.model_id !== "string") errors.model_id = "model_id is a model's id (Settings → Models).";
   const maxSteps = wholeNumber(raw.max_steps, 1, MAX_API_STEPS);
@@ -34,7 +39,13 @@ export function parseApiRunInput(raw: Record<string, unknown>): { ok: true; valu
   return {
     ok: true,
     value: {
-      body: { targetUrl: raw.target_url, mode: raw.mode ?? "passive", focus: raw.focus ?? null, modelConfigId: raw.model_id ?? null },
+      body: {
+        targetUrl: raw.target_url,
+        mode: raw.mode ?? "passive",
+        focus: raw.focus ?? null,
+        modelConfigId: raw.model_id ?? null,
+        ...(raw.engine_model ? { engineModel: raw.engine_model } : {}),
+      },
       maxSteps: maxSteps ?? null,
       maxSeconds: maxMinutes ? maxMinutes * 60 : null,
     },
@@ -43,7 +54,7 @@ export function parseApiRunInput(raw: Record<string, unknown>): { ok: true; valu
 
 /** Field names the dashboard's validation uses → the API's names, for error messages. */
 export function apiErrorNames(errors: Record<string, string | undefined>): Record<string, string> {
-  const names: Record<string, string> = { targetUrl: "target_url", mode: "mode", focus: "focus", model: "model_id" };
+  const names: Record<string, string> = { targetUrl: "target_url", mode: "mode", focus: "focus", model: "model_id", engineModel: "engine_model" };
   return Object.fromEntries(Object.entries(errors).filter(([, v]) => v).map(([k, v]) => [names[k] ?? k, v as string]));
 }
 
@@ -64,6 +75,9 @@ type ApiRun = {
   id: string;
   targetUrl: string;
   mode: string;
+  /** Run 9: loop (the standard agent) or deep; a paused deep run says why. */
+  engine?: string;
+  pausedReason?: string | null;
   status: string;
   costUsd: number;
   pagesVisited: number;
@@ -78,9 +92,14 @@ export const FINAL_STATUSES = ["done", "failed", "stopped"];
 
 const steps = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
 
-/** What a run reports to its user: every bug that verification didn't dismiss. */
+/** What a run reports to its user: every bug that verification didn't dismiss. Unverified
+ * findings (deep mode: nothing could check them) are reported apart, never with these. */
 function reported(run: ApiRun): ApiBug[] {
-  return run.bugs.filter((bug) => bug.status !== "dismissed" && !bug.suppressed);
+  return run.bugs.filter((bug) => bug.status !== "dismissed" && bug.status !== "unverified" && !bug.suppressed);
+}
+
+function unverified(run: ApiRun): ApiBug[] {
+  return run.bugs.filter((bug) => bug.status === "unverified" && !bug.suppressed);
 }
 
 export function apiStatus(run: ApiRun, baseUrl: string) {
@@ -91,6 +110,9 @@ export function apiStatus(run: ApiRun, baseUrl: string) {
     finished: FINAL_STATUSES.includes(run.status),
     target_url: run.targetUrl,
     mode: run.mode,
+    engine: run.engine ?? "loop",
+    paused_reason: run.pausedReason ?? null,
+    unverified: unverified(run).length,
     created_at: run.createdAt.toISOString(),
     started_at: run.startedAt?.toISOString() ?? null,
     finished_at: run.finishedAt?.toISOString() ?? null,
@@ -112,18 +134,23 @@ export function apiReport(run: ApiRun, baseUrl = "") {
   return {
     run: status,
     counts: status.counts,
-    bugs: reported(run).map((bug) => ({
-      id: bug.id,
-      title: bug.title,
-      severity: bug.severity,
-      category: bug.category,
-      page_url: bug.pageUrl,
-      status: bug.status,
-      source: bug.source,
-      expected: bug.expected,
-      actual: bug.actual,
-      repro_steps: steps(bug.reproSteps),
-    })),
+    bugs: reported(run).map(apiBug),
+    unverified_bugs: unverified(run).map(apiBug),
+  };
+}
+
+function apiBug(bug: ApiBug) {
+  return {
+    id: bug.id,
+    title: bug.title,
+    severity: bug.severity,
+    category: bug.category,
+    page_url: bug.pageUrl,
+    status: bug.status,
+    source: bug.source,
+    expected: bug.expected,
+    actual: bug.actual,
+    repro_steps: steps(bug.reproSteps),
   };
 }
 
