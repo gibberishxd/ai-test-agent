@@ -21,11 +21,19 @@ class RunStatus(StrEnum):
     DONE = "done"
     FAILED = "failed"
     STOPPED = "stopped"
+    PAUSED = "paused"  # run 9: a usage limit; keeps its coverage and findings, can resume
 
 
 class RunMode(StrEnum):
     PASSIVE = "passive"
     INTERACTIVE = "interactive"
+
+
+class RunEngine(StrEnum):
+    """Run 9: which agent drives an interactive run (the current loop, or deep mode)."""
+
+    LOOP = "loop"
+    DEEP = "deep"
 
 
 class Severity(StrEnum):
@@ -44,6 +52,7 @@ class BugStatus(StrEnum):
     CANDIDATE = "candidate"
     CONFIRMED = "confirmed"
     DISMISSED = "dismissed"
+    UNVERIFIED = "unverified"  # run 9: nothing could check it; shown apart, never counted
 
 
 class WorkspaceRole(StrEnum):
@@ -92,6 +101,9 @@ class Workspace(Base):
     retention_days: Mapped[int] = mapped_column(server_default=text("30"))
     # Run 5, K4: the plan whose limits apply (consume_quota, retention, seats).
     plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"), server_default="free")
+    # Run 9: deep mode's limits for this workspace; None = the product defaults (deep/config.py).
+    deep_max_steps: Mapped[int | None]
+    deep_max_seconds: Mapped[int | None]
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -163,6 +175,12 @@ class Run(Base):
     # The screen the run starts on, "WIDTHxHEIGHT" (e.g. "390x844"); None = desktop 1280×800.
     viewport: Mapped[str | None]
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("api_keys.id"))
+    # Run 9: the agent engine, the model a deep run asked for (None = the default), what it
+    # covered (map, plan, ticked items, resume state), and why it paused.
+    engine: Mapped[str] = mapped_column(_pg_enum(RunEngine, "run_engine"), server_default="loop")
+    engine_model: Mapped[str | None]
+    coverage: Mapped[dict | None] = mapped_column(JSONB)
+    paused_reason: Mapped[str | None]
     # When retention deleted this run's screenshots and steps (its findings stay).
     purged_at: Mapped[datetime | None] = mapped_column(_timestamp())
 

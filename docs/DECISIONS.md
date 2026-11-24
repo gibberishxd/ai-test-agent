@@ -1577,3 +1577,20 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   product (the customer's own key and choice), and kept off the owner's API budget for
   development.
 
+## D112. Deep mode's data: an engine column, not a third mode (2026-11-24)
+- **Decision:** a deep run is an interactive run with `engine = 'deep'` (a new `run_engine`
+  enum, `loop` by default). The API's `mode: "deep"` is stored that way. New: `runs.engine_model`
+  (a pinned ID, deep runs only), `runs.coverage` (JSONB), `run_status` `paused` with
+  `runs.paused_reason`, `bug_status` `unverified`, and `workspaces.deep_max_steps` /
+  `deep_max_seconds`.
+- **Alternatives:** a third `run_mode` value `deep`. Every safety rule (look-only passive mode,
+  interactive only on verified domains) reads `mode`; a third value would have to be added to
+  each check, and one forgotten check would make deep runs less safe than interactive ones.
+  For unverified findings: `status = candidate` plus a flag in the evidence; a separate status
+  keeps them from being counted or shown with verified ones by accident.
+- **Limits:** product defaults 400 steps and 60 minutes (the owner's setting). A workspace may set
+  its own, higher or lower; a run may only lower its workspace's, the same rule as the current
+  loop's per-run budgets (run 4, J3), so an API caller can't run past what the workspace allows.
+- **No cost cap for deep runs:** steps and time bound a run, and quality comes first (D111);
+  customers pay with their own key. The current loop's `MAX_RUN_COST_USD` stays as it is.
+
