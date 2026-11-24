@@ -27,7 +27,7 @@ from worker.deep.harness import Harness, HarnessConfig
 from worker.deep.scripted import ScriptedDriver, TurnDriver
 from worker.deep.sdk_driver import SdkConfig, SdkDriver, check_auth, run_workdir
 from worker.deep.toolbox import Action, Toolbox, ToolboxConfig, ToolResult
-from worker.llm.base import LLMClient, Usage
+from worker.llm.base import LLMClient, Usage, UsageLimitReached
 from worker.model_configs import ModelConfigError, decrypt_key
 from worker.report import BugReport
 from worker.safety.network import BlockedError
@@ -153,7 +153,7 @@ def run_deep(
         verify_and_dedupe,
     )
     from worker.login import login_for_run
-    from worker.scan import guarded_context, is_demo_target, passive_scan
+    from worker.scan import passive_scan
 
     if not interactive_allowed(settings, run.target_url, verified):
         raise BlockedError("deep mode is only allowed on the demo shop and verified domains")
@@ -191,8 +191,58 @@ def run_deep(
         if run.stop_requested:
             run.summary = summarize(pages, deterministic)
             return
-    recorder = DbRecorder(session, run, storage, first_step, segment_start=run.step_count)
     started = time.monotonic()
+    saved = run.coverage or {}
+    if resuming and saved.get("stop_reason") == "finished":
+        # The agent had finished; only verification was left when the run paused.
+        coverage, stop_reason, agent_summary = saved, "finished", saved.get("summary") or None
+    else:
+        recorder = DbRecorder(session, run, storage, first_step, segment_start=run.step_count)
+        harness = _run_agent(
+            session, run, settings, driver, recorder, limits, login, viewport, resuming, browser
+        )
+        if harness.paused:
+            run.paused_reason = harness.paused_detail or "usage limit"
+        coverage, stop_reason = harness.coverage(), harness.stop_reason
+        agent_summary = harness.summary or None
+    session.commit()
+    # Findings so far are verified as usual, a paused run's too. If the judge's model is out of
+    # its usage as well (the same login), the run pauses with its findings still candidates;
+    # verification continues when it is resumed.
+    try:
+        verification = verify_and_dedupe(session, run, llm, settings, browser, login)
+    except UsageLimitReached as error:
+        session.rollback()
+        run.paused_reason = run.paused_reason or f"usage limit during verification: {error}"
+        verification = {"pending": "verification continues when the run is resumed"}
+    all_bugs = [BugReport.model_validate(b, from_attributes=True) for b in run.bugs]
+    run.summary = {
+        **summarize(pages, all_bugs),
+        "engine": "deep",
+        "model": model,
+        "stop_reason": stop_reason,
+        "agent_summary": agent_summary,
+        "verification": verification,
+        "coverage": {
+            "pages_mapped": len((coverage.get("map") or {}).get("pages") or []),
+            "plan_items": len(coverage.get("plan") or []),
+            "ticked": len(coverage.get("progress") or {}),
+            "unticked": coverage.get("unticked") or [],
+            "candidates": len(coverage.get("candidates") or []),
+            "screenshots": coverage.get("screenshots") or {},
+        },
+        "seconds": round(coverage.get("seconds") or (time.monotonic() - started), 1),
+    }
+    session.commit()
+
+
+def _run_agent(
+    session, run, settings, driver, recorder, limits, login, viewport, resuming, browser
+) -> Harness:
+    """The harness and its driver in a guarded browser context; returns the harness."""
+    from worker.execute import _stop_requested
+    from worker.scan import guarded_context, is_demo_target
+
     with guarded_context(settings, run.target_url, browser, login, viewport) as (context, guard):
         toolbox = Toolbox(
             context.new_page(),
@@ -218,33 +268,10 @@ def run_deep(
             recorder,
             coverage=run.coverage if resuming else None,
         )
-        outcome = driver.run(harness)
+        driver.run(harness)
         recorder.session_id = getattr(driver, "session_id", None) or recorder.session_id
         recorder.on_coverage(harness.coverage())
-    if harness.paused:
-        run.paused_reason = harness.paused_detail or "usage limit"
-    # Findings so far are verified as usual, a paused run's too.
-    verification = verify_and_dedupe(session, run, llm, settings, browser, login)
-    all_bugs = [BugReport.model_validate(b, from_attributes=True) for b in run.bugs]
-    coverage = harness.coverage()
-    run.summary = {
-        **summarize(pages, all_bugs),
-        "engine": "deep",
-        "model": model,
-        "stop_reason": outcome.stop_reason,
-        "agent_summary": harness.summary or None,
-        "verification": verification,
-        "coverage": {
-            "pages_mapped": len((coverage.get("map") or {}).get("pages") or []),
-            "plan_items": len(coverage["plan"]),
-            "ticked": len(coverage["progress"]),
-            "unticked": coverage["unticked"],
-            "candidates": len(coverage["candidates"]),
-            "screenshots": coverage["screenshots"],
-        },
-        "seconds": round(coverage["seconds"] or (time.monotonic() - started), 1),
-    }
-    session.commit()
+    return harness
 
 
 def make_driver(session: Session, run: Run, settings: Settings, model: str) -> TurnDriver:

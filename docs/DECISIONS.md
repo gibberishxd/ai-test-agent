@@ -1737,3 +1737,14 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** console errors and failed requests seen during a deep run are not turned into
   deterministic findings the way the loop's are; the model has console and network tools and a
   checklist area for them, and the crawl's deterministic findings stay (OPEN_QUESTIONS).
+
+## D119. A usage limit during verification pauses the run too (2026-11-24, found in the evaluation)
+- **What happened:** the first demo-shop deep run (`75a366f0`) paused correctly on the plan's
+  five-hour limit, then verification asked claude-cli (the same login) to dedupe, hit the same
+  limit, and the run was marked failed: 13 findings were left unchecked.
+- **Decision:** a usage limit raised by verification is caught in `run_deep`: the run is paused
+  (the first reason kept), the findings stay candidates, and verification continues on resume.
+  A run whose agent had finished (`coverage.stop_reason == "finished"`) resumes with
+  verification only; the agent doesn't run again.
+- **Alternatives:** skip verification on every pause (a pause on the API path, where the judge
+  may be another provider, could verify right away); fail the run (loses the findings).
