@@ -6,9 +6,12 @@ pydantic-settings maps each field to an env var of the same name (case-insensiti
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from worker.deep.config import DEEP_MODELS
 
 REPO_ROOT = Path(__file__).resolve().parents[4]  # apps/worker/src/worker/config.py → repo root
 
@@ -75,6 +78,25 @@ class Settings(BaseSettings):
     # A benchmark stops when its runs' API-equivalent cost reaches this (run 6): a guard against
     # a runaway loop on the owner's plan, not a measurement setting. 0 = no cap.
     bench_max_cost_usd: float = 5.00
+
+    # Deep mode (run 9, worker/deep): quality first. Steps and time bound a run; there is no
+    # separate cost cap (customers pay with their own key, D111). DEEP_AUTH=api uses the
+    # workspace's (or the worker's) API key; DEEP_AUTH=cli uses this machine's Claude login, for
+    # the owner's local evaluation only. Screenshots go to the model as JPEG, at most this wide.
+    deep_max_steps: int = 400
+    deep_max_seconds: int = 3600
+    deep_auth: Literal["api", "cli"] = "api"
+    deep_model: str = "claude-sonnet-5-5"
+    deep_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
+    deep_screenshot_max_width: int = 1280
+    deep_screenshot_quality: int = Field(default=75, ge=1, le=100)
+
+    @field_validator("deep_model")
+    @classmethod
+    def _deep_model_known(cls, value: str) -> str:
+        if value not in DEEP_MODELS:
+            raise ValueError(f"DEEP_MODEL must be one of {DEEP_MODELS}, got {value!r}")
+        return value
 
     # Passive scan
     max_pages: int = 30

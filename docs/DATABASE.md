@@ -242,6 +242,10 @@ erDiagram
     integer max_seconds
     integer max_steps
     text viewport
+    run_engine engine
+    text engine_model
+    jsonb coverage
+    text paused_reason
     timestamp_with_time_zone purged_at
     text reviewer_provider
     text reviewer_model
@@ -510,6 +514,21 @@ never raise them (`run_limits()` takes the smaller value).
 format): the screen the crawl, the agent and replay verification start on. NULL = desktop 1280×800.
 The agent's `set_viewport` tool still switches to its named desktop and mobile sizes; a report is
 replayed at the size it names, else at the run's viewport.
+
+### Deep mode (run 9)
+- `runs.engine` (`run_engine`: `loop` default, `deep`): which agent drives an interactive run.
+  `mode` keeps meaning passive or interactive, so every safety rule still reads `mode`.
+- `runs.engine_model` (nullable): the model a deep run asked for, a pinned ID (a CHECK refuses
+  aliases, and refuses it on a `loop` run); NULL = the worker's `DEEP_MODEL`.
+- `runs.coverage` (JSONB, nullable): the deep run's map of the app, its test plan, which items it
+  ticked off, and what it needs to resume. Written as the run goes, so the run page shows it live.
+- `run_status` `paused` and `runs.paused_reason`: a deep run that hit a usage limit. It keeps its
+  coverage and findings and can be resumed (status back to `queued`).
+- `bug_status` `unverified`: a finding neither replay nor a re-measurement could check. Shown
+  apart from verified findings and never counted as found.
+- `workspaces.deep_max_steps`, `deep_max_seconds` (nullable, CHECK > 0): the workspace's deep-mode
+  limits; NULL = the product defaults (400 steps, 60 minutes). A run's own `max_steps` /
+  `max_seconds` can lower them, never raise them (`deep/config.py: deep_limits`).
 
 ### targets, specs, spec_chunks — a team's own requirements (run 7, M3)
 - **`targets`**: an app a workspace tests, by `origin` (`scheme://host[:port]`, a CHECK keeps it

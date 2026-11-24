@@ -35,12 +35,23 @@ enum RunMode {
   @@map("run_mode")
 }
 
+/// Run 9: which agent drives an interactive run. `loop` is the current agent; `deep` is deep
+/// mode (a strong model with general browser tools, a test plan and verified evidence).
+enum RunEngine {
+  loop
+  deep
+
+  @@map("run_engine")
+}
+
 enum RunStatus {
   queued
   running
   done
   failed
   stopped
+  /// Run 9: stopped on a usage limit; keeps its coverage and findings and can be resumed.
+  paused
 
   @@map("run_status")
 }
@@ -65,6 +76,8 @@ enum BugStatus {
   candidate
   confirmed
   dismissed
+  /// Run 9: neither replay nor a re-measurement could check it; shown apart, never counted.
+  unverified
 
   @@map("bug_status")
 }
@@ -80,6 +93,10 @@ model Workspace {
   retentionDays     Int      @default(30) @map("retention_days")
   /// Run 5, K4: the plan whose limits apply (consume_quota, retention, seats).
   planId            String   @default("free") @map("plan_id")
+  /// Run 9: deep mode's limits for this workspace; null = the product defaults (400 steps,
+  /// 60 minutes). A run can lower them, never raise them. Checked > 0 by the migration.
+  deepMaxSteps      Int?     @map("deep_max_steps")
+  deepMaxSeconds    Int?     @map("deep_max_seconds")
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   plan         Plan              @relation(fields: [planId], references: [id])
@@ -180,6 +197,14 @@ model Run {
   viewport                 String?
   /// The API key that started the run (null: started from the dashboard).
   apiKeyId                 String?   @map("api_key_id") @db.Uuid
+  /// Run 9: the agent engine (loop = the current agent, deep = deep mode).
+  engine                   RunEngine @default(loop)
+  /// The model a deep run asked for, a pinned ID; null = the worker's default. Deep runs only.
+  engineModel              String?   @map("engine_model")
+  /// What a deep run covered (map, test plan, ticked items) and what it needs to resume.
+  coverage                 Json?
+  /// Why a paused run stopped (a usage limit); it can be resumed from where it stopped.
+  pausedReason             String?   @map("paused_reason")
 
   workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy         User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)

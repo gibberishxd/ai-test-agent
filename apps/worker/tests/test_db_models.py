@@ -45,3 +45,30 @@ def test_every_hot_query_has_its_index(db_engine):
         for constraint in inspector.get_unique_constraints(table)
     }
     assert set(HOT_QUERY_INDEXES) - existing == set()
+
+
+def test_every_enum_matches_the_database(db_engine):
+    # The Python enums must list exactly the labels Postgres has, in the same order: a value
+    # only one side knows fails on insert (Python) or reads back unknown (Prisma).
+    from sqlalchemy import text
+
+    from worker.db.models import BugSource, BugStatus, RunEngine, RunMode, RunStatus, Severity
+
+    enums = {
+        "run_mode": RunMode,
+        "run_status": RunStatus,
+        "run_engine": RunEngine,
+        "severity": Severity,
+        "bug_source": BugSource,
+        "bug_status": BugStatus,
+    }
+    with db_engine.connect() as conn:
+        for name, enum in enums.items():
+            labels = conn.execute(
+                text(
+                    "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
+                    "WHERE t.typname = :name ORDER BY e.enumsortorder"
+                ),
+                {"name": name},
+            ).scalars()
+            assert list(labels) == [member.value for member in enum], name
