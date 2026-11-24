@@ -342,10 +342,28 @@ def _replay_step(page: Page, step: ReplayStep) -> None:
     elif step.action == "reload":
         page.reload(timeout=NAVIGATION_TIMEOUT_MS)
     elif step.action == "set_viewport":
-        page.set_viewport_size(VIEWPORTS.get(str(step.args.get("size")), VIEWPORTS["desktop"]))
+        if "width" in step.args and "height" in step.args:  # deep mode: any size (run 9)
+            size = {"width": int(step.args["width"]), "height": int(step.args["height"])}
+        else:
+            size = VIEWPORTS.get(str(step.args.get("size")), VIEWPORTS["desktop"])
+        page.set_viewport_size(size)
     elif step.action == "scroll":
-        distance = -700 if step.args.get("direction") == "up" else 700
-        page.evaluate("y => window.scrollBy(0, y)", distance)
+        pixels = int(step.args.get("pixels") or 700)  # deep mode records its distance
+        page.evaluate(
+            "y => window.scrollBy(0, y)", -pixels if step.args.get("direction") == "up" else pixels
+        )
+    elif step.action == "press_key":  # deep mode (run 9): on its element, else the focused one
+        key = str(step.args.get("key", ""))
+        if step.element:
+            wait_for_target(page, step.element)
+            find_target(page, step.element).press(key, timeout=ACTION_TIMEOUT_MS)
+        else:
+            page.keyboard.press(key)
+    elif step.action == "hover":  # deep mode (run 9)
+        if not step.element:
+            raise ReplayError("no element was recorded", "no_element_recorded")
+        wait_for_target(page, step.element)
+        find_target(page, step.element).hover(timeout=ACTION_TIMEOUT_MS)
     # take_screenshot, note, report_bug, finish, blocked or failed steps: nothing to repeat
 
 
