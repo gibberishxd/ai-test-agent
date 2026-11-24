@@ -1594,3 +1594,29 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **No cost cap for deep runs:** steps and time bound a run, and quality comes first (D111);
   customers pay with their own key. The current loop's `MAX_RUN_COST_USD` stays as it is.
 
+
+## D113. Deep mode's toolbox: general tools behind the same safety rules (2026-11-24)
+- **Decision:** deep mode's model gets general browser tools (`deep/tools.py`, run by
+  `deep/toolbox.py`): navigate, click, type, select, press_key, hover, scroll, any-size
+  set_viewport, go_back; screenshot (JPEG), accessibility snapshot, visible text; evaluate_js,
+  page_source, read_script; console and network since a mark; axe, layout, meta and the keyboard
+  probe as tools. Elements are named by a `ref` from the latest snapshot (the same numbering as
+  the current loop's observation), or by a CSS selector that must match exactly one element.
+- **Safety, the same rules as the current loop:** passive mode's look-only rule, the deny list
+  (also for Enter or Space on a destructive control, and for the keyboard probe's click), no card
+  numbers off the demo shop, no navigation off the target, and a return to the site when a
+  button or script leaves it. The proxy still guards every request.
+- **Measuring must not act:** while an evaluate_js snippet runs, requests that send data (not
+  GET, HEAD or OPTIONS) are blocked by a route on the page, and a MutationObserver tells the
+  model if the snippet changed the DOM, with a warning that replay can't repeat it. page_source
+  and read_script return only responses the browser already loaded: nothing new is fetched.
+- **What replay repeats:** navigate, click, type, select, press_key, hover, scroll (its distance
+  is recorded), set_viewport (width and height) and go_back; replay learned press_key, hover,
+  any size and a scroll distance. The keyboard probe is evidence, not a replayed step: its key
+  presses leave the page in a state replay can't rebuild exactly.
+- **Alternatives:** Playwright MCP's own tools (a separate Node process, its own refs, none of our
+  safety checks, and nothing recorded for replay); a sandboxed JavaScript (an isolated world
+  can't read the page's own state, which is what measuring needs).
+- **Tradeoffs:** a measuring snippet can still change the page; it is told, not prevented.
+  Routing every request through Python to block data-sending ones during a snippet adds a little
+  time per request.
