@@ -173,6 +173,7 @@ class ToolResult:
     is_error: bool = False
     action: Action | None = None
     data: dict | None = None  # the machine-readable result of a measurement
+    step: int | None = None  # the run's step number, set by the harness
 
     def data_text(self) -> str:
         return json.dumps(self.data)
@@ -622,7 +623,8 @@ class Toolbox:
         ]
         body = "\n".join(lines) or "(no violations)"
         return ToolResult(
-            f"axe at {self.viewport}:\n<page_content>\n{self._safe(body)}\n</page_content>"
+            f"axe at {self.viewport}:\n<page_content>\n{self._safe(body)}\n</page_content>",
+            data={"violations": [v.model_dump() for v in violations]},
         )
 
     def _check_layout(self, args: dict, action: Action) -> ToolResult:

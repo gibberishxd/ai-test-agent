@@ -1620,3 +1620,33 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** a measuring snippet can still change the page; it is told, not prevented.
   Routing every request through Python to block data-sending ones during a snippet adds a little
   time per request.
+
+## D114. Deep mode's process is enforced by the harness (2026-11-24)
+- **Decision:** `deep/harness.py` drives the run in phases, one turn each: MAP (save_map with
+  pages and flows), PLAN (save_plan, refused unless every checklist area has an item or a
+  reasoned "not applicable", and layout has items at 390×844, 768×1024 and 1440×900), EXECUTE
+  (plan items handed out 8 per turn, each ticked done, skipped or blocked), REVIEW (every
+  candidate reported or dropped), then finish. Every tool call is a numbered step; the coverage
+  (map, plan, progress, candidates, screenshots seen per viewport, budget used) is saved after
+  every call.
+- **Gates:** report_bug needs a flagged, open candidate and at least one browser tool call after
+  the flag (the re-check), a self-review, and a verification spec: replay steps that exist and
+  can be repeated; or a measurement or check the harness runs itself at that moment and stores
+  (a check must report the named rule now). finish needs every item ticked, every candidate
+  resolved and a screenshot seen at each viewport; when the last 10% of the steps or time is
+  reached, the next prompt switches to review and finish is always allowed, with the unticked
+  items recorded.
+- **Stopping:** the step and time budgets, the user's Stop, three turns in a row without progress
+  (phase, ticks, candidates, reports), and a usage limit, which pauses instead: everything is
+  saved and the run can resume from its coverage (the browser restarts on the start page).
+- **The checklist** (`deep/checklist.py`) is generic: core flows and forms (including whether a
+  request is sent on submit), links and navigation, layout at three viewports, visual
+  consistency, accessibility, meta and SEO, console and network, and whether the app's own text
+  promises things that don't exist. A guard test keeps every benchmark app's names and bugs out
+  of the prompts, checklist and tools.
+- **Alternatives:** the process only in the prompt (the current loop's charter: models skip
+  parts of it, MISS_ANALYSIS); one long turn with the harness only counting (no way to hand out
+  the plan or to know cost at phase boundaries).
+- **Tradeoffs:** a model that disagrees with a gate spends steps on refused calls; the error says
+  what is missing. A resumed run loses the browser's state (a cart, a sign-in) and has to
+  rebuild it.

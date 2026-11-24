@@ -150,3 +150,155 @@ BROWSER_TOOLS = [
 ]
 
 BROWSER_TOOL_NAMES = {tool.name for tool in BROWSER_TOOLS}
+
+
+# --- the process tools: the harness runs these (deep/harness.py) --------------------------------
+
+STEPS = {"type": "array", "items": {"type": "integer"}}
+VERIFY = {
+    "type": "object",
+    "description": "How to check this bug in a fresh browser. kind=replay: `steps`, the step "
+    "numbers of the browser actions that reproduce it from the start page. kind=measure: a "
+    "`snippet` that returns the wrong value, and `setup_steps` that reach the state to measure. "
+    "kind=check: `check` (run_axe, check_layout, check_meta) and the `rule` it reports, with "
+    "`setup_steps`; or check=keyboard_probe with the probe's `step` and the failed check as "
+    "`rule`.",
+    "properties": {
+        "kind": {"type": "string", "enum": ["replay", "measure", "check"]},
+        "steps": STEPS,
+        "snippet": {"type": "string"},
+        "setup_steps": STEPS,
+        "check": {
+            "type": "string",
+            "enum": ["run_axe", "check_layout", "check_meta", "keyboard_probe"],
+        },
+        "rule": {"type": "string"},
+        "step": {"type": "integer"},
+    },
+    "required": ["kind"],
+}
+
+PROCESS_TOOLS = [
+    _tool(
+        "save_map",
+        "Record your map of the app: its pages, its flows, and what it is for.",
+        ("pages", "flows", "summary"),
+        pages={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}, "purpose": {"type": "string"}},
+                "required": ["url", "purpose"],
+            },
+        },
+        flows={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "description": {"type": "string"}},
+                "required": ["name", "description"],
+            },
+        },
+        summary={"type": "string"},
+    ),
+    _tool(
+        "save_plan",
+        "Record your test plan: concrete items, each in a checklist area; mark an area not "
+        "applicable only with a reason.",
+        ("items",),
+        items={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "area": {"type": "string"},
+                    "description": {"type": "string"},
+                    "viewport": {"type": "string", "description": "For layout items: WxH."},
+                },
+                "required": ["id", "area", "description"],
+            },
+        },
+        not_applicable={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"area": {"type": "string"}, "reason": {"type": "string"}},
+                "required": ["area", "reason"],
+            },
+        },
+    ),
+    _tool(
+        "tick",
+        "Mark a plan item as done, skipped or blocked, with a short note.",
+        ("item_id", "status", "note"),
+        item_id={"type": "string"},
+        status={"type": "string", "enum": ["done", "skipped", "blocked"]},
+        note={"type": "string"},
+    ),
+    _tool(
+        "flag_candidate",
+        "Note something that looks wrong, before you try to disprove it. Returns its id.",
+        ("title", "observation"),
+        title={"type": "string"},
+        observation={"type": "string", "description": "What you saw, with concrete values."},
+    ),
+    _tool(
+        "drop_candidate",
+        "Close a candidate that turned out not to be a bug, saying why.",
+        ("candidate_id", "reason"),
+        candidate_id={"type": "string"},
+        reason={"type": "string"},
+    ),
+    _tool(
+        "report_bug",
+        "Report a candidate as a bug, after re-checking it. One bug per report.",
+        (
+            "candidate_id",
+            "title",
+            "severity",
+            "category",
+            "expected",
+            "actual",
+            "self_review",
+            "verify",
+        ),
+        candidate_id={"type": "string"},
+        title={"type": "string", "description": "Short and specific, like a ticket title."},
+        severity={"type": "string", "enum": ["critical", "high", "medium", "low"]},
+        category={
+            "type": "string",
+            "enum": [
+                "functional",
+                "validation",
+                "ux",
+                "visual",
+                "layout",
+                "accessibility",
+                "content",
+                "performance",
+                "security",
+                "seo",
+                "other",
+            ],
+        },
+        expected={"type": "string"},
+        actual={"type": "string", "description": "What happened, with concrete values."},
+        steps_to_reproduce={"type": "array", "items": {"type": "string"}},
+        self_review={
+            "type": "string",
+            "description": "How you tried to disprove it, and why it is still a bug.",
+        },
+        verify=VERIFY,
+    ),
+    _tool(
+        "finish",
+        "End the run: every plan item ticked, every candidate resolved, screenshots seen at "
+        "every viewport.",
+        ("summary",),
+        summary={"type": "string"},
+    ),
+]
+
+PROCESS_TOOL_NAMES = {tool.name for tool in PROCESS_TOOLS}
+ALL_TOOLS = BROWSER_TOOLS + PROCESS_TOOLS
