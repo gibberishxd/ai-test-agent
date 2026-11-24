@@ -58,7 +58,14 @@ def export_run(session: Session, run_id: str, data_dir: Path | None = None) -> d
         "steps": run.step_count,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "findings": [_finding(bug, steps, data_dir) for bug in bugs],
+        # Run 9: which engine ran it, and for deep mode what it covered (map, plan, progress).
+        "engine": run.engine,
+        "coverage": run.coverage,
+        # Unverified findings (nothing could check them) are listed apart, never mixed in.
+        "findings": [_finding(bug, steps, data_dir) for bug in bugs if bug.status != "unverified"],
+        "unverified_findings": [
+            _finding(bug, steps, data_dir) for bug in bugs if bug.status == "unverified"
+        ],
     }
 
 
@@ -94,6 +101,7 @@ def _finding(bug: Bug, steps: dict[int, Step], data_dir: Path | None) -> dict:
         "dismiss_reason": bug.dismiss_reason,
         "duplicate_of": str(bug.duplicate_of_id) if bug.duplicate_of_id else None,
         "replay_verified": replay_verified(bug.status, evidence),
+        "verification": verification_of(bug.status, bug.source, evidence),
         "steps": list(bug.repro_steps or []),
         "evidence": evidence_of(evidence, events),
         "screenshot": _path(screenshot_of(bug, steps), data_dir),
@@ -109,6 +117,20 @@ def replay_verified(status: str, evidence: dict) -> bool:
     """Replay ran and the bug showed again. Deterministic findings are confirmed by their hard
     evidence without a replay, so they are not "replay-verified"."""
     return status == "confirmed" and bool(evidence.get("replay"))
+
+
+def verification_of(status: str, source: str, evidence: dict) -> str:
+    """How a finding was checked: "replay", "measurement" (a re-run snippet or check, deep
+    mode), "deterministic" (hard evidence, no replay needed), or "none" (unverified, or not
+    checked)."""
+    if source == "deterministic":
+        return "deterministic"
+    checked = (evidence.get("verification") or {}).get("kind")
+    if status not in ("confirmed", "dismissed"):
+        return "none"
+    if checked in ("measure", "check"):
+        return "measurement"
+    return "replay" if evidence.get("replay") else "none"
 
 
 def evidence_of(evidence: dict, step_events: list[dict]) -> dict:

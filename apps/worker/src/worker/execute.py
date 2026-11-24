@@ -21,7 +21,7 @@ from worker.agent.loop import AgentConfig, AgentRun, StepRecord
 from worker.agent.policy import Budget
 from worker.agent.reviewer import review_candidate
 from worker.config import Settings
-from worker.db.models import Bug, Domain, Flow, FlowResult, Run, RunMode, Spec, Step
+from worker.db.models import Bug, Domain, Flow, FlowResult, Run, RunEngine, RunMode, Spec, Step
 from worker.deep.measure import verify_measurement
 from worker.findings import findings_from_pages
 from worker.flows import (
@@ -65,7 +65,12 @@ def make_execute(
     `reviewer`: the reviewer tier's client (run 5, K2), or None for the explorer alone."""
 
     def execute(session: Session, run: Run, llm: LLMClient) -> None:
-        if run.mode == RunMode.INTERACTIVE:
+        if run.engine == RunEngine.DEEP:  # run 9: deep mode (worker/deep/run.py)
+            from worker.deep.run import run_deep
+
+            verified = is_verified_domain(session, run.workspace_id, run.target_url)
+            run_deep(session, run, llm, settings, storage, browser, verified)
+        elif run.mode == RunMode.INTERACTIVE:
             verified = is_verified_domain(session, run.workspace_id, run.target_url)
             run_interactive(session, run, llm, settings, storage, browser, verified, reviewer)
         else:

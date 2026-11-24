@@ -42,7 +42,7 @@ import tempfile
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -233,6 +233,29 @@ class SdkDriver(TurnDriver):
             harness.pause(f"claude-cli stopped earlier: {claude_cli.limit_reached()}")
             result.stop_reason = harness.stop_reason
             return result
+        error = self._run_once(harness, result)
+        if (
+            error is not None
+            and not isinstance(error, UsageLimitReached)
+            and self.config.resume_session
+            and result.turns == 0
+        ):
+            # Resuming a session this machine no longer has (a reboot cleared the temp folder):
+            # start a fresh one; the harness's saved coverage carries the run on.
+            self.config = replace(self.config, resume_session=None)
+            self.session_id = None
+            error = self._run_once(harness, result)
+        if isinstance(error, UsageLimitReached):
+            if self.config.auth == "cli":
+                claude_cli.latch(str(error))
+            harness.pause(str(error))
+        elif error is not None:
+            harness.stop(f"the model session failed: {_first_line(error)}")
+        result.stop_reason = harness.stop_reason
+        return result
+
+    def _run_once(self, harness: Harness, result: DriverResult) -> BaseException | None:
+        """One SDK session in a background thread, serving harness calls on this thread."""
         main, done, failure = MainThread(), threading.Event(), {}
 
         def session_thread() -> None:
@@ -247,15 +270,7 @@ class SdkDriver(TurnDriver):
         thread.start()
         main.serve_until(done)
         thread.join()
-        error = failure.get("error")
-        if isinstance(error, UsageLimitReached):
-            if self.config.auth == "cli":
-                claude_cli.latch(str(error))
-            harness.pause(str(error))
-        elif error is not None:
-            harness.stop(f"the model session failed: {_first_line(error)}")
-        result.stop_reason = harness.stop_reason
-        return result
+        return failure.get("error")
 
     async def _session(self, harness: Harness, main: MainThread, result: DriverResult) -> None:
         async def on_main(fn: Callable[[], Any]) -> Any:

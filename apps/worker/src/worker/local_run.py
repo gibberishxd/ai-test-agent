@@ -49,8 +49,15 @@ def local_settings(settings: Settings, url: str, data_dir: Path) -> Settings:
     )
 
 
-def queue_local_run(session: Session, url: str, viewport: str | None) -> str:
-    """Queue an interactive run of `url` at `viewport` (None = desktop); returns its id."""
+def queue_local_run(
+    session: Session,
+    url: str,
+    viewport: str | None,
+    engine: str = "loop",
+    model: str | None = None,
+) -> str:
+    """Queue an interactive run of `url` at `viewport` (None = desktop); returns its id.
+    `engine="deep"` (run 9): deep mode, with `model` (a pinned ID) or DEEP_MODEL."""
     if viewport is not None:
         parse_viewport(viewport)  # refuse a bad size before anything is stored
     workspace = session.query(Workspace).filter_by(slug=LOCAL_WORKSPACE_SLUG).one_or_none()
@@ -58,7 +65,14 @@ def queue_local_run(session: Session, url: str, viewport: str | None) -> str:
         workspace = Workspace(name="Local runs", slug=LOCAL_WORKSPACE_SLUG)
         session.add(workspace)
         session.flush()
-    run = Run(workspace_id=workspace.id, target_url=url, mode="interactive", viewport=viewport)
+    run = Run(
+        workspace_id=workspace.id,
+        target_url=url,
+        mode="interactive",
+        viewport=viewport,
+        engine=engine,
+        engine_model=model if engine == "deep" else None,
+    )
     session.add(run)
     session.commit()
     return str(run.id)
@@ -72,11 +86,37 @@ def run_local(
     viewport: str | None,
     export: Path | None = None,
     browser: Browser | None = None,
+    engine: str = "loop",
+    model: str | None = None,
 ) -> dict:
     """Queue, run and (with `export`) export one run; returns a short summary of it.
     `settings` come from local_settings()."""
     with sessions() as session:
-        run_id = queue_local_run(session, url, viewport)
+        run_id = queue_local_run(session, url, viewport, engine, model)
+    return _process(sessions, settings, llm, run_id, export, browser)
+
+
+def resume_local(
+    sessions: sessionmaker[Session],
+    settings: Settings,
+    llm: LLMClient,
+    run_id: str,
+    export: Path | None = None,
+    browser: Browser | None = None,
+) -> dict:
+    """Queue a paused deep run again and process it here (`worker resume`). A local app's run
+    needs its app allowed again, as when it started."""
+    from worker.deep.run import resume
+
+    with sessions() as session:
+        run = resume(session, run_id)
+        url = run.target_url
+    if settings.dev_mode and urlsplit(url).hostname in LOCAL_HOSTS:
+        settings = local_settings(settings, url, settings.data_path())
+    return _process(sessions, settings, llm, run_id, export, browser)
+
+
+def _process(sessions, settings, llm, run_id: str, export, browser) -> dict:
     execute = make_execute(settings, make_storage(settings), browser)
     process_next(sessions, llm, execute, only=[run_id])
     with sessions() as session:
@@ -89,7 +129,10 @@ def run_local(
             "status": run.status,
             "error": run.error,
             "stop_reason": (run.summary or {}).get("stop_reason"),
+            "engine": run.engine,
+            "paused_reason": run.paused_reason,
             "cost_usd": run.cost_usd,
+            "estimated_cost_usd": run.estimated_cost_usd,
             "findings": findings,
             "export": str(export) if export else None,
         }

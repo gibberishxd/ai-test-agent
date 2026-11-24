@@ -85,6 +85,13 @@ def _process(sessions, session: Session, run: Run, llm: LLMClient, execute, clie
     if not _still_ours(session, run):
         session.commit()
         return True
+    if run.paused_reason and not run.stop_requested:
+        # Run 9: a usage limit paused a deep run. It isn't finished: no webhook yet; it is
+        # queued again by `worker resume` or the dashboard's Resume button.
+        transition(run, RunStatus.PAUSED)
+        session.commit()
+        log.info("run %s paused: %s", run.id, run.paused_reason)
+        return True
     final = RunStatus.STOPPED if run.stop_requested else RunStatus.DONE
     transition(run, final)
     session.commit()

@@ -1711,3 +1711,29 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** a measurement that depends on timing or randomness is dismissed when it
   differs; the model is told to report deterministic measurements. Rounding to one decimal can
   hide a difference smaller than that (sub-pixel sizes), which is the point.
+
+## D117. A deep run's life: crawl, harness, verify; pause and resume (2026-11-24)
+- **Decision:** `deep/run.py: run_deep` runs a deep run like an interactive one where it can: the
+  same crawl and deterministic checks first (skipped on a resume), then the harness in a guarded
+  context, then the run's verification. A `DbRecorder` writes every step (with its JPEG), finding,
+  coverage update and turn's usage to the database as it happens; harness step n is the run's
+  step `first_step + n - 1`, after the crawl's visits, and the step numbers in a finding are
+  moved the same way.
+- **Pause and resume:** a usage limit makes the runner set `paused` (new transitions: running →
+  paused, paused → queued or stopped; a paused run is not final, so no webhook and no usage row
+  yet). `worker resume RUN_ID` (and the dashboard's button) queues it again; the run continues
+  from its coverage with a fresh browser, and the Agent SDK session is resumed when this machine
+  still has it, else a fresh session starts. Findings so far are verified when it pauses.
+- **Which driver:** `LLM_PROVIDER=fake` → the scripted driver with `DEEP_SCRIPT` ($0 tests and the
+  end-to-end runs); otherwise the Agent SDK with `DEEP_AUTH`. On the API path the key is the
+  run's workspace model's (an Anthropic model, Settings → Models), else the worker's own.
+- **CLI:** `run-local URL --engine deep [--model claude-opus-5-5]`, `resume RUN_ID`,
+  `bench --engine deep`, and `apps/realworld/measure.py --engine deep`. A paused run stops a
+  benchmark the way a claude-cli usage limit does.
+- **Export:** `engine`, `coverage`, a `verification` per finding (replay, measurement,
+  deterministic or none), and unverified findings in their own `unverified_findings` list.
+- **Alternatives:** a new worker process type for deep runs (two queues to operate); restarting a
+  paused run from scratch (loses its map, plan and the tokens already spent).
+- **Tradeoffs:** console errors and failed requests seen during a deep run are not turned into
+  deterministic findings the way the loop's are; the model has console and network tools and a
+  checklist area for them, and the crawl's deterministic findings stay (OPEN_QUESTIONS).

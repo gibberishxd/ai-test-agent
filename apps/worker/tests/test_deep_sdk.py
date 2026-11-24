@@ -396,3 +396,27 @@ def test_turn_usage_is_priced_and_charged_only_on_the_api():
     login = turn_usage(message, "claude-sonnet-5-5", "cli")
     assert api.cost_usd == pytest.approx(2.0) and api.estimated_cost_usd == pytest.approx(2.0)
     assert login.cost_usd == 0 and login.estimated_cost_usd == pytest.approx(2.0)
+
+
+class GoneSession(FakeCli):
+    """The CLI can't find the session it was asked to resume."""
+
+    async def connect(self):
+        raise RuntimeError("No conversation found with session ID: old")
+
+
+def test_a_lost_session_on_resume_starts_a_fresh_one(harness, workdir):
+    harness_, _ = harness
+    transports = [GoneSession([]), FakeCli([[("snapshot", {}), ("save_map", MAP)]])]
+    config = SdkConfig(
+        model="claude-sonnet-5-5",
+        effort="high",
+        auth="api",
+        workdir=workdir,
+        api_key="k",
+        resume_session="old",
+    )
+    sdk = SdkDriver(config, transport_factory=lambda: transports.pop(0))
+    sdk.run(harness_)
+    assert harness_.map is not None  # the fresh session went on with the run
+    assert sdk.session_id == "fake-session"

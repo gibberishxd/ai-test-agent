@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     deep_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"
     deep_screenshot_max_width: int = 1280
     deep_screenshot_quality: int = Field(default=75, ge=1, le=100)
+    # LLM_PROVIDER=fake only: the fake model's turns for deep runs, as JSON
+    # [[["tool", {args}], ...], ...]. Lets the end-to-end tests run deep mode at $0.
+    deep_script: str = ""
 
     @field_validator("deep_model")
     @classmethod

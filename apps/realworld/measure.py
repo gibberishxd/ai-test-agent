@@ -70,6 +70,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("bug_id")
     parser.add_argument("--runs", type=int, default=3)
+    # Run 9: deep mode runs on the same bugs, so the two engines can be compared.
+    parser.add_argument("--engine", choices=["loop", "deep"], default="loop")
     args = parser.parse_args()
     bug, _ = bug_and_app(args.bug_id)
     if bug.get("dropped"):
@@ -95,7 +97,9 @@ def main() -> None:
             session.commit()
         run_ids = []
         for _ in range(args.runs):
-            run = Run(workspace_id=workspace.id, target_url=target, mode="interactive")
+            run = Run(
+                workspace_id=workspace.id, target_url=target, mode="interactive", engine=args.engine
+            )
             session.add(run)
             session.commit()
             run_ids.append(str(run.id))
@@ -142,6 +146,8 @@ def main() -> None:
                     "steps": run.step_count,
                     "seconds": seconds,
                     "estimated_cost_usd": round(run.estimated_cost_usd, 4),
+                    "cost_usd": round(run.cost_usd, 4),
+                    "paused_reason": run.paused_reason,
                     "reports": reports,
                 }
             )
@@ -151,12 +157,16 @@ def main() -> None:
         "issue": bug["issue"],
         "date": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": commit,
-        "provider": llm.provider,
-        "model": llm.agent_model,
+        "engine": args.engine,
+        # A deep run's model is deep mode's own (DEEP_MODEL); `llm` only judges its replays.
+        "provider": llm.provider if args.engine == "loop" else f"deep/{settings.deep_auth}",
+        "model": llm.agent_model if args.engine == "loop" else settings.deep_model,
         "judge": f"{judge.provider}/{judge.cheap_model}",
         "settings": {
-            "max_steps": settings.max_steps,
-            "max_run_seconds": settings.max_run_seconds,
+            "max_steps": settings.max_steps if args.engine == "loop" else settings.deep_max_steps,
+            "max_run_seconds": (
+                settings.max_run_seconds if args.engine == "loop" else settings.deep_max_seconds
+            ),
             "start": bug["start_path"],
         },
         "stopped": stopped,

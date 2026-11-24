@@ -9,7 +9,9 @@ uv run worker reverify ID replay an old run's agent reports again (read-only); -
 uv run worker export ID --out FILE   a run's findings as JSON (read-only); --data-dir DIR where
                           its screenshots are (default DATA_DIR)
 uv run worker run-local URL          one interactive run of an app on localhost (DEV_MODE=true);
-                          --viewport WxH, --data-dir DIR for its screenshots, --export FILE
+                          --viewport WxH, --data-dir DIR for its screenshots, --export FILE,
+                          --engine deep [--model claude-opus-5-5] for deep mode (run 9)
+uv run worker resume ID   queue a paused deep run again and process it (--export FILE)
 uv run worker make-admin EMAIL        let a user see usage across workspaces (/admin/usage)
 uv run worker set-plan SLUG PLAN      put a workspace on a plan (free, team, business)
 Operator commands (bench, reverify, export, run-local, backfill-fingerprints, make-admin, set-plan)
@@ -98,6 +100,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     bench.add_argument("--mode", choices=["interactive", "passive"], default="interactive")
     bench.add_argument(
+        "--engine",
+        choices=["loop", "deep"],
+        default="loop",
+        help="the agent: the current loop (default) or deep mode (run 9)",
+    )
+    bench.add_argument(
         "--specs",
         action="store_true",
         help="give the holdout app's runs the owner's specs (apps/demo2/specs.md; run 7, M3)",
@@ -131,6 +139,16 @@ def main(argv: list[str] | None = None) -> None:
         "--data-dir", type=Path, help="where to store the run's screenshots (default: DATA_DIR)"
     )
     local.add_argument("--export", type=Path, help="also write the run's findings to a JSON file")
+    local.add_argument(
+        "--engine", choices=["loop", "deep"], default="loop", help="the agent (default: loop)"
+    )
+    local.add_argument("--model", help="deep mode's model, a pinned ID (default: DEEP_MODEL)")
+    resume = sub.add_parser("resume", help="queue a paused deep run again and process it")
+    resume.add_argument("run_id", help="the run's id (a unique prefix is enough)")
+    resume.add_argument("--export", type=Path, help="also write the run's findings to a JSON file")
+    resume.add_argument(
+        "--data-dir", type=Path, help="where to store the run's screenshots (default: DATA_DIR)"
+    )
     sub.add_parser(
         "backfill-fingerprints", help="give findings stored before run 4 their fingerprint (J4)"
     )
@@ -175,7 +193,29 @@ def main(argv: list[str] | None = None) -> None:
         log.info("local run: provider=%s model=%s", llm.provider, llm.agent_model)
         # Creates its own workspace and reads the run back: an operator's command, like bench.
         sessions = make_session_factory(make_engine(local, admin=True))
-        result = run_local(sessions, local, llm, args.url, args.viewport, export=args.export)
+        result = run_local(
+            sessions,
+            local,
+            llm,
+            args.url,
+            args.viewport,
+            export=args.export,
+            engine=args.engine,
+            model=args.model,
+        )
+        print(json.dumps(result, indent=2))
+        raise SystemExit(0 if result["status"] == "done" else 1)
+
+    if args.command == "resume":
+        from worker.export import find_run_id
+        from worker.local_run import resume_local
+
+        sessions = make_session_factory(make_engine(settings, admin=True))  # an operator's
+        with sessions() as session:
+            run_id = find_run_id(session, args.run_id)
+        if args.data_dir:
+            settings = settings.model_copy(update={"data_dir": str(args.data_dir.resolve())})
+        result = resume_local(sessions, settings, make_client(settings), run_id, args.export)
         print(json.dumps(result, indent=2))
         raise SystemExit(0 if result["status"] == "done" else 1)
 
@@ -247,6 +287,7 @@ def main(argv: list[str] | None = None) -> None:
             reviewer=reviewer,
             specs_file=HOLDOUT_SPECS if args.specs else None,
             flows=args.flows,
+            engine=args.engine,
         )
         return
     if args.once:
@@ -308,8 +349,12 @@ def run_benchmark(
     reviewer: LLMClient | None = None,
     specs_file: Path | None = None,
     flows: bool = False,
+    engine: str = "loop",
 ) -> None:
     """Queue the benchmark runs, process them with `llm`, then score them with `judge`.
+
+    `engine="deep"` (run 9): the runs use deep mode; `llm` then only judges replays and
+    duplicates, as in any run, and deep mode's own model comes from DEEP_MODEL.
 
     `holdout_first` queues the holdout app's runs before the shop's: a change is judged on the
     holdout first, and the shop runs can be stopped if it drops.
@@ -332,16 +377,20 @@ def run_benchmark(
         run_ids: dict[str, list[str]] = {}
 
         def queue_shop() -> None:
-            run_ids["buggy"] = queue_runs(session, workspace.id, [settings.demo_url] * runs, mode)
-            run_ids["clean"] = queue_runs(session, workspace.id, [settings.clean_demo_url], mode)
+            run_ids["buggy"] = queue_runs(
+                session, workspace.id, [settings.demo_url] * runs, mode, engine
+            )
+            run_ids["clean"] = queue_runs(
+                session, workspace.id, [settings.clean_demo_url], mode, engine
+            )
 
         def queue_holdout() -> None:
             if holdout_runs > 0:
                 run_ids["holdout_buggy"] = queue_runs(
-                    session, workspace.id, [settings.demo2_url] * holdout_runs, mode
+                    session, workspace.id, [settings.demo2_url] * holdout_runs, mode, engine
                 )
                 run_ids["holdout_clean"] = queue_runs(
-                    session, workspace.id, [settings.clean_demo2_url], mode
+                    session, workspace.id, [settings.clean_demo2_url], mode, engine
                 )
 
         for queue in (queue_holdout, queue_shop) if holdout_first else (queue_shop, queue_holdout):

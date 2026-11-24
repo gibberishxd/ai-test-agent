@@ -48,6 +48,8 @@ class Recorder(Protocol):
 
     def on_coverage(self, coverage: dict) -> None: ...
 
+    def on_usage(self, usage: Usage) -> None: ...
+
 
 @dataclass
 class MemoryRecorder:
@@ -57,6 +59,7 @@ class MemoryRecorder:
     results: list[ToolResult] = field(default_factory=list)
     bugs: list[BugReport] = field(default_factory=list)
     coverage: dict = field(default_factory=dict)
+    usage: list[Usage] = field(default_factory=list)
 
     def on_step(self, step: int, action: Action, result: ToolResult) -> None:
         self.actions.append(action)
@@ -67,6 +70,9 @@ class MemoryRecorder:
 
     def on_coverage(self, coverage: dict) -> None:
         self.coverage = coverage
+
+    def on_usage(self, usage: Usage) -> None:
+        self.usage.append(usage)
 
 
 @dataclass
@@ -188,6 +194,7 @@ class Harness:
         self.usage.cache_write_tokens += usage.cache_write_tokens
         self.usage.cost_usd += usage.cost_usd
         self.usage.estimated_cost_usd += usage.estimated_cost_usd
+        self.recorder.on_usage(usage)  # the run's totals (tokens and cost) in a real run
         self._save_coverage()
 
     def pause(self, detail: str) -> None:

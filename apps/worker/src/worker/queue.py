@@ -27,7 +27,9 @@ BENCHMARK_SLUG = "benchmark"  # the workspace the benchmark queues its runs in
 # Which status changes are allowed. Anything else is a bug in the worker.
 TRANSITIONS: dict[str, set[str]] = {
     RunStatus.QUEUED: {RunStatus.RUNNING, RunStatus.STOPPED},
-    RunStatus.RUNNING: {RunStatus.DONE, RunStatus.FAILED, RunStatus.STOPPED},
+    RunStatus.RUNNING: {RunStatus.DONE, RunStatus.FAILED, RunStatus.STOPPED, RunStatus.PAUSED},
+    # Run 9: a deep run paused on a usage limit is resumed (queued again) or given up (stopped).
+    RunStatus.PAUSED: {RunStatus.QUEUED, RunStatus.STOPPED},
 }
 FINAL = {RunStatus.DONE, RunStatus.FAILED, RunStatus.STOPPED}
 
