@@ -255,14 +255,19 @@ class Toolbox:
 
     def start(self) -> None:
         """Listen to the page and open the target."""
+        self.attach()
+        self.page.goto(self.config.target_url, timeout=NAVIGATION_TIMEOUT_MS)
+        wait_until_quiet(self.page, SETTLE_MS)
+
+    def attach(self) -> None:
+        """Listen to the page (console, network, sources) and guard measurements, without
+        opening anything: verification replays its own steps first."""
         self.page.on("console", self._on_console)
         self.page.on("pageerror", self._on_page_error)
         self.page.on("request", self._on_request)
         self.page.on("response", self._on_response)
         self.page.on("requestfailed", self._on_request_failed)
         self.page.route("**/*", self._route)
-        self.page.goto(self.config.target_url, timeout=NAVIGATION_TIMEOUT_MS)
-        wait_until_quiet(self.page, SETTLE_MS)
 
     # --- the one entry point -------------------------------------------------------------------
 

@@ -118,7 +118,7 @@ class BugReport(BaseModel):
     screenshot: str | None = None  # storage reference
     step_indexes: list[int] = Field(default_factory=list)  # steps that led here (for replay)
     source: Literal["deterministic", "agent"]
-    status: Literal["candidate", "confirmed", "dismissed"] = "candidate"
+    status: Literal["candidate", "confirmed", "dismissed", "unverified"] = "candidate"
     dismiss_reason: str | None = None
 
 
