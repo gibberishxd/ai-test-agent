@@ -257,7 +257,7 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J1 (`bea561fa`) | a0af21e, expected vs. actual | 8% (bug 8 in 2/3) | 39% | 0% | 33% | 0.0 / 0.0 | 1 | 1156 s |
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
-## Run 9: deep mode (2026-11-24, stacked PRs #26–#33, none merged)
+## Run 9: deep mode (2026-11-24 to 11-26, stacked PRs #26–#34, none merged)
 Built, tested at $0, not yet measured. A second engine (`engine = 'deep'`) next to the current
 loop: Sonnet 5.5 (default) or Opus 5.5 through the Claude Agent SDK, general browser tools,
 map → plan → execute → review enforced by the harness, every finding verified in a fresh
@@ -266,10 +266,34 @@ resume. Acceptance: the fake-model end-to-end test runs deep mode on the demo sh
 dashboard and the worker at $0 (`e2e/deep.e2e.ts`: coverage finished 10 of 10 items, one
 finding confirmed by re-measurement, one kept apart as unverified); worker and web suites pass.
 
+Measured (owner's Claude login, $0 charged; `docs/BENCHMARKS.md`, `docs/REAL_WORLD.md`):
+- **Demo shop, second evaluation (2026-11-26):** recall 85% (11/13), AI-only 78% (7/9), precision
+  62%, 6.0 false alarms per clean run, est. $1.44 a run. Bug 9 now survives verification (D120).
+  First evaluation (2026-11-24): 77%, 67%, 58%, 5.0. Loop (Haiku): 56%, 37%, 74%, 2.0.
+- **Real-world:** recognised the bug in 2 of 2 deep runs (IT-1, IT-5), where the loop found 0 of
+  18 (Haiku), 0 of 12 (Sonnet) and 0 of 1 (Opus) on the real bugs.
+- **The false alarms checked by hand** (`docs/DEEP_REVIEW_RUN9.md`): every clean-build report
+  describes something the shop really does: real unplanted bugs, deliberate demo behaviour, or a
+  threshold question. Recommendations for the owner; scores and shops unchanged.
+- **Since the first evaluation:** errors seen while the agent works are deterministic findings
+  (D121, plus a follow-up for broken links); open questions 6–9 added.
+
 ## Needs me
-0. **Run 9, deep mode: your go-ahead for the evaluation.** Every paid or real run waits for
-   your OK (RUN_PLAN_9). Before the first one: confirm `DEEP_AUTH=cli` (your Claude login,
-   Sonnet 5.5, effort high), and read `docs/OPEN_QUESTIONS.md` (5 choices made for you).
+0. **Run 9, deep mode: your calls.**
+   - **`docs/DEEP_REVIEW_RUN9.md`:** decide each recommendation (real bug in the shop /
+     duplicate / deliberate / false alarm). Then: fix the shop's unplanted bugs in both builds
+     (as in benchmark v2) or plant them, settle the metadata finding (B3) and the tap-target
+     threshold (B7), and decide whether a deterministic finding on bug 3's 404 page counts as
+     bug 3.
+   - **`docs/OPEN_QUESTIONS.md` 6–9:** merging instead of rebasing the stack; errors logged
+     before a pause; the clipboard permission (our browser's, not the site's); a paused run's
+     candidates scored as verified.
+   - **IT-5's matched report bundles the real bug with a design complaint**
+     (`docs/REAL_WORLD.md`, deep mode): whether that counts is the matcher question.
+   - **`DEEP_AUTH` defaults to `api`, and `.env` has an API key:** every evaluation command set
+     `DEEP_AUTH=cli` and an empty `ANTHROPIC_API_KEY`. Consider `DEEP_AUTH=cli` in `.env` for
+     local work, so a plain `worker run-local --engine deep` can't use credits.
+   - **Merging:** PRs #26–#34 are ready for review in order; nothing merged.
 0. **Real-world model comparison (branch `real-world-models`, PR open, not merged):**
    - **A stronger model is not the fix:** Sonnet 0 of 12, Opus 0 of 1, Haiku 0 of 18 on the real
      bugs. The two blind spots below are the same for all three models; Opus repeated Haiku's

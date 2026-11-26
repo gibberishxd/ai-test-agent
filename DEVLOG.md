@@ -117,3 +117,16 @@ Benchmark scores go here too, once Phase 2 exists.
   were noise.
 - Real-world benchmark (IT-Tools, react-admin): 0 of 18 real reported bugs found (0–18%). In 6
   runs the agent got to the bug and didn't report it: the main open problem.
+
+## 2026-11-26 (run 9, deep mode, evaluation)
+- Deep mode re-measured on the demo shop: recall 85%, AI-only 78% (bug 9 now survives
+  verification), precision 62%, 6 false alarms on the clean build, all of them real shop
+  behaviour on a hand check (`docs/DEEP_REVIEW_RUN9.md`). Real-world: recognised IT-1 and IT-5,
+  2 of 2, where the loop never reported a real bug.
+- Built: console errors, uncaught exceptions and failed requests seen during a deep run become
+  deterministic findings (D121); the first run with it showed a broken link reported twice, fixed
+  test-first the same day.
+- Learned: the benchmark's "false alarms" were mostly the clean shop's own unplanted bugs; a run
+  paused on the usage limit needs re-scoring after its verification; `DEEP_AUTH` defaults to the
+  API path, so the login has to be chosen explicitly.
+
