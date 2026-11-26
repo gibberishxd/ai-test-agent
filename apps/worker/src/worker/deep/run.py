@@ -240,11 +240,17 @@ def run_deep(
 def save_runtime_findings(session: Session, run: Run, pages: dict[str, PageResult]) -> None:
     """Console errors, uncaught exceptions and failed requests seen while the agent worked,
     as deterministic findings (as the loop does), unless the run already has one by that title
-    (the crawl's, or an earlier segment's before a pause)."""
+    (the crawl's, or an earlier segment's before a pause). A failed request to a link the run
+    already reports as broken is that finding again, as the crawl's own findings treat it."""
     from worker.findings import findings_from_pages
 
-    known = {title for (title,) in session.query(Bug.title).filter(Bug.run_id == run.id)}
+    rows = session.query(Bug.title, Bug.evidence).filter(Bug.run_id == run.id).all()
+    known = {title for title, _ in rows}
+    broken = {(evidence or {}).get("link") for _, evidence in rows} - {None}
     for bug in findings_from_pages(list(pages.values())):
+        failed = bug.evidence.get("failed_requests") or [{}]
+        if failed[0].get("url") in broken:
+            continue
         if bug.title not in known:
             session.add(Bug(run_id=run.id, **bug.model_dump()))
             known.add(bug.title)
