@@ -315,6 +315,47 @@ which assumes 1-hour cache writes; on the real API Haiku costs about $0.02 a ben
 Opus cost 4.3× Sonnet per run, not the 2× the prices suggest: it used every step (40, ending at
 221 s) and wrote about 3× the output tokens of Sonnet's IT-1 runs (10.4k against 3.5k).
 
+## Deep mode (run 9, 2026-11-26)
+
+One deep run per bug on the two bugs RUN_PLAN_9 names, each starting on the tool's page with no
+description of the bug: Sonnet 5.5 at effort high through the Claude Agent SDK on the owner's
+Claude login (`DEEP_AUTH=cli`, $0 charged), 400 steps / 60 minutes, replays and duplicates judged
+by claude-cli Haiku 5.5, matching by the pinned judge gemma4:12b, classified by
+`apps/realworld/measure.py --engine deep` as before (rows in `results.jsonl`).
+
+**Recognised the bug: 2 of 2** (Wilson 95%: 34–100%; one run per bug, so this shows deep mode can
+recognise these bugs, not how often it does).
+
+| Bug | Deep mode, Sonnet 5.5 (1 run) | Loop, Haiku 5.5 (3 runs: found / reached / never) | Loop, Sonnet 5.5 (2 runs) | Loop, Opus 5.5 (1 run) |
+|---|---|---|---|---|
+| IT-1 Roman numerals accept invalid numerals | **found** (250 steps, 478 s, est. $1.39) | 0 / 1 / 2 | 0 / 0 / 2 | 0 / 1 / 0 |
+| IT-5 lower-case OTP secret rejected | **found** (270 steps, est. $1.97; paused once on the usage limit) | 0 / 3 / 0 | 0 / 0 / 2 | not run |
+
+- **IT-1, run `a2840e6f`:** "Roman to arabic accepts malformed numerals (VX=5, IC=99, IIII=4)",
+  confirmed by replay. The same run also reported both real Roman-numeral bugs from "Other
+  reports" below: numbers above 3999 (`4000` → `MMMM`) and `NaN` for unrecognised input (`xlii`,
+  `ABC`), each confirmed by replay. The fix 8930e139 covers all three.
+- **IT-5, run `65860fc7`:** the report the judge matched is titled "Invalid secret still produces
+  OTP codes, QR code and a hex value containing '-' characters", which leads with behaviour this
+  page calls the app's design (unchanged upstream). Its body names the real bug: typing the lower-case
+  secret `jbswy3dpehpk3pxp` gives "Secret should be a base32 string", and the expected result
+  says "lowercase and '=' padded base32 (e.g. 'MZXW6===') are valid base32 but are rejected".
+  Hand-check: recognised, though bundled with a design complaint. Whether a bundled report should
+  count is the matcher question above (the owner's call).
+- **IT-5's pause:** the run hit the owner's five-hour usage limit after 189 steps, paused with its
+  report still a candidate, and was resumed after the reset; verification then confirmed it. The
+  first row for this run in `results.jsonl` (status `paused`, outcome `found`) is provisional:
+  scoring counts a paused run's unverified candidates as verified (OPEN_QUESTIONS 9). The
+  second row (`rescored_after_resume: true`) is the result. Its `seconds` (244) cover only the
+  resumed part.
+- **Not counted as real:** the clipboard `NotAllowedError`, now reported by D121 as a
+  deterministic finding in both runs (our headless browser has no clipboard permission,
+  OPEN_QUESTIONS 8), and generic axe and console-warning findings, as for the loop.
+- **Why this differs from the loop:** the loop's runs reached both bugs (IT-5 in 3 of 3 Haiku runs)
+  but didn't report them. Deep mode, with a test plan, measurement and a review of each candidate,
+  reported the state it reached. Two runs can't say how much of that is the model and how much
+  the harness: the loop with Sonnet found neither, so the harness matters at least.
+
 ## Honest limits
 
 - **Small:** 18 runs over 6 bugs in 2 apps; 0 of 18 means "probably under ~18%", not "zero".

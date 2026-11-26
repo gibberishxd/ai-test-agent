@@ -126,6 +126,80 @@ meta, console-warning, keyboard-probe, success-without-request and CSS-visibilit
   on the buggy builds (the metadata finding, about two axe best-practice findings per shop
   run). Agent reports that matched nothing didn't increase.
 
+## Deep mode, first evaluation: demo shop (run 9, 2026-11-24)
+
+One deep run on the buggy shop (`75a366f0`) and one on the clean shop (`e2f17518`), signed in
+as the benchmark's shop runs are. Sonnet 5.5 at effort high through the Claude Agent SDK on the
+owner's Claude login (`DEEP_AUTH=cli`, $0 charged; the cost below is the API-equivalent
+estimate), 400 steps / 60 min limits. Replays and duplicates judged by claude-cli Haiku 5.5 (as
+in the loop's claude-cli rows); matching by the pinned judge gemma4:12b. Scored with the
+benchmark's own functions; no benchmark row was saved (the `bench` run stopped on a usage limit
+before the clean run, see below). **One run per build: the intervals are wide.**
+
+| | Deep mode, Sonnet 5.5 | Loop, Haiku 5.5, after the six check improvements (92fc566) | Loop, Sonnet 5.5, run 7 (dde46e0) |
+|---|---|---|---|
+| Shop AI-only recall | **67%** (6/9; Wilson 35–88%) | 37% (10/27; 22–56%) | 48% |
+| Shop recall | **77%** (10/13) | 56% | 64% |
+| Precision (verified reports matching a planted bug) | 58% (11/19) | 74% | 91% |
+| False alarms per clean run | 5.0 (1 metadata finding + 4 agent reports, see below) | 2.0 | 2.0 |
+| Verified / unverified, buggy run | 11 confirmed, 1 dismissed, 6 duplicates, 0 unverified | | |
+| Verified / unverified, clean run | 4 confirmed, 1 duplicate, 1 unverified | | |
+| Cost per run | est. $1.60 buggy, $1.51 clean ($0 charged) | $0.017 (charged, API) | est. $1.65 |
+| Agent time per run | 471 s, 374 steps (buggy); 394 s, 329 steps (clean) | 154 s, 40 steps | 241 s |
+| Coverage | buggy: 7 pages, 25/25 plan items, screenshots at all three viewports; clean: 10 pages, 20/20 | | |
+
+- **Found:** planted bugs 1–8, 10 and 13. **Missed:** 9 (`$NaN`: found and reported, then
+  dismissed by a measurement-gate flaw, fixed afterwards in D120), 11 (logout: the shop runs
+  are signed in with logout denied, as for the loop) and 12 (the wrong-password message).
+- **The clean run's 5 reports:** the metadata finding every engine now reports (D105), and 4
+  agent reports that look like real clean-build behaviour, not yet checked by hand: quantities
+  of 999999 and 1.5 accepted, the footer's "Returns policy" link reloading the app and emptying
+  the cart (the loop reported the same cart loss in run 8), the shop list ignoring search text
+  still shown in the search box, and the search toggle without `aria-expanded` that Escape
+  doesn't close. The buggy run's 5 unmatched agent reports are of the same kind.
+- **Two harness flaws found by this run, both fixed before the clean run:** a usage limit
+  during verification failed the run instead of pausing it (D119; the buggy run was paused at
+  that point, set back to paused and resumed); and a measurement report could be accepted while
+  the harness's own measurement didn't show the bug (D120). The buggy run used the code before
+  D120; the clean run the code after it.
+- **Usage limit:** the buggy run reached the owner's five-hour plan limit after 347 steps (7
+  minutes, est. $1.12); it paused as designed and was resumed after the reset.
+
+## Deep mode, second evaluation: demo shop with D120 and D121 (run 9, 2026-11-26)
+
+The same setup as the first evaluation (one deep run per build, Sonnet 5.5 at effort high on the
+owner's Claude login, `DEEP_AUTH=cli`, $0 charged; replays and duplicates judged by claude-cli
+Haiku 5.5; matching by the pinned judge gemma4:12b), now with the measurement-gate fix (D120) and
+errors seen during the run as deterministic findings (D121). Saved as a benchmark row this time
+(`bench --engine deep --runs 1 --holdout-runs 0`, commit 32a4152; buggy `b364ce85`, clean
+`2e31e8aa`). **One run per build: the intervals are wide.**
+
+| | First evaluation (2026-11-24) | **Second evaluation (2026-11-26)** |
+|---|---|---|
+| Shop AI-only recall | 67% (6/9; Wilson 35–88%) | **78%** (7/9; Wilson 45–94%) |
+| Shop recall | 77% (10/13) | **85%** (11/13; Wilson 58–96%) |
+| Precision | 58% (11/19) | **62%** (13/21) |
+| False alarms per clean run | 5.0 | 6.0 |
+| Agent reports after verification, buggy run | 11 confirmed, 1 dismissed, 6 duplicates, 0 unverified | 12 confirmed, 0 dismissed, 6 duplicates, 0 unverified |
+| Agent reports after verification, clean run | 4 confirmed, 1 duplicate, 1 unverified | 5 confirmed, 1 dismissed, 1 duplicate, 0 unverified |
+| Cost per run (est., $0 charged) | $1.60 buggy, $1.51 clean | $1.44 on average |
+| Agent time per run | 471 s, 374 steps; 394 s, 329 steps | 381 s (buggy), 269 s (clean); 446 s per run in all |
+| Coverage | 7 pages, 25/25 items; 10 pages, 20/20 | 7 pages, 22/22 items; 8 pages, 20/20; all three viewports in both |
+
+- **Bug 9 now survives verification:** "Wool Socks price displays "$NaN" on shop list and
+  product page" was confirmed, where the first evaluation found it and then lost it to the
+  measurement-gate flaw (D120).
+- **Found:** planted bugs 1–10 and 13. **Missed:** 11 (logout is denied in the signed-in shop
+  runs) and 12 (the wrong-password message, not reported in either evaluation).
+- **The unmatched reports and the clean run's 6** are the shop's real but unplanted behaviour
+  already reviewed in `docs/DEEP_REVIEW_RUN9.md`, plus two new ones (a search with a trailing
+  space; an order with an empty cart), checked in its addendum. None is an invention.
+- **D121 in this run:** one new deterministic finding on the buggy build, "GET /return-policy
+  fails with HTTP 404": bug 3's broken link again under another title (matched to bug 3, so not
+  a false alarm here). Fixed right after the run (467366d), so the comparison stands as measured.
+  None on the clean build.
+- No usage limit in this benchmark.
+
 ## Real-world v1 (run 8, N4): real reported bugs in IT-Tools and react-admin
 
 A separate benchmark (`docs/REAL_WORLD.md`, rows in `apps/realworld/results.jsonl`): real bugs

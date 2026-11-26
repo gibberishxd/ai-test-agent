@@ -39,3 +39,19 @@ Format: the question, the choice made, and why. Newest last.
    resume become findings. Choice: accepted for now (pauses are rare, and the crawl's findings and
    the model's own reports are kept). Saving the log with the coverage is a small change if
    wanted.
+8. **A clipboard error caused by our test browser.** On IT-Tools, a deep run that clicks a "copy"
+   button gets "Uncaught exception: NotAllowedError: Failed to execute 'writeText' on 'Clipboard'",
+   which D121 now reports as a deterministic finding. A real user's browser allows `writeText`
+   after a click; ours has no clipboard permission, so this is the harness's error, not the
+   site's. Choice: not changed in run 9 (the browser context is shared with the loop and the
+   crawl). The likely fix is to grant `clipboard-read`/`clipboard-write` in the guarded context
+   for every engine, measured on the benchmarks like any change. Until then, count it as a
+   false alarm when it shows.
+9. **Scoring a paused run: a candidate counts as "verified".** `benchmark.stage_of` treats every
+   report that isn't dismissed, a duplicate or unverified as verified, including candidates whose
+   verification hasn't run because the run paused. The real-world runner then prints "found" for
+   a paused run (IT-5, 2026-11-26). Choice: not changed (matching and scoring are the owner's);
+   a paused run is re-scored after it is resumed and verified, and its first, provisional row in
+   `apps/realworld/results.jsonl` is marked as such in `docs/REAL_WORLD.md`. A one-line fix would
+   be `if bug.status == "candidate": return "candidate", None`.
+
