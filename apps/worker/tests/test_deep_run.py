@@ -10,10 +10,11 @@ import pytest
 from worker.config import Settings
 from worker.db.models import Bug, Run, Step, Workspace
 from worker.deep.checklist import AREAS, VIEWPORTS
-from worker.deep.run import resume, run_deep
+from worker.deep.run import resume, run_deep, save_runtime_findings
 from worker.deep.scripted import ScriptedDriver
 from worker.execute import make_execute
 from worker.llm import FakeClient, UsageLimitReached
+from worker.report import FailedRequest, PageResult
 from worker.runner import process_next
 from worker.storage import LocalStorage
 
@@ -283,3 +284,39 @@ def test_a_run_whose_agent_finished_resumes_with_verification_only(
         bugs = {b.title: b.status for b in session.query(Bug).filter_by(run_id=run.id)}
         assert bugs["Total shows the count"] == "confirmed"
         assert bugs["Depends on this tab's state"] == "unverified"
+
+
+def test_a_failed_request_to_a_known_broken_link_is_not_reported_again(sessions, site_url):
+    """The agent following a link the crawl already reported as broken gets the same 404: that
+    is the crawl's finding again, under a network title the title check doesn't catch."""
+    run_id = queue(sessions, site_url)
+    missing = f"{site_url}/missing-page.html"
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        session.add(
+            Bug(
+                run_id=run.id,
+                title="Broken link: /missing-page.html returns HTTP 404",
+                severity="low",
+                category="broken-link",
+                page_url=f"{site_url}/problems.html",
+                evidence={"link": missing, "status": 404},
+                source="deterministic",
+                status="confirmed",
+            )
+        )
+        session.commit()
+        page = PageResult(
+            url=missing,
+            status=200,
+            failed_requests=[
+                FailedRequest(url=missing, method="GET", resource_type="document", status=404),
+                FailedRequest(
+                    url=f"{site_url}/status/500", method="GET", resource_type="fetch", status=500
+                ),
+            ],
+        )
+        save_runtime_findings(session, run, {missing: page})
+        titles = [b.title for b in session.query(Bug).filter_by(run_id=run.id)]
+    assert "GET /missing-page.html fails with HTTP 404" not in titles
+    assert "GET /status/500 fails with HTTP 500" in titles
