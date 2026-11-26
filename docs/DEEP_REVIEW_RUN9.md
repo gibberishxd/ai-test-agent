@@ -177,3 +177,42 @@ If you accept these recommendations:
   B7 and B8 came up only on the buggy run, and C2, C4 and C5 only on the clean run, though the code
   is the same in both builds. With one run per build, this is expected noise. More runs per build
   would show how stable deep mode's coverage is.
+
+## Addendum: the re-run with D120 and D121 (2026-11-26)
+
+One more deep run per build (buggy `b364ce85`, clean `2e31e8aa`; scores in `docs/BENCHMARKS.md`).
+Its 8 unmatched buggy reports and 6 clean reports are mostly the ones above again:
+
+| Re-run report | Build | Same as |
+|---|---|---|
+| axe: one main landmark / content in landmarks on `/return-policy` | buggy | B1, B2 (duplicates of bug 3) |
+| Sharing and icon metadata incomplete | both | B3 |
+| Quantity above 10 accepted, decimals accepted (2 reports on clean, 1 on buggy) | both | C1 / B5 |
+| Order detail table unstyled | buggy | C5 (verified this time by measurement) |
+| Search toggle: no `aria-expanded`, Escape doesn't close | both | C4 |
+| Confirmed order never appears in My orders | clean | B4 (deliberate) |
+| **Order placed with an empty cart** | both | new, see R2 |
+| **Search with a trailing space finds nothing** | buggy | new, see R1 |
+
+D121's new runtime findings added one report on the buggy build, "GET /return-policy fails with
+HTTP 404", which the judge matched to bug 3. That is bug 3's broken link again under another
+title, and D121's follow-up fix (commit 467366d) stops it from being reported. The run itself
+used the code from before that fix. No runtime findings on the clean build.
+
+### R1. Search with a trailing space finds nothing
+- **Reproduced (clean build):** "lamp" shows 1 product, and "lamp " (with a trailing space) shows 0.
+- **Cause:** `ProductList.tsx` filters with `name.toLowerCase().includes(query.toLowerCase())`
+  and doesn't trim the query. Not behind a `bug(n)` switch.
+- **Recommendation: real bug in the shop, minor.** A space typed by habit or by phone
+  autocomplete hides every result, with only a "No products match" message.
+- Screenshot: [r1-search-trailing-space.jpg](deep-review-run9/r1-search-trailing-space.jpg)
+
+### R2. An order can be placed with an empty cart
+- **Reproduced (clean build):** on `/checkout` with an empty cart the page says "Your cart is
+  empty, but you can still try the form."; Place order then confirms "order #27145".
+- **Recommendation: deliberate behaviour.** The page says so before the form, like B4's "not
+  really: this is a demo". If you want the shop to look less like a demo to the agent, these two
+  notes are what it keeps reporting around.
+- Screenshot: [r2-empty-cart-order.jpg](deep-review-run9/r2-empty-cart-order.jpg)
+
+The script for R1 and R2 is [`deep-review-run9/repro_rerun.py`](deep-review-run9/repro_rerun.py).
