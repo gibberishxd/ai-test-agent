@@ -43,6 +43,19 @@ export type BugView = {
   suppressed: boolean;
 };
 
+/** What a deep run covered (the worker's deep/harness.py `coverage()`); written as it runs. */
+export type Coverage = {
+  phase?: string;
+  map?: { pages?: { url: string; purpose?: string }[]; flows?: { name: string; description?: string }[]; summary?: string } | null;
+  plan?: { id: string; area: string; description: string; viewport?: string }[];
+  not_applicable?: { area: string; reason: string }[];
+  progress?: Record<string, { status: string; note?: string }>;
+  candidates?: { id: string; title: string; status: string; reason?: string; bug?: string }[];
+  screenshots?: Record<string, number>;
+  unticked?: string[];
+  steps?: number;
+};
+
 export type FlowResultView = {
   name: string;
   /** passed | replayed | repaired | failed | skipped */
@@ -74,6 +87,11 @@ export type RunView = {
   estimatedCostUsd: number;
   error: string | null;
   summary: Record<string, unknown> | null;
+  /** Run 9: loop or deep; a deep run's model, coverage (map, plan, progress) and pause reason. */
+  engine: string;
+  engineModel: string | null;
+  coverage: Coverage | null;
+  pausedReason: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -107,6 +125,10 @@ export function serializeRun(run: RunDetail): RunView {
     estimatedCostUsd: run.estimatedCostUsd,
     error: run.error,
     summary: (run.summary as Record<string, unknown> | null) ?? null,
+    engine: run.engine,
+    engineModel: run.engineModel,
+    coverage: (run.coverage as Coverage | null) ?? null,
+    pausedReason: run.pausedReason,
     createdAt: run.createdAt.toISOString(),
     startedAt: iso(run.startedAt),
     finishedAt: iso(run.finishedAt),

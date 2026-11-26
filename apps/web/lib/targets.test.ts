@@ -6,7 +6,7 @@ describe("parseRunInput", () => {
     const result = parseRunInput({ targetUrl: " https://example.com ", mode: "passive", focus: "" });
     expect(result).toEqual({
       ok: true,
-      value: { targetUrl: "https://example.com/", mode: "passive", focus: null },
+      value: { targetUrl: "https://example.com/", mode: "passive", focus: null, engine: "loop", engineModel: null },
     });
   });
 
@@ -59,5 +59,32 @@ describe("origins", () => {
     expect(isDemoTarget("http://localhost:5173/products/1")).toBe(true);
     expect(isDemoTarget("http://localhost:5174/")).toBe(true);
     expect(isDemoTarget("https://example.com")).toBe(false);
+  });
+});
+
+describe("parseRunInput: deep mode (run 9)", () => {
+  it("is an interactive run with the deep engine, on the demo shop", () => {
+    const result = parseRunInput({ targetUrl: "http://localhost:5173/", mode: "deep" });
+    expect(result).toEqual({
+      ok: true,
+      value: { targetUrl: "http://localhost:5173/", mode: "interactive", focus: null, engine: "deep", engineModel: null },
+    });
+  });
+
+  it("follows the interactive rule: demo shop or a verified domain only", () => {
+    expect(parseRunInput({ targetUrl: "https://example.com", mode: "deep" })).toMatchObject({ ok: false, errors: { mode: expect.any(String) } });
+    expect(parseRunInput({ targetUrl: "https://example.com", mode: "deep" }, ["https://example.com"])).toMatchObject({ ok: true });
+  });
+
+  it("takes Sonnet 5.5 or Opus 5.5, nothing else", () => {
+    const opus = parseRunInput({ targetUrl: "http://localhost:5173/", mode: "deep", engineModel: "claude-opus-5-5" });
+    expect(opus).toMatchObject({ ok: true, value: { engineModel: "claude-opus-5-5" } });
+    const other = parseRunInput({ targetUrl: "http://localhost:5173/", mode: "deep", engineModel: "claude-haiku-5-5" });
+    expect(other).toMatchObject({ ok: false, errors: { engineModel: expect.any(String) } });
+  });
+
+  it("leaves the current loop as it was", () => {
+    const loop = parseRunInput({ targetUrl: "http://localhost:5173/", mode: "interactive", engineModel: "claude-opus-5-5" });
+    expect(loop).toMatchObject({ ok: true, value: { mode: "interactive", engine: "loop", engineModel: null } });
   });
 });

@@ -24,10 +24,11 @@ Authorization: Bearer ata_…
 | Field | | |
 |---|---|---|
 | `target_url` | required | the URL to test |
-| `mode` | `passive` (default) or `interactive` | interactive clicks and types; needs a verified domain |
+| `mode` | `passive` (default), `interactive` or `deep` | interactive clicks and types; needs a verified domain. `deep` (run 9) is deep mode: a strong model maps the app, plans its tests and works through them at three screen sizes; same domain rule; up to the workspace's deep limits (default 400 steps, 60 minutes), and costs more |
+| `engine_model` | `claude-sonnet-5-5` (default) or `claude-opus-5-5` | deep runs only: the model that drives it |
 | `focus` | optional | what to concentrate on, e.g. `"checkout"` |
 | `model_id` | optional | one of the workspace's models; default: the server's model |
-| `max_steps` | 1–100 | lowers the agent's step limit |
+| `max_steps` | 1–100 | lowers the agent's step limit (for a deep run, below the workspace's deep limit) |
 | `max_minutes` | 1–60 | lowers the run's time limit |
 
 ```sh
@@ -59,11 +60,16 @@ for a missing or revoked key, `429` for the rate limit or the monthly quota.
 
 ## Wait for it
 `GET /api/v1/runs/{id}`: poll every 10 seconds until `finished` is `true`. `status` is then
-`done`, `failed` or `stopped`; `counts` has the reported bugs per severity.
+`done`, `failed` or `stopped`; `counts` has the reported bugs per severity. A deep run can also
+be `paused` (`finished` stays `false`): the model's usage limit was reached, `paused_reason`
+says so, and it continues when someone presses Resume on its dashboard page. `engine` is `loop`
+or `deep`; `unverified` counts deep-mode findings nothing could check (not in `counts`).
 
 ## Read the findings
 `GET /api/v1/runs/{id}/report`: every bug the run reports (bugs that replay verification
-dismissed are left out), with severity, page, expected, actual and repro steps.
+dismissed are left out), with severity, page, expected, actual and repro steps. Deep-mode
+findings that neither a replay nor a re-measurement could check are listed apart in
+`unverified_bugs`, never in `bugs`.
 
 `GET /api/v1/runs/{id}/report?format=junit`: JUnit XML, one failing test case per bug (its
 severity as the failure type), or one passing case when nothing was found. Every CI system can

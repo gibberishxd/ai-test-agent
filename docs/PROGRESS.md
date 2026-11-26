@@ -257,7 +257,19 @@ Counts are found bug×run slots: shop has 9 judgement bugs × 3 runs = 27 (13 bu
 | Run 4, J1 (`bea561fa`) | a0af21e, expected vs. actual | 8% (bug 8 in 2/3) | 39% | 0% | 33% | 0.0 / 0.0 | 1 | 1156 s |
 | Run 4, J7 (`bd88e166`) | b114b43, everything in run 4; shop signed in, 13 bugs (bug 13 behind the login) | 0% (7% before verification) | 31% (33% without bug 11) | 0% | 33% | 0.0 / 0.0 | 2 (bug 8 twice, the judge said no) | 1277 s |
 
+## Run 9: deep mode (2026-11-24, stacked PRs #26–#33, none merged)
+Built, tested at $0, not yet measured. A second engine (`engine = 'deep'`) next to the current
+loop: Sonnet 5.5 (default) or Opus 5.5 through the Claude Agent SDK, general browser tools,
+map → plan → execute → review enforced by the harness, every finding verified in a fresh
+browser (replay or re-measurement) or kept apart as unverified; pause on a usage limit and
+resume. Acceptance: the fake-model end-to-end test runs deep mode on the demo shop through the
+dashboard and the worker at $0 (`e2e/deep.e2e.ts`: coverage finished 10 of 10 items, one
+finding confirmed by re-measurement, one kept apart as unverified); worker and web suites pass.
+
 ## Needs me
+0. **Run 9, deep mode: your go-ahead for the evaluation.** Every paid or real run waits for
+   your OK (RUN_PLAN_9). Before the first one: confirm `DEEP_AUTH=cli` (your Claude login,
+   Sonnet 5.5, effort high), and read `docs/OPEN_QUESTIONS.md` (5 choices made for you).
 0. **Real-world model comparison (branch `real-world-models`, PR open, not merged):**
    - **A stronger model is not the fix:** Sonnet 0 of 12, Opus 0 of 1, Haiku 0 of 18 on the real
      bugs. The two blind spots below are the same for all three models; Opus repeated Haiku's

@@ -498,10 +498,11 @@
             "type": "string",
             "enum": [
               "passive",
-              "interactive"
+              "interactive",
+              "deep"
             ],
             "default": "passive",
-            "description": "interactive needs a verified domain (or a sign-in setup for apps behind a login)."
+            "description": "interactive and deep need a verified domain (or a sign-in setup for apps behind a login). deep is deep mode: a strong model with general browser tools, a test plan and verified evidence; it takes longer and costs more."
           },
           "focus": {
             "type": [
@@ -528,6 +529,18 @@
             "minimum": 1,
             "maximum": 60,
             "description": "Lowers the run's time limit."
+          },
+          "engine_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude-sonnet-5-5",
+              "claude-opus-5-5",
+              null
+            ],
+            "description": "Deep runs only: the model that drives it; default claude-sonnet-5-5."
           }
         }
       },
@@ -577,7 +590,8 @@
               "running",
               "done",
               "failed",
-              "stopped"
+              "stopped",
+              "paused"
             ]
           },
           "finished": {
@@ -641,6 +655,25 @@
                 "type": "string"
               }
             }
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "deep"
+            ],
+            "description": "loop: the standard agent; deep: deep mode."
+          },
+          "paused_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why a paused run stopped (a usage limit); it can be resumed from the dashboard."
+          },
+          "unverified": {
+            "type": "integer",
+            "description": "Findings nothing could verify, kept apart and not in counts."
           }
         }
       },
@@ -727,6 +760,13 @@
             "items": {
               "$ref": "#/components/schemas/Bug"
             }
+          },
+          "unverified_bugs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bug"
+            },
+            "description": "Deep mode: findings neither replay nor a re-measurement could check. Not counted, not in bugs."
           }
         }
       },

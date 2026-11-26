@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { DEEP_SCRIPT } from "./e2e/deep-script";
 
 /**
  * End-to-end test of the main flow: web app + demo shop + worker, all real, with the worker on
@@ -29,6 +30,8 @@ export default defineConfig({
         REVIEW_PAGES: "0",
         DEV_MODE: "true",
         FAKE_SCRIPT: '[["click", {"element_id": 1}], ["finish", {"summary": "done"}]]',
+        // Run 9: deep runs play this script instead of calling a model (e2e/deep.e2e.ts).
+        DEEP_SCRIPT,
       },
       wait: { stderr: /ready\./ },
       timeout: 120_000,

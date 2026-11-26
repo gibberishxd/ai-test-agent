@@ -23,14 +23,20 @@ export const TOOLS = [
     description:
       "Start an AI test run on a web app: the agent explores it like a manual QA tester and reports bugs with evidence. " +
       "Returns the run's id and status; poll get_run_status until finished is true, then get_report. " +
-      "Interactive mode needs a domain verified in the workspace (or the demo shop).",
+      "Interactive and deep mode need a domain verified in the workspace (or the demo shop). " +
+      "Deep mode maps the app, plans its tests and checks three screen sizes with a strong model: thorough, slower and costlier.",
     inputSchema: {
       type: "object",
       required: ["target_url"],
       additionalProperties: false,
       properties: {
         target_url: { type: "string", description: "The URL to test, e.g. https://staging.example.com" },
-        mode: { type: "string", enum: ["passive", "interactive"], description: "passive (default) only looks; interactive clicks, types and submits." },
+        mode: {
+          type: "string",
+          enum: ["passive", "interactive", "deep"],
+          description: "passive (default) only looks; interactive clicks, types and submits; deep is deep mode.",
+        },
+        engine_model: { type: "string", enum: ["claude-sonnet-5-5", "claude-opus-5-5"], description: "Deep mode's model (default Sonnet 5.5)." },
         focus: { type: "string", description: 'What to concentrate on, e.g. "checkout".' },
         max_steps: { type: "integer", minimum: 1, maximum: 100 },
         max_minutes: { type: "integer", minimum: 1, maximum: 60 },
@@ -40,7 +46,7 @@ export const TOOLS = [
   {
     name: "get_run_status",
     title: "Get a run's status",
-    description: "A run's status: queued, running, done, failed or stopped, with counts of findings so far.",
+    description: "A run's status: queued, running, done, failed, stopped or paused (deep mode, a usage limit), with counts of findings so far.",
     inputSchema: { type: "object", required: ["run_id"], additionalProperties: false, properties: { run_id: { type: "string" } } },
   },
   {
@@ -86,7 +92,7 @@ export function createServer(config: Config, fetchFn: Fetch = fetch) {
   async function callTool(name: unknown, args: Json) {
     if (name === "start_run") {
       if (typeof args.target_url !== "string" || !args.target_url) throw new InvalidParams("target_url is required.");
-      const allowed = ["target_url", "mode", "focus", "max_steps", "max_minutes"];
+      const allowed = ["target_url", "mode", "engine_model", "focus", "max_steps", "max_minutes"];
       const body = Object.fromEntries(Object.entries(args).filter(([key]) => allowed.includes(key)));
       return api("/api/v1/runs", { method: "POST", body: JSON.stringify(body) });
     }

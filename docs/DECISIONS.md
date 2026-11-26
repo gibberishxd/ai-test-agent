@@ -1738,6 +1738,23 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   deterministic findings the way the loop's are; the model has console and network tools and a
   checklist area for them, and the crawl's deterministic findings stay (OPEN_QUESTIONS).
 
+## D118. Deep mode in the dashboard and the API (2026-11-24)
+- **Decision:** the run form offers a third mode, "Deep test", with a model choice (Claude Sonnet
+  5.5 by default, Claude Opus 5.5); `POST /api/v1/runs` takes `mode: "deep"` and `engine_model`
+  (OpenAPI, docs/API.md, and the MCP server's `start_run`). Both are stored as an interactive run
+  with `engine = 'deep'` (D112), so the domain rule and quota are the same. The plan's per-run
+  step limit is the current loop's and isn't written on deep runs (OPEN_QUESTIONS 1).
+- **The run page:** a "Deep · model" badge; a coverage panel (phase, pages mapped, plan items
+  done, viewports seen, the plan and the map, live while it runs); unverified findings in their
+  own dashed section under the bugs, never as bug cards and not in the counts; a paused run shows
+  why, stops polling, and has a Resume button (`POST /api/runs/{id}/resume`, members); Stop on a
+  paused run gives it up. The API's status has `engine`, `paused_reason` and an `unverified`
+  count; its report lists `unverified_bugs` apart from `bugs`; JUnit counts only `bugs`.
+- **Workspace limits:** Settings → "Deep mode limits" (owners and admins, like models): steps and
+  minutes per deep run, empty for the defaults (400, 60).
+- **Alternatives:** a separate deep-mode page (two places to start a run); showing unverified
+  findings as greyed bug cards (too easy to read as found).
+
 ## D119. A usage limit during verification pauses the run too (2026-11-24, found in the evaluation)
 - **What happened:** the first demo-shop deep run (`75a366f0`) paused correctly on the plan's
   five-hour limit, then verification asked claude-cli (the same login) to dedupe, hit the same

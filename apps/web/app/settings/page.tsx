@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { DeepSettings } from "@/components/deep-settings";
 import { DomainList } from "@/components/domain-list";
 import { IntegrationSettings } from "@/components/integration-settings";
 import { LoginSettings } from "@/components/login-settings";
@@ -19,6 +20,7 @@ import { listLoginSetups } from "@/lib/login-setups";
 import { listWebhooks } from "@/lib/webhooks";
 import { listModelConfigs } from "@/lib/model-configs";
 import { auditLog, listDomains, usageThisMonth } from "@/lib/settings-data";
+import { DEFAULT_DEEP_MINUTES, DEFAULT_DEEP_STEPS } from "@/lib/deep";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -139,6 +141,25 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           {admin ? <ModelSettings models={models} /> : readOnly}
+        </CardContent>
+      </Card>
+
+      <Card id="deep-mode" className="scroll-mt-20">
+        <CardHeader>
+          <CardTitle>Deep mode limits</CardTitle>
+          <CardDescription>
+            Deep tests map the app, plan their tests and work through them with a strong model, for as long as they need,
+            up to these limits. Empty uses the default ({DEFAULT_DEEP_STEPS} steps, {DEFAULT_DEEP_MINUTES} minutes). A run
+            started through the API can ask for less, never more. Model costs go to your workspace&apos;s Anthropic key.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DeepSettings
+            steps={workspace.deepMaxSteps}
+            minutes={workspace.deepMaxSeconds === null ? null : Math.round(workspace.deepMaxSeconds / 60)}
+            defaults={{ steps: DEFAULT_DEEP_STEPS, minutes: DEFAULT_DEEP_MINUTES }}
+            canEdit={admin}
+          />
         </CardContent>
       </Card>
 
