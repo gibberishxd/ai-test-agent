@@ -69,7 +69,8 @@ class MatchDecision:
     reason: str
     # How verification ended for this report: "verified" (kept: confirmed, or never checked),
     # "judge_said_no" (replayed, the model didn't see it), "could_not_replay", "duplicate",
-    # "reviewer_said_no" (the reviewer tier dropped it before replay, run 5).
+    # "reviewer_said_no" (the reviewer tier dropped it before replay, run 5), "unverified"
+    # (deep mode, run 9: neither replay nor a re-measurement could check it).
     stage: str = "verified"
     failure_kind: str | None = None  # for "could_not_replay": evidence.replay_failure.kind
 
@@ -258,6 +259,8 @@ def score(
         "reported": len(every),
         "verified": len(all_decisions),
         "duplicates": sum(1 for d in every if d.stage == "duplicate"),
+        # Run 9: deep-mode findings nothing could check; neither verified nor discarded.
+        "unverified": sum(1 for d in every if d.stage == "unverified"),
         "discarded_at_replay": len(discarded),
         "discard_reasons": dict(sorted(reasons.items())),
         "bugs_lost": bugs_lost,
@@ -352,6 +355,9 @@ def stop_reason(session: Session, run_ids: list[str], cap_usd: float) -> str | N
 
     if why := limit_reached():
         return f"claude-cli stopped: {why}"
+    runs = session.query(Run).filter(Run.id.in_(run_ids)).all()
+    if paused := [r for r in runs if r.status == "paused"]:
+        return f"a deep run paused on a usage limit ({paused[0].paused_reason})"
     spent = sum(r.estimated_cost_usd for r in session.query(Run).filter(Run.id.in_(run_ids)))
     if cap_usd > 0 and spent >= cap_usd:
         return f"estimated cost cap reached (${spent:.2f} of ${cap_usd:.2f}, API-equivalent)"
@@ -387,6 +393,8 @@ def stage_of(bug) -> tuple[str, str | None]:
     """How verification ended for a stored bug: (stage, failure kind). See MatchDecision."""
     if bug.duplicate_of_id is not None:
         return "duplicate", None
+    if bug.status == "unverified":  # run 9: nothing could check it; never counted as found
+        return "unverified", None
     if bug.status != "dismissed":
         return "verified", None
     reason = bug.dismiss_reason or ""
@@ -426,10 +434,14 @@ def benchmark_workspace(session: Session) -> Workspace:
     return workspace
 
 
-def queue_runs(session: Session, workspace_id, urls: list[str], mode: str) -> list[str]:
+def queue_runs(
+    session: Session, workspace_id, urls: list[str], mode: str, engine: str = "loop"
+) -> list[str]:
+    """`engine`: "loop" (the current agent) or "deep" (run 9, always interactive)."""
     ids = []
     for url in urls:
-        run = Run(workspace_id=workspace_id, target_url=url, mode=mode, focus=None)
+        mode = "interactive" if engine == "deep" else mode
+        run = Run(workspace_id=workspace_id, target_url=url, mode=mode, focus=None, engine=engine)
         session.add(run)
         session.commit()
         ids.append(str(run.id))
@@ -442,7 +454,7 @@ def wait_for(sessions: sessionmaker[Session], run_ids: list[str], process) -> li
     while True:
         with sessions() as session:
             runs = [session.get(Run, run_id) for run_id in run_ids]
-            if all(run.status in FINAL for run in runs):
+            if all(run.status in FINAL or run.status == "paused" for run in runs):
                 return runs
         if not process():
             time.sleep(1)
@@ -452,7 +464,11 @@ def report_bugs(session: Session, run_id: str) -> list[Bug]:
     """What the run reports to the user: every bug that wasn't dismissed or suppressed."""
     return (
         session.query(Bug)
-        .filter(Bug.run_id == run_id, Bug.status != "dismissed", Bug.suppressed.is_(False))
+        .filter(
+            Bug.run_id == run_id,
+            Bug.status.not_in(("dismissed", "unverified")),
+            Bug.suppressed.is_(False),
+        )
         .order_by(Bug.created_at)
         .all()
     )
@@ -504,7 +520,9 @@ def _print_set(name: str, scores: BenchmarkScores) -> None:
         print(
             f"  verification   reported {funnel['reported']} → verified {funnel['verified']}"
             f" (duplicates {funnel['duplicates']},"
-            f" discarded at replay {funnel['discarded_at_replay']})"
+            f" discarded at replay {funnel['discarded_at_replay']}"
+            # Deep mode only (run 9): findings nothing could check.
+            + (f", unverified {funnel['unverified']})" if funnel.get("unverified") else ")")
         )
         print(f"  discarded because       {reasons}")
         print(

@@ -37,8 +37,10 @@ self_review, or drop_candidate with the reason.
 - Every report says how to verify it in a fresh browser:
   - replay: the step numbers of the browser actions that reproduce it from the start page, in \
 order (include navigation and viewport changes).
-  - measure: a JavaScript snippet that returns the wrong value deterministically, plus the \
-setup steps that reach the state where it is measured. The harness runs it itself.
+  - measure: a JavaScript snippet that returns the wrong value deterministically, the value \
+it returns there (observed_value), and the setup steps that reach that state from the start \
+page. The harness runs the snippet on your current page and must get observed_value, so \
+report from the page where the bug shows.
   - check: a check (run_axe, check_layout, check_meta) and the rule it reports, or a \
 keyboard_probe step and the failed check.
 - Report what you observed, with concrete values. One bug per report. Don't report features \

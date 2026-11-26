@@ -1711,3 +1711,81 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** a measurement that depends on timing or randomness is dismissed when it
   differs; the model is told to report deterministic measurements. Rounding to one decimal can
   hide a difference smaller than that (sub-pixel sizes), which is the point.
+
+## D117. A deep run's life: crawl, harness, verify; pause and resume (2026-11-24)
+- **Decision:** `deep/run.py: run_deep` runs a deep run like an interactive one where it can: the
+  same crawl and deterministic checks first (skipped on a resume), then the harness in a guarded
+  context, then the run's verification. A `DbRecorder` writes every step (with its JPEG), finding,
+  coverage update and turn's usage to the database as it happens; harness step n is the run's
+  step `first_step + n - 1`, after the crawl's visits, and the step numbers in a finding are
+  moved the same way.
+- **Pause and resume:** a usage limit makes the runner set `paused` (new transitions: running →
+  paused, paused → queued or stopped; a paused run is not final, so no webhook and no usage row
+  yet). `worker resume RUN_ID` (and the dashboard's button) queues it again; the run continues
+  from its coverage with a fresh browser, and the Agent SDK session is resumed when this machine
+  still has it, else a fresh session starts. Findings so far are verified when it pauses.
+- **Which driver:** `LLM_PROVIDER=fake` → the scripted driver with `DEEP_SCRIPT` ($0 tests and the
+  end-to-end runs); otherwise the Agent SDK with `DEEP_AUTH`. On the API path the key is the
+  run's workspace model's (an Anthropic model, Settings → Models), else the worker's own.
+- **CLI:** `run-local URL --engine deep [--model claude-opus-5-5]`, `resume RUN_ID`,
+  `bench --engine deep`, and `apps/realworld/measure.py --engine deep`. A paused run stops a
+  benchmark the way a claude-cli usage limit does.
+- **Export:** `engine`, `coverage`, a `verification` per finding (replay, measurement,
+  deterministic or none), and unverified findings in their own `unverified_findings` list.
+- **Alternatives:** a new worker process type for deep runs (two queues to operate); restarting a
+  paused run from scratch (loses its map, plan and the tokens already spent).
+- **Tradeoffs:** console errors and failed requests seen during a deep run are not turned into
+  deterministic findings the way the loop's are; the model has console and network tools and a
+  checklist area for them, and the crawl's deterministic findings stay (OPEN_QUESTIONS).
+
+## D119. A usage limit during verification pauses the run too (2026-11-24, found in the evaluation)
+- **What happened:** the first demo-shop deep run (`75a366f0`) paused correctly on the plan's
+  five-hour limit, then verification asked claude-cli (the same login) to dedupe, hit the same
+  limit, and the run was marked failed: 13 findings were left unchecked.
+- **Decision:** a usage limit raised by verification is caught in `run_deep`: the run is paused
+  (the first reason kept), the findings stay candidates, and verification continues on resume.
+  A run whose agent had finished (`coverage.stop_reason == "finished"`) resumes with
+  verification only; the agent doesn't run again.
+- **Alternatives:** skip verification on every pause (a pause on the API path, where the judge
+  may be another provider, could verify right away); fail the run (loses the findings).
+
+## D120. A measurement report states its value, and the harness must measure it (2026-11-24, found in the evaluation)
+- **What happened:** in the first demo-shop deep run the model reported the `$NaN` price (a real,
+  planted bug) with the snippet `innerText.includes('$NaN')` while its tab was on a page without
+  it. The harness measured `false` there and accepted the report; the fresh browser reached the
+  bug state through the setup step, measured `true`, and "different from the report" dismissed
+  a real bug.
+- **Decision:** a `measure` report must give `observed_value`, the value its snippet returns
+  where the bug shows. The harness runs the snippet on the current page and refuses the report
+  (the candidate stays open) unless it gets that value (`deep/compare.py: same_result`, the same
+  comparison verification uses: numbers rounded to one decimal, key order ignored). The stored
+  result is then the bug's value by construction, and a fresh browser that measures it again
+  confirms it.
+- **Alternatives:** have the harness re-run the setup steps in a fresh page at report time (a
+  second browser per report, and slow); judge the snippet's meaning with a model (not
+  deterministic).
+- **Tradeoffs:** the model spends a step or two going back to the page that shows the bug. It
+  only adds a refusal, so it can't add false alarms.
+
+## D121. Errors seen during a deep run become deterministic findings (2026-11-26, the owner's step 3)
+- **Context:** the loop turns the console errors, uncaught exceptions and failed requests it sees
+  while clicking into deterministic findings (`execute.py`, step 3). Deep mode only showed them to
+  the model (the `console` and `network` tools), so an error the model didn't mention was lost
+  (open question 3).
+- **Decision:** the toolbox also calls `browser.listen` (the crawl's and the loop's filters:
+  extensions, aborted or self-blocked requests, Chrome's "Failed to load resource" echo,
+  redaction) and files what it heard per page: what arrived before a call under the page it was
+  on, what arrived during the call under the page the call ended on. Not during `evaluate_js`:
+  that is the model's own code. After the agent, `deep/run.py: save_runtime_findings` runs
+  `findings_from_pages` over that log and saves what the run doesn't already have by title.
+  These findings are confirmed from the start, like the crawl's.
+- **Alternatives:** parse the model-facing console lines (no structure, and no page URL);
+  report only what the model mentions (what run 9 did; it misses errors the model ignores).
+- **Tradeoffs:** events are attributed by the URL around a call, so a late error can land on
+  the next page (the loop has the same approximation). The log isn't saved when a run pauses,
+  so a resumed run only reports errors seen after the resume (OPEN_QUESTIONS 7).
+- **Found in the first run with it (2026-11-26):** the agent followed the footer link the crawl
+  had already reported as broken, and the page's own 404 came back as "GET /return-policy fails
+  with HTTP 404", the same bug under a network title. A failed request to a link the run already
+  reports as broken is now skipped, as the crawl's findings do (test first).
+

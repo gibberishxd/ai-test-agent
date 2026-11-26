@@ -10,6 +10,9 @@ import posixpath
 from pathlib import Path
 from typing import Protocol
 
+# Screenshots: PNG from the crawl and the current loop, JPEG from deep mode (run 9).
+CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+
 
 class Storage(Protocol):
     def save(self, key: str, data: bytes) -> str: ...
@@ -95,7 +98,7 @@ class S3Storage:
     def save(self, key: str, data: bytes) -> str:
         key = _safe_key(key)
         self._ensure_bucket()
-        content_type = "image/png" if key.endswith(".png") else "application/octet-stream"
+        content_type = CONTENT_TYPES.get(key.rsplit(".", 1)[-1].lower(), "application/octet-stream")
         self._s3.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
         return key
 

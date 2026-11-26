@@ -32,10 +32,11 @@ from playwright.sync_api import Locator, Page
 from worker.agent.loop import text_changes
 from worker.agent.observe import CONTEXT_JS, CSS_PATH_JS, Element, fence, read_page
 from worker.agent.policy import card_number_reason, deny_reason
-from worker.browser import from_extension, parse_viewport, run_axe, wait_until_quiet
+from worker.browser import from_extension, listen, parse_viewport, run_axe, wait_until_quiet
 from worker.keyboard_probe import opened_by, probe, snapshot
 from worker.layout import check_layout
 from worker.meta import check_meta
+from worker.report import ConsoleError, FailedRequest, PageResult
 from worker.safety.actions import check_mode
 from worker.safety.network import NetworkGuard
 from worker.safety.secrets import redact
@@ -219,6 +220,12 @@ class Toolbox:
         self._blocked_requests: list[str] = []
         self._image_cache: dict[str, str | None] = {}
         self._last_site_url = config.target_url
+        # Errors per page, as the loop keeps them: they become deterministic findings at the
+        # end of the run (findings_from_pages). Filled by listen(), filed after every call.
+        self.pages: dict[str, PageResult] = {}
+        self._errors: list[ConsoleError] = []
+        self._failed: list[FailedRequest] = []
+        self._warnings: list[ConsoleError] = []
         self._handlers = {
             "navigate": self._navigate,
             "click": self._click,
@@ -267,12 +274,28 @@ class Toolbox:
         self.page.on("request", self._on_request)
         self.page.on("response", self._on_response)
         self.page.on("requestfailed", self._on_request_failed)
+        listen(self.page, self._errors, self._failed, self._warnings)
         self.page.route("**/*", self._route)
 
     # --- the one entry point -------------------------------------------------------------------
 
     def call(self, name: str, args: dict) -> ToolResult:
-        """Run one tool call. Never raises for the model's mistakes: they come back as errors."""
+        """Run one tool call. Never raises for the model's mistakes: they come back as errors.
+
+        What the page logged before the call is filed under the page it was on; what it logged
+        during the call, under the page the call ended on. Except during evaluate_js: that is
+        the model's own code, so whatever it logs isn't the site's (as our checks mute the
+        console while they run)."""
+        self._file_errors(self.page.url)
+        try:
+            return self._call(name, args)
+        finally:
+            if name == "evaluate_js":
+                self._drop_errors()
+            else:
+                self._file_errors(self.page.url)
+
+    def _call(self, name: str, args: dict) -> ToolResult:
         args = dict(args or {})
         action = Action(tool=name, args=args, url=self.page.url, viewport=self.viewport)
         handler = self._handlers.get(name)
@@ -294,6 +317,20 @@ class Toolbox:
         action.image = result.image
         result.text = self._with_mark(result.text)
         return result
+
+    def _file_errors(self, url: str) -> None:
+        if self._errors or self._failed or self._warnings:
+            page = self.pages.setdefault(url, PageResult(url=url, status=200))
+            page.console_errors += self._errors
+            page.failed_requests += self._failed
+            known = {w.text for w in page.console_warnings}
+            page.console_warnings += [w for w in self._warnings if w.text not in known]
+        self._drop_errors()
+
+    def _drop_errors(self) -> None:
+        self._errors.clear()
+        self._failed.clear()
+        self._warnings.clear()  # listen() de-duplicates against this list, so per call
 
     def _with_mark(self, text: str) -> str:
         return f"{text}\n(mark {self.mark})"

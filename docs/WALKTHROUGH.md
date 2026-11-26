@@ -1579,3 +1579,66 @@ report with a different symptom; claude-cli must never read this folder or the c
    `outside_repo` refuses the repo and the clones' folder before every call; a guard test fails if
    a bug title or app name appears in the agent's prompt or tools; the browser can't leave the
    app's local URL.
+
+## Run 9: deep mode (`worker/deep/`: `tools.py`, `toolbox.py`, `checklist.py`, `prompt.py`, `harness.py`, `scripted.py`, `sdk_driver.py`, `measure.py`, `run.py`; D111–D117)
+
+**What.** A second agent engine, chosen per run (`engine = 'deep'`), built for quality first:
+a strong model (Sonnet 5.5 by default, Opus 5.5 per run) drives a real browser with general tools
+(screenshots it sees, JavaScript to measure, the page source and scripts, console and network
+since a mark, our deterministic checks), maps the app, writes a test plan from a generic QA
+checklist, works through it at three viewports, and re-checks each candidate before reporting
+it. Every finding is then verified in a fresh browser; what can't be checked is kept apart as
+`unverified`. The current loop stays the default and unchanged.
+
+**How.** Four layers, each testable without a model:
+- *Toolbox* (`toolbox.py`): one function per tool on the Playwright page, behind the current
+  loop's safety rules (look-only passive mode, the deny list also for Enter on a destructive
+  control, no card numbers, no navigation off the target, a return when a script leaves).
+  JavaScript runs in a measure-only window (data-sending requests blocked, DOM changes reported).
+  Every call records an `Action` with what replay needs.
+- *Harness* (`harness.py`): numbers every call as a step, keeps the phase (map → plan → execute →
+  review), gates the process tools (no plan before a map; a plan must cover every checklist area
+  and layout at every viewport; a report needs a flagged candidate, a re-check after it, a
+  self-review and a way to verify it, measured by the harness itself), enforces the step and
+  time budgets, stops when no progress is made, pauses on a usage limit, and saves the coverage
+  after every call.
+- *Drivers*: `ScriptedDriver` plays the model from a list of calls (tests, `LLM_PROVIDER=fake`
+  with `DEEP_SCRIPT`); `SdkDriver` runs Claude through the Claude Agent SDK, whose CLI is locked
+  down to our tools only (no built-ins, no other MCP servers, no settings, a folder outside the
+  repo). The SDK is async and Playwright's sync API isn't thread-safe, so the SDK runs in a
+  background thread and every harness call is handed to the main thread through a queue.
+- *Run* (`run.py`): the crawl and deterministic checks first (as for the loop), then the harness
+  in a guarded browser context, every step, finding, coverage update and turn's usage written to
+  the database as it happens, then verification (`execute.verify_and_dedupe`, `measure.py`).
+  Console errors, uncaught exceptions and failed requests the page logged while the agent worked
+  become deterministic findings, as they do for the loop (D121): the toolbox files them per page
+  around every call (not during the model's own `evaluate_js`), and `save_runtime_findings` runs
+  the crawl's `findings_from_pages` over them, skipping titles the run already has.
+
+**Why.** Run 8 measured that a stronger model doesn't help inside the current loop (D104): the
+limits are the harness's (40 steps, mostly text, one fixed tool per step, no measuring, no plan).
+Deep mode removes those limits and keeps what makes it a product: safety rules, verification,
+evidence, and a benchmark to compare the two engines on.
+
+**Weak spots.** A deep run costs far more than a loop run (quality first, D111; the customer's
+own key). A measuring snippet can still change the page (told, not prevented). A resumed run
+starts the browser fresh and must rebuild state (a cart, a sign-in), and the errors logged before
+the pause are lost unless the model saw them. The keyboard probe's
+results are evidence but not replayed steps. The SDK's transport protocol is internal, so the
+fake CLI in the tests can break on an SDK upgrade (the version is pinned). Not measured yet: the
+evaluation runs need the owner's go-ahead.
+
+**Interview Q&A**
+1. *Why enforce the process in code instead of the prompt?* Prompts are advice; models skip
+   parts of a charter when a run gets long (MISS_ANALYSIS). Gates make coverage checkable (every
+   area planned, every item ticked, screenshots at every viewport) and make evidence trustworthy:
+   a measurement in a report is what the harness measured, not what the model says it saw.
+2. *How do you verify a bug that was found with JavaScript, not by clicking?* The report stores
+   the snippet, the setup steps, the URL and the viewport, and what the harness measured. A fresh
+   browser at the same size replays the setup, runs the same snippet and compares (rounding only).
+   Same → confirmed; different → dismissed with both values; can't repeat the setup → unverified,
+   kept apart and never counted.
+3. *The SDK passes the whole environment to its CLI. How do you keep the API key out on the
+   login path?* `options.env` can only add variables, so the CLI is started through a small
+   wrapper script that unsets the API credentials before it starts; a test runs the wrapper and
+   checks the key isn't in the environment it passes on.

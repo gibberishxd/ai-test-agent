@@ -62,6 +62,11 @@ def client_for_run(
     raise ModelConfigError(f"unknown provider {config.provider!r}")
 
 
+def decrypt_key(config: ModelConfig, settings: Settings) -> str | None:
+    """The model's API key in clear text (deep mode passes it to the Agent SDK's CLI)."""
+    return _decrypt(config, settings)
+
+
 def _decrypt(config: ModelConfig, settings: Settings) -> str | None:
     if not config.api_key_ciphertext:
         return None

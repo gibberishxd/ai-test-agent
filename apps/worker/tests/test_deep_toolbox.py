@@ -258,6 +258,27 @@ def test_console_and_network_since_a_mark(toolbox):
     assert "500" in network and "/status/500" in network
 
 
+def test_errors_are_logged_per_page_for_deterministic_findings(toolbox):
+    box, _ = toolbox()
+    box.call("navigate", {"url": "/problems.html"})
+    box.call("snapshot", {})  # a later call files what arrived after the navigation settled
+    problems = next(page for url, page in box.pages.items() if url.endswith("/problems.html"))
+    errors = {(e.kind, e.text) for e in problems.console_errors}
+    assert ("console", "boom from console") in errors
+    assert any(kind == "pageerror" and "uncaught boom" in text for kind, text in errors)
+    assert any(r.url.endswith("/status/500") and r.status == 500 for r in problems.failed_requests)
+    start = next(page for url, page in box.pages.items() if url.endswith("/deep.html"))
+    assert [w.text for w in start.console_warnings] == ["deep.js loaded"]
+
+
+def test_the_models_own_snippets_are_not_logged_as_site_errors(toolbox):
+    box, _ = toolbox()
+    box.call("evaluate_js", {"snippet": "console.error('from the model'); return 1"})
+    box.call("snapshot", {})
+    logged = [e.text for page in box.pages.values() for e in page.console_errors]
+    assert "from the model" not in logged
+
+
 def test_every_result_carries_the_current_mark(toolbox):
     box, _ = toolbox()
     result = box.call("snapshot", {})

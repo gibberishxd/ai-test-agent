@@ -21,6 +21,7 @@ from playwright.sync_api import BrowserContext
 from playwright.sync_api import Error as PlaywrightError
 
 from worker.browser import wait_until_quiet
+from worker.deep.compare import same_result
 from worker.deep.harness import rule_detail
 from worker.deep.toolbox import NAVIGATION_TIMEOUT_MS, SETTLE_MS, Toolbox, ToolboxConfig
 from worker.keyboard_probe import opened_by, probe, snapshot
@@ -131,26 +132,6 @@ def _reprobe(page, spec: dict) -> MeasureVerdict:
     if failed is None:
         return MeasureVerdict("dismissed", f"the {kind} passes the {rule} check in a fresh browser")
     return MeasureVerdict("confirmed", f"the {kind} fails the {rule} check again", failed)
-
-
-def same_result(a, b) -> bool:
-    """Equal after rounding numbers to one decimal and ignoring key order."""
-    return _canonical(a) == _canonical(b)
-
-
-def _canonical(value) -> str:
-    def round_all(v):
-        if isinstance(v, bool) or v is None or isinstance(v, str):
-            return v
-        if isinstance(v, int | float):
-            return round(float(v), 1)
-        if isinstance(v, list):
-            return [round_all(x) for x in v]
-        if isinstance(v, dict):
-            return {str(k): round_all(x) for k, x in v.items()}
-        return str(v)
-
-    return json.dumps(round_all(value), sort_keys=True)
 
 
 def _show(value) -> str:
