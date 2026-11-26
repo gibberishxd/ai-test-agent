@@ -1610,6 +1610,10 @@ it. Every finding is then verified in a fresh browser; what can't be checked is 
 - *Run* (`run.py`): the crawl and deterministic checks first (as for the loop), then the harness
   in a guarded browser context, every step, finding, coverage update and turn's usage written to
   the database as it happens, then verification (`execute.verify_and_dedupe`, `measure.py`).
+  Console errors, uncaught exceptions and failed requests the page logged while the agent worked
+  become deterministic findings, as they do for the loop (D121): the toolbox files them per page
+  around every call (not during the model's own `evaluate_js`), and `save_runtime_findings` runs
+  the crawl's `findings_from_pages` over them, skipping titles the run already has.
 
 **Why.** Run 8 measured that a stronger model doesn't help inside the current loop (D104): the
 limits are the harness's (40 steps, mostly text, one fixed tool per step, no measuring, no plan).
@@ -1618,7 +1622,8 @@ evidence, and a benchmark to compare the two engines on.
 
 **Weak spots.** A deep run costs far more than a loop run (quality first, D111; the customer's
 own key). A measuring snippet can still change the page (told, not prevented). A resumed run
-starts the browser fresh and must rebuild state (a cart, a sign-in). The keyboard probe's
+starts the browser fresh and must rebuild state (a cart, a sign-in), and the errors logged before
+the pause are lost unless the model saw them. The keyboard probe's
 results are evidence but not replayed steps. The SDK's transport protocol is internal, so the
 fake CLI in the tests can break on an SDK upgrade (the version is pinned). Not measured yet: the
 evaluation runs need the owner's go-ahead.

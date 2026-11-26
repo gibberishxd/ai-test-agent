@@ -90,6 +90,8 @@ def script() -> list[list]:
                     },
                 },
             ],
+            ["navigate", {"url": "/problems.html"}],  # 18: errors become deterministic findings
+            ["snapshot", {}],  # 19
         ]
         + [["tick", {"item_id": i["id"], "status": "done", "note": "ok"}] for i in plan()["items"]]
     )
@@ -153,6 +155,27 @@ def test_a_deep_run_end_to_end_with_the_fake_model(sessions, settings, site_url,
         assert (
             session.query(Step).filter_by(run_id=run.id, index=replayed[0]).one().action == "click"
         )
+
+
+def test_errors_seen_during_a_deep_run_become_deterministic_findings(
+    sessions, settings, site_url, browser, tmp_path
+):
+    run_id = queue(sessions, site_url)
+    execute = make_execute(settings, LocalStorage(tmp_path), browser)
+    assert process_next(sessions, FakeClient(texts=[NO_DUPLICATES]), execute, only=[run_id])
+    with sessions() as session:
+        run = session.get(Run, run_id)
+        assert run.status == "done", run.error
+        bugs = session.query(Bug).filter_by(run_id=run.id).all()
+        by_title = {b.title: b for b in bugs}
+        console = by_title["Console error: boom from console"]
+        assert console.source == "deterministic" and console.status == "confirmed"
+        assert console.page_url.endswith("/problems.html")
+        assert any(t.startswith("Uncaught exception") and "uncaught boom" in t for t in by_title)
+        assert "GET /status/500 fails with HTTP 500" in by_title
+        # The crawl already reported the start page's warning: not reported twice.
+        titles = [b.title for b in bugs]
+        assert titles.count("Console warnings on /deep.html") == 1
 
 
 class LimitDriver(ScriptedDriver):
