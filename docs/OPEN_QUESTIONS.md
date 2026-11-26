@@ -20,9 +20,22 @@ Format: the question, the choice made, and why. Newest last.
    it saw while clicking into findings; deep mode doesn't yet (its log isn't kept per page).
    Choice: not in run 9; the model has console and network tools and a checklist area for them,
    and the crawl's deterministic findings stay.
+   **Done (2026-11-26, the owner's step 3, D121):** deep runs now turn them into deterministic
+   findings, as the loop does.
 4. **Keyboard-probe steps aren't replayed.** Their key presses leave a state replay can't rebuild,
    so later replay steps can diverge. Choice: probes are evidence only; a keyboard finding is
    verified by probing the same control again in a fresh browser.
 5. **A resumed run's browser state.** A resumed run starts the browser fresh on the target (a cart
    or sign-in is gone; a saved login setup signs in again). Choice: the resume prompt tells the
    model to rebuild what it needs.
+6. **Carrying fixes up the stacked branches: rebase or merge?** The owner asked for a rebase of
+   the branches above a fix, but every `deep-*` branch is already pushed, so a rebase needs a
+   force-push, which the same instructions stop on. Choice: merge the fixed branch into the one
+   above it, in order (as the stack was updated before: "Merge branch 'deep-run' into
+   deep-web"). The history is busier, nothing is rewritten. A rebase can still be done at merge
+   time.
+7. **Errors logged before a pause.** D121's per-page error log lives in the toolbox, so a run that
+   pauses on a usage limit loses what it logged before the pause; only errors seen after the
+   resume become findings. Choice: accepted for now (pauses are rare, and the crawl's findings and
+   the model's own reports are kept). Saving the log with the coverage is a small change if
+   wanted.

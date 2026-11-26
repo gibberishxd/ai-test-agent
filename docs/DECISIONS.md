@@ -1783,3 +1783,22 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
   deterministic).
 - **Tradeoffs:** the model spends a step or two going back to the page that shows the bug. It
   only adds a refusal, so it can't add false alarms.
+
+## D121. Errors seen during a deep run become deterministic findings (2026-11-26, the owner's step 3)
+- **Context:** the loop turns the console errors, uncaught exceptions and failed requests it sees
+  while clicking into deterministic findings (`execute.py`, step 3). Deep mode only showed them to
+  the model (the `console` and `network` tools), so an error the model didn't mention was lost
+  (open question 3).
+- **Decision:** the toolbox also calls `browser.listen` (the crawl's and the loop's filters:
+  extensions, aborted or self-blocked requests, Chrome's "Failed to load resource" echo,
+  redaction) and files what it heard per page: what arrived before a call under the page it was
+  on, what arrived during the call under the page the call ended on. Not during `evaluate_js`:
+  that is the model's own code. After the agent, `deep/run.py: save_runtime_findings` runs
+  `findings_from_pages` over that log and saves what the run doesn't already have by title.
+  These findings are confirmed from the start, like the crawl's.
+- **Alternatives:** parse the model-facing console lines (no structure, and no page URL);
+  report only what the model mentions (what run 9 did; it misses errors the model ignores).
+- **Tradeoffs:** events are attributed by the URL around a call, so a late error can land on
+  the next page (the loop has the same approximation). The log isn't saved when a run pauses,
+  so a resumed run only reports errors seen after the resume (OPEN_QUESTIONS 7).
+

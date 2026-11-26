@@ -29,7 +29,7 @@ from worker.deep.sdk_driver import SdkConfig, SdkDriver, check_auth, run_workdir
 from worker.deep.toolbox import Action, Toolbox, ToolboxConfig, ToolResult
 from worker.llm.base import LLMClient, Usage, UsageLimitReached
 from worker.model_configs import ModelConfigError, decrypt_key
-from worker.report import BugReport
+from worker.report import BugReport, PageResult
 from worker.safety.network import BlockedError
 from worker.storage import Storage
 from worker.verify import size_or_desktop
@@ -198,9 +198,10 @@ def run_deep(
         coverage, stop_reason, agent_summary = saved, "finished", saved.get("summary") or None
     else:
         recorder = DbRecorder(session, run, storage, first_step, segment_start=run.step_count)
-        harness = _run_agent(
+        harness, agent_pages = _run_agent(
             session, run, settings, driver, recorder, limits, login, viewport, resuming, browser
         )
+        save_runtime_findings(session, run, agent_pages)
         if harness.paused:
             run.paused_reason = harness.paused_detail or "usage limit"
         coverage, stop_reason = harness.coverage(), harness.stop_reason
@@ -236,10 +237,25 @@ def run_deep(
     session.commit()
 
 
+def save_runtime_findings(session: Session, run: Run, pages: dict[str, PageResult]) -> None:
+    """Console errors, uncaught exceptions and failed requests seen while the agent worked,
+    as deterministic findings (as the loop does), unless the run already has one by that title
+    (the crawl's, or an earlier segment's before a pause)."""
+    from worker.findings import findings_from_pages
+
+    known = {title for (title,) in session.query(Bug.title).filter(Bug.run_id == run.id)}
+    for bug in findings_from_pages(list(pages.values())):
+        if bug.title not in known:
+            session.add(Bug(run_id=run.id, **bug.model_dump()))
+            known.add(bug.title)
+    session.commit()
+
+
 def _run_agent(
     session, run, settings, driver, recorder, limits, login, viewport, resuming, browser
-) -> Harness:
-    """The harness and its driver in a guarded browser context; returns the harness."""
+) -> tuple[Harness, dict[str, PageResult]]:
+    """The harness and its driver in a guarded browser context; returns the harness and the
+    errors the toolbox logged per page."""
     from worker.execute import _stop_requested
     from worker.scan import guarded_context, is_demo_target
 
@@ -271,7 +287,7 @@ def _run_agent(
         driver.run(harness)
         recorder.session_id = getattr(driver, "session_id", None) or recorder.session_id
         recorder.on_coverage(harness.coverage())
-    return harness
+    return harness, toolbox.pages
 
 
 def make_driver(session: Session, run: Run, settings: Settings, model: str) -> TurnDriver:
