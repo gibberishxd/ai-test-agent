@@ -1801,4 +1801,8 @@ Per verified judgement bug = the buggy runs' estimate divided by the judgement b
 - **Tradeoffs:** events are attributed by the URL around a call, so a late error can land on
   the next page (the loop has the same approximation). The log isn't saved when a run pauses,
   so a resumed run only reports errors seen after the resume (OPEN_QUESTIONS 7).
+- **Found in the first run with it (2026-11-26):** the agent followed the footer link the crawl
+  had already reported as broken, and the page's own 404 came back as "GET /return-policy fails
+  with HTTP 404", the same bug under a network title. A failed request to a link the run already
+  reports as broken is now skipped, as the crawl's findings do (test first).
 
